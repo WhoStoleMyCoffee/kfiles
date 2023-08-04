@@ -3,72 +3,38 @@
 use std::fs::{self, DirEntry, FileType};
 use std::path::{PathBuf, Path};
 
+use console_engine::KeyEventKind;
 use console_engine::screen::Screen;
 use console_engine::{
 	ConsoleEngine,
-	pixel, Color, KeyCode, KeyModifiers
+	pixel, Color, KeyCode, KeyModifiers,
+	rect_style::BorderStyle,
 };
+use console_engine::forms::{
+	Form, FormField, FormStyle, FormValue, FormOptions, Text,
+};
+use console_engine::{events::Event, crossterm::event::KeyEvent};
 
 use opener;
 
 
 const SCROLL_MARGIN: u8 = 4;
 
-
-enum CommandType {
-	CursorUp,
-	CursorDown,
-	CursorJump(isize),
-	Open,
-	GoBack,
+enum BufferMode {
+	Normal,
+	QuickSearch(String),
 }
 
-
-struct InputBuffer(String);
-
-impl InputBuffer {
-	fn new() -> Self {
-		Self( String::new() )
-	}
-
-	fn handle_input(&mut self, engine: &ConsoleEngine) -> Option<CommandType> {
-		if engine.is_key_held(KeyCode::Char('j')) || engine.is_key_held(KeyCode::Down) {
-			return Some(CommandType::CursorDown);
-		}
-
-		if engine.is_key_held(KeyCode::Char('k')) || engine.is_key_held(KeyCode::Up) {
-			return Some(CommandType::CursorUp);
-		}
-
-		if engine.is_key_pressed(KeyCode::Enter) {
-			return Some(CommandType::Open);
-		}
-
-		if engine.is_key_pressed(KeyCode::Char('-')) {
-			return Some(CommandType::GoBack);
-		}
-
-		if engine.is_key_pressed(KeyCode::Char('g')) {
-			return Some(CommandType::CursorJump(0));
-		}
-
-		if engine.is_key_pressed(KeyCode::Char('G')) {
-			return Some(CommandType::CursorJump(-1));
-		}
-
-		None
-	}
-}
 
 
 
 struct FileBuffer {
 	path: PathBuf,
 	screen: Screen,
-	input_buffer: InputBuffer,
 	selected_index: usize,
 	scroll: usize,
 	entries: Result<Vec<DirEntry>, std::io::Error>,
+	mode: BufferMode,
 }
 
 impl FileBuffer {
@@ -76,10 +42,10 @@ impl FileBuffer {
 		FileBuffer {
 			path: PathBuf::from(path),
 			screen,
-			input_buffer: InputBuffer::new(),
 			selected_index: 0,
 			scroll: 0,
 			entries: FileBuffer::get_dirs_at_sorted(path),
+			mode: BufferMode::Normal,
 		}
 	}
 
@@ -126,53 +92,115 @@ impl FileBuffer {
 		self.scroll = 0;
 	}
 
-	fn update(&mut self, engine: &ConsoleEngine) {
-		let cmd: CommandType = match self.input_buffer.handle_input(engine) {
-			Some(cmd) => cmd,
-			None => return,
-		};
+	fn get_status_text(&mut self) -> (String, Color) {
+		match &self.mode {
+			BufferMode::Normal => ( self.get_path_display(), Color::White ),
+			BufferMode::QuickSearch(pattern) => ( format!("Searching for: {}", pattern), Color::Yellow ),
+		}
+	}
+
+	fn open_selected(&mut self) -> Option<()> {
+		let dirs: &Vec<DirEntry> = self.entries.as_ref() .ok()?;
+		let de: &DirEntry = dirs.get(self.selected_index)?;
+		let file_type: FileType = de.file_type() .ok()?;
+
+		if file_type.is_file() {
+			let _ = opener::open( de.path() );
+		} else if file_type.is_dir() {
+			let file_name = de.file_name();
+			self.path.push( file_name );
+			self.reload_entries();
+		}
+
+		Some(())
+	}
+
+	fn handle_key_event(&mut self, event: KeyEvent) {
+		if let BufferMode::QuickSearch(pattern) = &mut self.mode {
+			// Exit quick search
+			// KeyCode::Enter works because Press exists quickmode, and Release opens the path
+			if let KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press, .. } = event {
+				self.mode = BufferMode::Normal;
+				return;
+			}
+
+			if let KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } = event {
+				pattern.clear();
+				self.open_selected();
+				return;
+			}
+
+			if let KeyEvent { code: KeyCode::Backspace, kind: KeyEventKind::Press, .. } = event {
+				pattern.pop();
+				return;
+			}
+
+			if let KeyEvent { code: KeyCode::Char(ch), kind: KeyEventKind::Press, .. } = event {
+				pattern.push(ch);
+				let pattern_lowercase: String = pattern.to_lowercase();
+
+				for (i, de) in self.entries.as_ref().unwrap() .iter().enumerate() {
+					let file_name = de.file_name().into_string().unwrap() .to_lowercase();
+					if file_name.starts_with( pattern_lowercase.as_str() ) {
+						self.selected_index = i;
+						break;
+					}
+				}
+				self.update_scroll();
+			}
+			return;
+		}
 
 		let len: usize = self.len();
-		match cmd {
-			CommandType::CursorUp => {
+		match event {
+			// Move cursor up
+			KeyEvent { code: KeyCode::Char('k'), kind: KeyEventKind::Press, .. } => {
+				if len == 0 { return; }
 				self.selected_index = self.selected_index.checked_sub(1) .unwrap_or(len - 1);
 				self.update_scroll();
 			},
 
-			CommandType::CursorDown => {
+			// Move cursor down
+			KeyEvent { code: KeyCode::Char('j'), kind: KeyEventKind::Press, .. } => {
+				if len == 0 { return; }
 				self.selected_index = (self.selected_index + 1) % len;
 				self.update_scroll();
 			},
 
-			CommandType::Open => {
-				let dirs: &Vec<DirEntry> = self.entries.as_ref() .unwrap();
-				let de: &DirEntry = dirs.get(self.selected_index) .unwrap();
-				let file_type: FileType = de.file_type().unwrap();
-
-				if file_type.is_file() {
-					let _ = opener::open( de.path() );
-				} else if file_type.is_dir() {
-					let file_name = de.file_name();
-					self.path.push( file_name );
-					self.reload_entries();
-				}
+			// Open
+			KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } => {
+				self.open_selected();
 			},
 
-			CommandType::GoBack => {
+			// Go back
+			KeyEvent { code: KeyCode::Char('-'), kind: KeyEventKind::Press, .. } => {
 				let went_back: bool = self.path.pop();
 				if went_back {
 					self.reload_entries();
 				}
 			},
 
-			CommandType::CursorJump(idx) => {
-				self.selected_index = if idx < 0 {
-					(len as isize + idx) as usize
-				} else {
-					idx as usize
-				};
+			// Jump to start
+			KeyEvent { code: KeyCode::Char('g'), kind: KeyEventKind::Press, .. } => {
+				if len == 0 { return; }
+				self.selected_index = 0;
 				self.update_scroll();
+			}
+
+			// Jump to end
+			KeyEvent { code: KeyCode::Char('G'), kind: KeyEventKind::Press, .. } => {
+				if len == 0 { return; }
+				self.selected_index = len - 1;
+				self.update_scroll();
+			}
+
+			// Start quick search
+			KeyEvent { code: KeyCode::Char('/'), kind : KeyEventKind::Press, .. } => {
+				if len == 0 { return; }
+				self.mode = BufferMode::QuickSearch( String::new() );
 			},
+
+			_ => {},
 		}
 
 	}
@@ -238,39 +266,103 @@ fn main() {
 		Screen::new(engine.get_width() - 2, engine.get_height() - 2));
 
 	loop {
-		engine.wait_frame();
-		engine.clear_screen();
+		match engine.poll() {
+			Event::Frame => {
+				engine.clear_screen();
+				
+				engine.print_screen(1, 1, file_buffer.draw());
 
-		if engine.is_key_pressed_with_modifier(KeyCode::Char('c'), KeyModifiers::CONTROL, console_engine::KeyEventKind::Press) {
-			break;
+				engine.print(0, 0, "Press Ctrl-c to exit");
+				{
+					let (status_text, fg) = file_buffer.get_status_text();
+					engine.print_fbg(0, engine.get_height() as i32 - 1, &status_text, fg, Color::Black );
+				}
+
+				engine.draw();
+			},
+
+			// Exit with Ctrl-c
+			Event::Key(KeyEvent {
+				code: KeyCode::Char('c'),
+				modifiers: KeyModifiers::CONTROL,
+				kind: _, state: _,
+			}) => { break; },
+
+			Event::Key(key_event) => {
+				if file_buffer.entries.is_ok() {
+					file_buffer.handle_key_event(key_event);
+				}
+			},
+
+			_ => {},
 		}
-
-        if file_buffer.entries.is_ok() {
-            file_buffer.update(&engine);
-        }
-		engine.print_screen(1, 1, file_buffer.draw() );
-
-		engine.print(0, 0, "Press Ctrl-c to exit");
-		engine.print(0, engine.get_height() as i32 - 1,
-			file_buffer.get_path_display().as_str());
-		engine.draw();
 	}
 }
 
 
 
+
+
 #[cfg(test)]
 mod tests {
-	use std::fs;
-	use std::path::PathBuf;
+	use console_engine::{events::Event, crossterm::event::KeyEvent};
+
+use super::*;
 
 	#[test]
-	fn display_path() {
-		let path = PathBuf::from("C:/Users/ddxte/Documents");
-		let stuff = fs::read_dir(&path) .unwrap();
+	fn test_form() {
+		let mut engine = ConsoleEngine::init_fill(5) .unwrap();
 
-		for dir in stuff {
-			println!("Name: {}", dir.unwrap() .path() .display());
+		let theme = FormStyle { ..Default::default() };
+		let mut form = Form::new(
+			12,
+			6,
+			FormOptions { style: theme, ..Default::default() }
+		);
+		form.build_field::<Text>(
+			"last_name",
+			FormOptions { style: theme, label: Some("Last Name:"), ..Default::default() }
+		);
+
+		form.set_active(true);
+
+		loop {
+			match engine.poll() {
+				Event::Frame => {
+					engine.clear_screen();
+					engine.print_screen(1, 1, form.draw( (engine.frame_count % 8 > 3) as usize ));
+					engine.draw();
+				},
+
+				// Exit with Ctrl-c
+				Event::Key(KeyEvent {
+					code: KeyCode::Char('c'),
+					modifiers: KeyModifiers::CONTROL,
+					..
+				}) => { break; }
+
+				event => {
+					form.handle_event(event);
+					if form.is_finished() { break; }
+				},
+			}
 		}
+
+		drop(engine); // ok byyeeeeeee
+		
+		if !form.is_finished() {
+			println!("Form cancelled");
+			return;
+		}
+
+		let mut last_name = String::new();
+
+		if let Ok(FormValue::String(name)) = form.get_validated_field_output("last_name") {
+			last_name = name;
+		}
+
+		println!("Hello, {}!", last_name);
+
 	}
+
 }

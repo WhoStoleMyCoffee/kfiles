@@ -6,5 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-console_engine = "2.6.0"
-opener = { version = "0.6.1", features = ["reveal"] }
+console_engine = { version = "2.6.0", features = ["form", "event"] }
+opener =  "0.6.1"
