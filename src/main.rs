@@ -2,6 +2,7 @@
 
 use std::fs::{self, DirEntry, FileType};
 use std::path::{PathBuf, Path};
+use std::process::exit;
 
 use console_engine::KeyEventKind;
 use console_engine::screen::Screen;
@@ -20,9 +21,11 @@ use opener;
 
 const SCROLL_MARGIN: u8 = 4;
 
+#[derive(Debug, PartialEq)]
 enum BufferMode {
 	Normal,
 	QuickSearch(String),
+	Exit,
 }
 
 
@@ -35,6 +38,7 @@ struct FileBuffer {
 	scroll: usize,
 	entries: Result<Vec<DirEntry>, std::io::Error>,
 	mode: BufferMode,
+	status_text: (String, Color),
 }
 
 impl FileBuffer {
@@ -46,6 +50,7 @@ impl FileBuffer {
 			scroll: 0,
 			entries: FileBuffer::get_dirs_at_sorted(path),
 			mode: BufferMode::Normal,
+			status_text: ( String::from(path), Color::White ),
 		}
 	}
 
@@ -92,10 +97,15 @@ impl FileBuffer {
 		self.scroll = 0;
 	}
 
-	fn get_status_text(&mut self) -> (String, Color) {
+	fn update_status_text(&mut self) {
 		match &self.mode {
-			BufferMode::Normal => ( self.get_path_display(), Color::White ),
-			BufferMode::QuickSearch(pattern) => ( format!("Searching for: {}", pattern), Color::Yellow ),
+			BufferMode::Normal => {
+				self.status_text = ( self.get_path_display(), Color::White );
+			},
+			BufferMode::QuickSearch(pattern) => {
+				self.status_text = ( format!("Searching for: {}", pattern), Color::Yellow );
+			},
+			_ => {},
 		}
 	}
 
@@ -105,7 +115,10 @@ impl FileBuffer {
 		let file_type: FileType = de.file_type() .ok()?;
 
 		if file_type.is_file() {
-			let _ = opener::open( de.path() );
+			if opener::open( de.path() ).is_err() {
+				self.status_text = ( String::from("Could not open file. Revealing in file explorer instead"), Color::Red );
+				let _ = opener::reveal( de.path() );
+			}
 		} else if file_type.is_dir() {
 			let file_name = de.file_name();
 			self.path.push( file_name );
@@ -117,37 +130,45 @@ impl FileBuffer {
 
 	fn handle_key_event(&mut self, event: KeyEvent) {
 		if let BufferMode::QuickSearch(pattern) = &mut self.mode {
-			// Exit quick search
-			// KeyCode::Enter works because Press exists quickmode, and Release opens the path
-			if let KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press, .. } = event {
-				self.mode = BufferMode::Normal;
-				return;
+			// Handle input
+			match event {
+				// Exit quick search
+				KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press, .. } => {
+					self.mode = BufferMode::Normal;
+					self.update_status_text();
+					return;
+				},
+
+				// Enter to open
+				KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } => {
+					pattern.clear();
+					self.open_selected();
+					return;
+				},
+
+				// Backspace to delete char
+				KeyEvent { code: KeyCode::Backspace, kind: KeyEventKind::Press, .. } => {
+					pattern.pop();
+				},
+
+				// Add char and update
+				KeyEvent { code: KeyCode::Char(ch), kind: KeyEventKind::Press, ..  } => {
+					pattern.push(ch);
+				},
+				_ => {},
 			}
 
-			if let KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } = event {
-				pattern.clear();
-				self.open_selected();
-				return;
-			}
-
-			if let KeyEvent { code: KeyCode::Backspace, kind: KeyEventKind::Press, .. } = event {
-				pattern.pop();
-				return;
-			}
-
-			if let KeyEvent { code: KeyCode::Char(ch), kind: KeyEventKind::Press, .. } = event {
-				pattern.push(ch);
-				let pattern_lowercase: String = pattern.to_lowercase();
-
-				for (i, de) in self.entries.as_ref().unwrap() .iter().enumerate() {
-					let file_name = de.file_name().into_string().unwrap() .to_lowercase();
-					if file_name.starts_with( pattern_lowercase.as_str() ) {
-						self.selected_index = i;
-						break;
-					}
+			let pattern_lowercase: String = pattern.to_lowercase();
+			for (i, de) in self.entries.as_ref().unwrap() .iter().enumerate() {
+				let file_name = de.file_name().into_string().unwrap() .to_lowercase();
+				if file_name.starts_with( pattern_lowercase.as_str() ) {
+					self.selected_index = i;
+					break;
 				}
-				self.update_scroll();
 			}
+
+			self.update_scroll();
+			self.update_status_text();
 			return;
 		}
 
@@ -175,6 +196,7 @@ impl FileBuffer {
 			// Go back
 			KeyEvent { code: KeyCode::Char('-'), kind: KeyEventKind::Press, .. } => {
 				let went_back: bool = self.path.pop();
+				self.update_status_text();
 				if went_back {
 					self.reload_entries();
 				}
@@ -198,6 +220,17 @@ impl FileBuffer {
 			KeyEvent { code: KeyCode::Char('/'), kind : KeyEventKind::Press, .. } => {
 				if len == 0 { return; }
 				self.mode = BufferMode::QuickSearch( String::new() );
+			},
+
+			// Reveal in file explorer
+			KeyEvent {
+				code: KeyCode::Char('e'),
+				kind: KeyEventKind::Press,
+				modifiers: KeyModifiers::CONTROL,
+				.. 
+			} => {
+				let _ = opener::open( &self.path );
+				self.mode = BufferMode::Exit;
 			},
 
 			_ => {},
@@ -266,6 +299,8 @@ fn main() {
 		Screen::new(engine.get_width() - 2, engine.get_height() - 2));
 
 	loop {
+		if file_buffer.mode == BufferMode::Exit { break; }
+
 		match engine.poll() {
 			Event::Frame => {
 				engine.clear_screen();
@@ -274,8 +309,8 @@ fn main() {
 
 				engine.print(0, 0, "Press Ctrl-c to exit");
 				{
-					let (status_text, fg) = file_buffer.get_status_text();
-					engine.print_fbg(0, engine.get_height() as i32 - 1, &status_text, fg, Color::Black );
+					let (status_text, fg) = &file_buffer.status_text;
+					engine.print_fbg(0, engine.get_height() as i32 - 1, status_text, *fg, Color::Black );
 				}
 
 				engine.draw();
