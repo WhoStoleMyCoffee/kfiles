@@ -8,6 +8,9 @@ edition = "2021"
 [dependencies]
 console_engine = { version = "2.6.0", features = ["form", "event"] }
 opener =  { version = "0.6.1", features = ["reveal"] }
+confy = "0.5.1"
+serde = { version = "1.0.183", features = ["derive"] }
+directories = "5.0.1"
 
 [lib]
 name = "filebuffer"
