@@ -4,20 +4,13 @@ use std::fs;
 use std::path::{ PathBuf, Path };
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::sync::mpsc::{self, Receiver};
-use std::thread;
 
-use console_engine::events::Event;
-use console_engine::rect_style::BorderStyle;
 use console_engine::screen::Screen;
 use console_engine::{
 	pixel, Color, KeyCode, KeyModifiers,
 	KeyEventKind
 };
 use console_engine::crossterm::event::KeyEvent;
-use console_engine::forms::{
-	Form, FormField, FormStyle, FormValue, FormOptions, Text,
-};
 
 use serde::{ Deserialize, Serialize };
 use directories::UserDirs;
@@ -113,20 +106,34 @@ where P: AsRef<Path> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Configs {
 	pub scroll_margin: u8,
-	pub max_search_results: usize,
 	pub max_search_stack: usize,
 	pub favorites: Vec<PathBuf>,
+	pub default_path: PathBuf,
+	pub target_fps: u32,
+
+	// Colors
 	pub folder_color: (u8, u8, u8),
+	pub file_color: (u8, u8, u8),
+	pub special_color: (u8, u8, u8),
+	pub bg_color: (u8, u8, u8),
 }
 
 impl Default for Configs {
 	fn default() -> Self {
+		let userdir: UserDirs = UserDirs::new().expect("Could not find home directory");
+		let home_dir: &Path = userdir.home_dir();
+
 		Self {
 			scroll_margin: 4,
-			max_search_results: 30,
-			max_search_stack: 255,
-			favorites: UserDirs::new() .map_or(Vec::new(), |dirs| vec![ dirs.home_dir().into() ] ),
-			folder_color: (0, 255, 255)
+			max_search_stack: 512,
+			favorites: vec![ PathBuf::from(home_dir) ],
+			default_path: PathBuf::from(home_dir),
+			target_fps: 10,
+
+			folder_color: ( 105, 250, 255 ),
+			file_color: (248, 242, 250),
+			special_color: (255, 209, 84),
+			bg_color: (21, 17, 23),
 		}
 	}
 }
@@ -167,22 +174,22 @@ pub struct FileBuffer {
 }
 
 impl FileBuffer {
-	pub fn from_str(path: &str, screen: Screen, cfg: Rc<RefCell<Configs>>) -> Self {
+	pub fn new(path: &PathBuf, screen: Screen, cfg: Rc<RefCell<Configs>>) -> Self {
 		FileBuffer {
-			path: PathBuf::from(path),
+			path: path.clone(),
 			screen,
 			selected_index: 0,
 			scroll: 0,
 			cfg,
 			entries: vec![],
 			state: BufferState::Normal,
-			status_text: ( String::from(path), Color::White ),
+			status_text: ( path2string(path), Color::White ),
 		}
 	}
 
 	pub fn load_entries(&mut self) {
 		self.entries = match get_at_sorted(&self.path) {
-			Ok(v) => v,
+			Ok(v) => { v },
 			Err(err) => {
 				self.state = BufferState::Error(err);
 				Vec::new()
@@ -198,7 +205,8 @@ impl FileBuffer {
 				self.status_text = ( path2string(&self.path), Color::White );
 			},
 			BufferState::QuickSearch(pattern) => {
-				self.status_text = ( format!("Searching for: {}", pattern), Color::Yellow );
+				let col: Color = Color::from( self.cfg.borrow().special_color );
+				self.status_text = ( format!("Searching for: {}", pattern), col );
 			},
 			_ => {},
 		}
@@ -230,63 +238,83 @@ impl FileBuffer {
 				let _ = opener::reveal(pathbuf);
 			}
 		} else if pathbuf.is_dir() {
-			self.path.push( pathbuf.file_name().unwrap() );
+			self.path.push( pathbuf.file_name().unwrap_or_default() );
 			self.load_entries();
 		}
 	}
 
-	pub fn handle_key_event(&mut self, event: KeyEvent) {
-		// QUICK SEARCH
-		if let BufferState::QuickSearch(pattern) = &mut self.state {
-			// Handle input
-			match event {
-				// Exit quick search
-				KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press, .. } => {
-					self.state = BufferState::Normal;
-					self.update_status_text();
-					return;
-				},
+	// Returns whether the state was QuickSearch
+	pub fn quicksearch_handle_key_event(&mut self, event: KeyEvent) -> bool {
+		let pattern = match &mut self.state {
+			BufferState::QuickSearch(p) => p,
+			_ => return false,
+		};
 
-				// Enter to open
-				KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } => {
-					pattern.clear();
-					self.open_selected();
-					return;
-				},
+		match event {
+			// Exit quick search
+			KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press, .. } => {
+				self.state = BufferState::Normal;
+				self.update_status_text();
+				return true;
+			},
 
-				// Backspace to delete char
-				KeyEvent { code: KeyCode::Backspace, kind: KeyEventKind::Press, .. } => {
-					pattern.pop();
-				},
+			// Enter to open
+			KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } => {
+				pattern.clear();
+				self.open_selected();
+				return true;
+			},
 
-				// Add char and update
-				KeyEvent { code: KeyCode::Char(ch), kind: KeyEventKind::Press, ..  } => {
-					pattern.push(ch);
-				},
-				_ => {},
-			}
+			// Backspace to delete char
+			KeyEvent { code: KeyCode::Backspace, kind: KeyEventKind::Press, .. } => {
+				pattern.pop();
+			},
 
-			let pattern_lowercase: String = pattern.to_lowercase();
-			for (i, pathbuf) in self.entries.iter().enumerate() {
-				let file_name = pathbuf.file_name()
-					.and_then(|osstr| osstr.to_str()) .unwrap()
-					.to_ascii_lowercase();
+			// Reveal in file explorer
+			KeyEvent {
+				code: KeyCode::Char('e'),
+				kind: KeyEventKind::Press,
+				modifiers: KeyModifiers::CONTROL,
+				.. 
+			} => {
+				let _ = opener::open( &self.path );
+				return true;
+			},
 
-				if file_name.starts_with(&pattern_lowercase) {
-					self.selected_index = i;
-					break;
-				}
-			}
+			// Add char and update
+			KeyEvent { code: KeyCode::Char(ch), kind: KeyEventKind::Press, ..  } => {
+				pattern.push(ch);
+			},
 
-			self.update_scroll();
-			self.update_status_text();
-			return;
+			_ => {},
 		}
 
-		// NORMAL MODE
+		let pattern_lowercase: String = pattern.to_lowercase();
+		for (i, pathbuf) in self.entries.iter().enumerate() {
+			let file_name = pathbuf.file_name()
+				.and_then(|osstr| osstr.to_str()) .unwrap_or_default()
+				.to_ascii_lowercase();
+
+			if file_name.starts_with(&pattern_lowercase) {
+				self.selected_index = i;
+				break;
+			}
+		}
+
+		self.update_scroll();
+		self.update_status_text();
+		true
+	}
+
+	pub fn handle_key_event(&mut self, event: KeyEvent) {
+		// Quick search
+		let bup: bool = self.quicksearch_handle_key_event(event);
+		if bup { return; }
+
+		// Normal mode
 		match event {
 			// Move cursor up
-			KeyEvent { code: KeyCode::Char('k'), kind: KeyEventKind::Press, .. } => {
+			KeyEvent { code: KeyCode::Char('k') | KeyCode::Up, kind: KeyEventKind::Press, .. } => {
 				let len: usize = self.entries.len();
 				if len == 0 { return; }
 				self.selected_index = self.selected_index.checked_sub(1) .unwrap_or(len - 1);
@@ -294,7 +322,7 @@ impl FileBuffer {
 			},
 
 			// Move cursor down
-			KeyEvent { code: KeyCode::Char('j'), kind: KeyEventKind::Press, .. } => {
+			KeyEvent { code: KeyCode::Char('j') | KeyCode::Down, kind: KeyEventKind::Press, .. } => {
 				let len: usize = self.entries.len();
 				if len == 0 { return; }
 				self.selected_index = (self.selected_index + 1) % len;
@@ -303,7 +331,9 @@ impl FileBuffer {
 
 			// Open
 			KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } => {
+				self.state = BufferState::Normal;
 				self.open_selected();
+				self.update_status_text();
 			},
 
 			// Go back
@@ -311,6 +341,7 @@ impl FileBuffer {
 				let went_back: bool = self.path.pop();
 				self.update_status_text();
 				if went_back {
+					self.state = BufferState::Normal;
 					self.load_entries();
 				}
 			},
@@ -345,7 +376,6 @@ impl FileBuffer {
 				.. 
 			} => {
 				let _ = opener::open( &self.path );
-				self.state = BufferState::Exit;
 			},
 
 			_ => {},
@@ -366,26 +396,30 @@ impl FileBuffer {
 	}
 
 	pub fn draw(&mut self) -> &Screen {
-		self.screen.clear();
+		let bg_color = Color::from(self.cfg.borrow().bg_color);
+		self.screen.fill(pixel::pxl_bg(' ', bg_color));
 
 		// Display error
 		if let BufferState::Error(err) = &self.state {
 			self.screen.print_fbg( 0, 0,
 				format!("Could not load path: \"{}\"", self.path.display()) .as_str(),
-				Color::Red, Color::Black);
+				Color::Red, bg_color);
 			self.screen.print_fbg( 0, 1,
 				format!("Error: {}", err) .as_str(),
-				Color::Red, Color::Black);
+				Color::Red, bg_color);
 			return &self.screen;
 		}
 
 		// Display empty
 		if self.entries.is_empty() {
-			self.screen.print_fbg(0, 0, "(empty)", Color::DarkGrey, Color::Black);
+			self.screen.print_fbg(0, 0, "(empty)", Color::DarkGrey, bg_color);
 			return &self.screen;
 		}
 
         let screen_selected_idx: isize = self.selected_index as isize - self.scroll as isize;
+		let folder_color: Color = Color::from( self.cfg.borrow().folder_color );
+		let file_color: Color = Color::from( self.cfg.borrow().file_color );
+
 		self.screen.h_line(
 			0, screen_selected_idx as i32,
 			self.screen.get_width() as i32,
@@ -395,14 +429,14 @@ impl FileBuffer {
 		// Display entries
 		for (i, path) in self.entries.iter() .skip(self.scroll) .enumerate() {
 			if i as u32 >= self.screen.get_height() { break; }
-			let mut file_name: String = path.file_name().unwrap() .to_str().unwrap() .to_string();
+			let mut file_name: String = path2string( path.file_name().unwrap_or_default() );
 
-			let bg: Color = if i == screen_selected_idx as usize { Color::DarkGrey } else { Color::Black };
+			let bg: Color = if i == screen_selected_idx as usize { Color::DarkGrey } else { bg_color };
 			let fg: Color = if path.is_dir() {
 				file_name.push('/');
-				Color::from( self.cfg.borrow().folder_color )
+				folder_color
 			} else {
-				Color::White
+				file_color
 			};
 
 			self.screen.print_fbg(0, i as i32, &file_name, fg, bg );
@@ -415,6 +449,33 @@ impl FileBuffer {
 
 
 
+
+pub mod querying {
+
+
+use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::sync::mpsc::{self, Receiver};
+
+use console_engine::events::Event;
+use console_engine::rect_style::BorderStyle;
+use console_engine::screen::Screen;
+use console_engine::{
+	pixel, Color, KeyCode, KeyEventKind
+};
+use console_engine::crossterm::event::KeyEvent;
+use console_engine::forms::{
+	Form, FormField, FormStyle, FormValue, FormOptions, Text,
+};
+
+use std::thread;
+
+use super::{
+	Configs,
+	path2string, get_files_and_folders_at, get_folders_at, get_all_folders_at
+};
 
 
 #[derive(Debug, PartialEq)]
@@ -429,26 +490,30 @@ pub struct SearchPanel {
 	form: Form,
 	selected_index: usize,
 	query: SearchQuery,
+	cfg: Rc<RefCell<Configs>>,
 	pub state: SearchPanelState,
 }
 
 impl SearchPanel {
 	pub fn new(width: u32, height: u32, mode: SearchQueryMode, cfg: Rc<RefCell<Configs>>) -> Self {
-		let max_result_count: usize = cfg.borrow().max_search_results;
+		let max_result_count: usize = (height - 5) as usize;
 		let max_stack_size: usize = cfg.borrow().max_search_stack;
+		let bg_color = Color::from(cfg.borrow().bg_color);
 
 		Self {
 			screen: Screen::new(width, height),
-			form: SearchPanel::build_form(width - 2),
+			form: SearchPanel::build_form(width - 2, bg_color),
 			selected_index: 0,
 			query: SearchQuery::new(mode, max_result_count, max_stack_size),
+			cfg,
 			state: SearchPanelState::Running,
 		}
 	}
 
-	fn build_form(width: u32) -> Form {
+	fn build_form(width: u32, bg_color: Color) -> Form {
 		let theme = FormStyle {
-			border: Some(BorderStyle::new_light()),
+			border: Some(BorderStyle::new_light().with_colors(Color::White, bg_color)),
+			bg: bg_color,
 			..Default::default()
 		};
 
@@ -467,6 +532,7 @@ impl SearchPanel {
 
 	pub fn update(&mut self) {
 		self.query.update();
+		self.selected_index = self.selected_index.clamp(0, self.query.results.len());
 	}
 
 	pub fn is_running(&self) -> bool {
@@ -537,6 +603,8 @@ impl SearchPanel {
 		if self.query.results.is_empty() { return; }
 
 		let offset: (i32, i32) = (2, 4);
+		let bg_color = Color::from(self.cfg.borrow().bg_color);
+
 		self.screen.h_line(
 			offset.0, self.selected_index as i32 + offset.1,
 			self.screen.get_width() as i32 - 2,
@@ -546,7 +614,7 @@ impl SearchPanel {
 		for (i, path) in self.query.results .iter().enumerate() {
 			if i as u32 + offset.1 as u32 >= self.screen.get_height() - 1 { break; }
 
-			let bg: Color = if i == self.selected_index { Color::DarkGrey } else { Color::Black };
+			let bg: Color = if i == self.selected_index { Color::DarkGrey } else { bg_color };
 			let file_name: String = path2string(match &self.query.mode {
 				SearchQueryMode::Favorites(_) => path,
 				SearchQueryMode::Files(root_path) | SearchQueryMode::Folders(root_path) => path.strip_prefix(root_path) .unwrap_or(path)
@@ -562,12 +630,13 @@ impl SearchPanel {
 	}
 
 	pub fn draw(&mut self, tick: usize) -> &Screen {
-		self.screen.clear();
+		let bg_color = Color::from(self.cfg.borrow().bg_color);
+		self.screen.fill(pixel::pxl_bg(' ', bg_color));
 
 		self.screen.rect_border(
 			0, 0,
 			self.screen.get_width() as i32 - 1, self.screen.get_height() as i32 - 1,
-			BorderStyle::new_double()
+			BorderStyle::new_light().with_colors(Color::Grey, bg_color)
 		);
 
 		self.screen.print_screen( 1, 1, self.form.draw(tick) );
@@ -632,8 +701,11 @@ impl SearchQuery {
 
 				while results.len() < self.max_result_count {
 					let search_path = if let Some(p) = stack.pop() { p } else { break; };
-					let (mut files, folders) = get_files_and_folders_at(search_path)
-						.unwrap();
+					let (mut files, folders) = match get_files_and_folders_at(search_path) {
+						Ok(pair) => pair,
+						Err(_) => continue,
+					};
+
 					results.append(&mut files);
 					stack.append(&mut folders.iter()
 						.take( self.max_stack_size - stack.len() )
@@ -647,13 +719,18 @@ impl SearchQuery {
 			},
 
 			SearchQueryMode::Folders(path) => {
-				let mut results: Vec<PathBuf> = get_folders_at(path, self.max_result_count) .unwrap();
+				let mut results: Vec<PathBuf> = match get_folders_at(path, self.max_result_count) {
+					Ok(v) => v,
+					Err(_) => return Vec::new(),
+				};
 				let mut idx: usize = 0;
 
 				while results.len() < self.max_result_count {
 					let search_path = if let Some(path) = results.get(idx) { path } else { break; };
-					let mut folders = get_folders_at(search_path, self.max_result_count - results.len())
-						.unwrap();
+					let mut folders = match get_folders_at(search_path, self.max_result_count - results.len()) {
+						Ok(v) => v,
+						Err(_) => continue,
+					};
 					results.append(&mut folders);
 					idx += 1;
 				}
@@ -714,9 +791,9 @@ impl SearchQuery {
 				let max_stack_size = self.max_stack_size;
 
 				thread::spawn(move || {
-					let mut stack: Vec<PathBuf> = vec![path];
+					let mut stack: VecDeque<PathBuf> = VecDeque::from([ path ]);
 
-					while let Some(search_path) = stack.pop() {
+					while let Some(search_path) = stack.pop_front() {
 						let (files, folders) = match get_files_and_folders_at(search_path) {
 							Ok(pair) => pair,
 							Err(_) => continue,
@@ -744,9 +821,9 @@ impl SearchQuery {
 				let max_stack_size = self.max_stack_size;
 
 				thread::spawn(move || {
-					let mut stack: Vec<PathBuf> = vec![path];
+					let mut stack: VecDeque<PathBuf> = VecDeque::from([ path ]);
 
-					while let Some(search_path) = stack.pop() {
+					while let Some(search_path) = stack.pop_front() {
 						let folders = match get_all_folders_at(search_path) {
 							Ok(v) => v,
 							Err(_) => continue,
@@ -772,3 +849,5 @@ impl SearchQuery {
 
 }
 
+
+}
