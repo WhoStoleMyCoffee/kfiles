@@ -1,6 +1,8 @@
 # kfiles
 A keybind-heavy 'OK' file explorer
 
+<img width="674" alt="kfiles_screenshot" src="https://github.com/WhoStoleMyCoffee/kfiles/assets/79783809/ae7c54c6-d2d5-49cb-8244-46e84d7c3cfb">
+
 ## Motivation
 I was once working on a project, doing my thing, and was looking for a folder stuffed *somewhere* in a directory I often used. So, I opened Windows file explorer and... was stuck waiting for *several seconds* for it to open. 
 
