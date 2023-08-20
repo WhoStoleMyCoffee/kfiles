@@ -14,9 +14,10 @@ use console_engine::{
 use console_engine::{events::Event, crossterm::event::KeyEvent};
 
 use filebuffer::*;
+use filebuffer::util::path2string;
 use filebuffer::querying::*;
 
-
+// Search panel offset from the edges of the screen
 const SEARCH_PANEL_MARGIN: (u32, u32) = (4, 2);
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPNAME: &str = env!("CARGO_PKG_NAME");
@@ -24,6 +25,7 @@ const CONFIG_PATH: &str = "configs";
 
 
 
+// Yes.
 fn new_search_panel(app: &App, mode: SearchQueryMode) -> SearchPanel {
 	SearchPanel::new(
 		app.engine.get_width() - SEARCH_PANEL_MARGIN.0 * 2,
@@ -54,11 +56,12 @@ impl From<ErrorKind> for AppError {
 
 
 enum RunArg {
-	TryFavorite(String),
-	AtPath(PathBuf),
-	AtDefaultPath,
+	TryFavorite(String), // When running  kfiles -f <path>
+	AtPath(PathBuf), // When running  kfiles <path>
+	AtDefaultPath, // When running kfiles with no arguments
 }
 
+// TODO CreateFile, CreateFolder, Delete, Rename
 enum AppState {
 	Running,
 	Exit(Option<PathBuf>),
@@ -144,6 +147,12 @@ impl App {
 				self.engine.draw();
 			},
 
+			// TODO add support for resizing screen
+			// Event::Resize(...) => { ... },
+
+			// TODO also maybe Ctrl-t to open terminal
+
+
 			// Exit with Ctrl-c
 			Event::Key(KeyEvent {
 				code: KeyCode::Char('c'),
@@ -209,34 +218,40 @@ impl App {
 				self.search_panel = Some(new_search_panel( self, SearchQueryMode::Favorites( self.cfg.borrow().favorites.clone() ) ));
 			},
 
-			event => {
+			Event::Mouse(mouse_event) => {
+				if let Some(panel) = &mut self.search_panel {
+					panel.handle_mouse_event(mouse_event, SEARCH_PANEL_MARGIN.1 as u16);
+				} else {
+					self.file_buffer.handle_mouse_event(mouse_event);
+				}
+			},
+
+			Event::Key(key_event) => {
 				// Try to update search panel first
 				if self.search_panel.is_some() {
-					if let Err(err) = self.searchpanel_handle_event(event) {
-						self.file_buffer.status_text = (
-							format!("Error opening: {}", err),
-							Color::Red
-						);
+					if let Err(err) = self.searchpanel_handle_key_event(key_event) {
+						self.file_buffer.status_text = ( format!("Error opening: {}", err), Color::Red );
 					}
 
 				// File buffer
-				} else if let Event::Key(key_event) = event {
-					if let BufferState::Exit = self.file_buffer.state { return AppState::Running; }
+				} else {
 					self.file_buffer.handle_key_event(key_event);
 				}
-
 			},
+
+			_ => {},
 		}
 
 		AppState::Running
 	}
 
-	fn searchpanel_handle_event(&mut self, event: Event) -> Result<(), String> {
+	// I put this stuff in its own function because that would've been a disgusting amount of indentation
+	fn searchpanel_handle_key_event(&mut self, key_event: KeyEvent) -> Result<(), String> {
 		let search_panel: &mut SearchPanel = unsafe {
 			self.search_panel.as_mut() .unwrap_unchecked()
 		};
 
-		search_panel.handle_event(event);
+		search_panel.handle_key_event(key_event);
 
 		match &search_panel.state {
 			SearchPanelState::Running => {},
@@ -342,7 +357,7 @@ fn main() {
 		let state: AppState = app.run();
 
 		if let AppState::Exit(Some(path)) = state {
-			env::set_current_dir(path) .unwrap(); // TODO why no work, eh?
+			env::set_current_dir(path) .unwrap(); // TODO why no work. eh?
 			break;
 		}
 
@@ -375,6 +390,9 @@ You can find your config file at {}
 	favorites		List of favorite directories
 	default_dir		Default directory when the program is run
 	target_fps		The frames per second to run the program at
+	search_ignore_types		The types of files to ignore while searching
+		E.g. "import,txt" will ignore all .import and .txt files
+
 	folder_color		The RGB color values for displaying folders
 	file_color		The RGB color values for displaying files
 	special_color		The RGB color values for displaying special text
@@ -399,5 +417,3 @@ Keybinds:
 	Enter		Open selected file/folder
 "#);
 }
-
-

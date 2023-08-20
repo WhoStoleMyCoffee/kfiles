@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "kfiles"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "confy",
  "console_engine",
@@ -342,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.3.4"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7b6d6190b7594385f61bd3911cd1be99dfddcfc365a4160cc2ab5bff4aed294"
+checksum = "fed1ceff11a1dddaee50c9dc8e4938bd106e9d89ae372f192311e7da498e3b69"
 
 [[package]]
 name = "scopeguard"
