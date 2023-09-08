@@ -114,10 +114,6 @@ impl App {
 	}
 
 	fn run(&mut self) -> AppState {
-		if let BufferState::Exit = self.file_buffer.state {
-			return AppState::Exit(Some( self.file_buffer.path.clone() ));
-		}
-
 		if let Some(panel) = &mut self.search_panel {
 			if panel.is_running() {
 				panel.update();

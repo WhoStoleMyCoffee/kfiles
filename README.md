@@ -4,20 +4,20 @@ A keybind-heavy 'OK' file explorer
 <img width="674" alt="kfiles_screenshot" src="https://github.com/WhoStoleMyCoffee/kfiles/assets/79783809/ae7c54c6-d2d5-49cb-8244-46e84d7c3cfb">
 
 ## Motivation
-I was once working on a project, doing my thing, and was looking for a folder stuffed *somewhere* in a directory I often used. So, I opened Windows file explorer and... was stuck waiting for *several seconds* for it to open. 
+I was once working on a project, doing my thing, and was looking for a folder stuffed _somewhere_ in a directory I often used. So, I opened Windows file explorer and... was stuck waiting for _several seconds_ for it to open, then spent _several more_ just searching for that folder.
 
-Now, I know waiting several seconds for an app to open isn't that big of a deal - In fact, I'd say I'm even one of the more patient people out there - but I do use Windows file explorer a lot, and using it often feels slow and sloppy (at least to me).
+Now, I know waiting several seconds for an app to open isn't that big of a deal - In fact, I'd say I'm even one of the more patient people out there - but this happens to me a lot, and using it often feels slow and sometimes even frustrating (at least to me).
 
 There were many features, big and small, that I just wished it had.
 
 So I made my own.
 
-It's obviously not perfect but it's good enough for me as a navigation tool; and it's certainly faster at booting up, and more configurable than Windows file explorer 😎
+It's obviously not perfect but it's good enough for me as a navigation tool; and it's certainly faster and more configurable than Windows file explorer 😎
 
 ## Usage
 You can run the .exe like a normal app, or through the terminal (if you set the PATH environment variable to it) with `kfiles`. 
 
-E.g. `kfiles` (run at default directory), `kfiles .` (run at path), `kfiles --help` (run with options)
+E.g. `kfiles` (run at default directory), `kfiles .` (run here), `kfiles --help` (show help message)
 
 ### Run options
 `--help` or `h` Shows a help message
@@ -61,6 +61,9 @@ You can find your config file at your `AppData/Roaming/kfiles/config/configs.tom
 
 `target_fps` The frames per second to run the program at. It's not really significant but it could be nice sometimes to be able to configure it
 
+`search_ignore_types`	The types of files to ignore while searching.
+	E.g. "import,txt" will ignore all .import and .txt files
+
 `folder_color` The RGB color values for displaying folders
 
 `file_color` The RGB color values for displaying files
@@ -70,8 +73,4 @@ You can find your config file at your `AppData/Roaming/kfiles/config/configs.tom
 `bg_color` The RGB color values for the background
 
 ## Features to come
-... if I have the motivation..
-
-- ignoring certain files and folders
-
-- creating, renaming, and deleting files / folders (Yeah, I haven't implemented those yet 😬)
+- Creating, renaming, and deleting files / folders

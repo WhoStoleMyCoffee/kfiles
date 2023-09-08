@@ -1,5 +1,4 @@
-
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{ PathBuf, Path };
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -154,7 +153,6 @@ pub enum BufferState {
 	Normal,
 	QuickSearch(String), // When using '/' search
 	Error(std::io::Error),
-	Exit,
 }
 
 pub struct FileBuffer {
@@ -275,7 +273,11 @@ impl FileBuffer {
 				modifiers: KeyModifiers::CONTROL,
 				.. 
 			} => {
-				let _ = opener::open( &self.path );
+				if let Some(pathbuf) = self.entries.get(self.selected_index) {
+					let _ = opener::reveal(pathbuf);
+				} else {
+					let _ = opener::open(&self.path);
+				}
 				return true;
 			},
 
@@ -361,11 +363,16 @@ impl FileBuffer {
 
 			// Go back
 			KeyEvent { code: KeyCode::Char('-'), kind: KeyEventKind::Press, .. } => {
+				let folder_name: Option<OsString> = self.path.file_name() .map(|s| s.to_os_string());
 				let went_back: bool = self.path.pop();
 				self.update_status_text();
 				if went_back {
 					self.state = BufferState::Normal;
 					self.load_entries();
+
+					if let Some(folder_name) = folder_name {
+						self.select(&folder_name);
+					}
 				}
 			},
 
@@ -398,7 +405,11 @@ impl FileBuffer {
 				modifiers: KeyModifiers::CONTROL,
 				.. 
 			} => {
-				let _ = opener::open( &self.path );
+				if let Some(pathbuf) = self.entries.get(self.selected_index) {
+					let _ = opener::reveal(pathbuf);
+				} else {
+					let _ = opener::open(&self.path);
+				}
 			},
 
 			_ => {},
@@ -608,7 +619,7 @@ pub mod querying {
 
 				// Esc to exit
 				KeyEvent { code: KeyCode::Esc, .. } => {
-					self.state = SearchPanelState::Exit( None );
+					self.state = SearchPanelState::Exit(None);
 				},
 
 				// Form input
