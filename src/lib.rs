@@ -196,7 +196,7 @@ impl FileBuffer {
 	pub fn update_status_text(&mut self) {
 		match &self.state {
 			BufferState::Normal => {
-				self.status_text = ( util::path2string(&self.path), Color::White );
+				self.status_text = ( self.path.display().to_string(), Color::White );
 			},
 			BufferState::QuickSearch(pattern) => {
 				let col: Color = Color::from( self.cfg.borrow().special_color );

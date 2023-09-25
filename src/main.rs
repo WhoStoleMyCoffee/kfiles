@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::env;
 
 use confy::ConfyError;
+use clean_path::Clean;
+
 use console_engine::crossterm::ErrorKind;
 use console_engine::pixel;
 use console_engine::screen::Screen;
@@ -306,15 +308,8 @@ fn main() {
 			},
 
 			s => {
-				let path: PathBuf = match env::current_dir() .expect("Failed to get current working directory") .join(s).canonicalize() {
-					Ok(p) => p,
-					Err(err) => {
-						println!("Error: {}", err);
-						return;
-					},
-				};
-
-				RunArg::AtPath(path)
+				let path: PathBuf = env::current_dir() .expect("Failed to get current working directory") .join(s);
+				RunArg::AtPath( path.clean() )
 			},
 		}
 	} else {
