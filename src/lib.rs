@@ -5,7 +5,7 @@ use std::cell::RefCell;
 
 use console_engine::screen::Screen;
 use console_engine::{
-	pixel, Color, KeyCode, KeyModifiers,
+	pixel, Color, KeyCode,
 	KeyEventKind
 };
 use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
@@ -222,6 +222,10 @@ impl FileBuffer {
 		}
 	}
 
+	pub fn get_selected_path(&self) -> Option<&PathBuf> {
+		self.entries.get(self.selected_index)
+	}
+
 	fn open_selected(&mut self) {
 		let pathbuf: &PathBuf = match self.entries.get(self.selected_index) {
 			Some(p) => p,
@@ -236,6 +240,15 @@ impl FileBuffer {
 		} else if pathbuf.is_dir() {
 			self.path.push( pathbuf.file_name().unwrap_or_default() );
 			self.load_entries();
+			self.update_status_text();
+		}
+	}
+
+	pub fn reveal(&self) -> Result<(), opener::OpenError> {
+		if let Some(pathbuf) = self.get_selected_path() {
+			opener::reveal(pathbuf)
+		} else {
+			opener::open(&self.path)
 		}
 	}
 
@@ -264,21 +277,6 @@ impl FileBuffer {
 			// Backspace to delete char
 			KeyEvent { code: KeyCode::Backspace, kind: KeyEventKind::Press, .. } => {
 				pattern.pop();
-			},
-
-			// Reveal in file explorer
-			KeyEvent {
-				code: KeyCode::Char('e'),
-				kind: KeyEventKind::Press,
-				modifiers: KeyModifiers::CONTROL,
-				.. 
-			} => {
-				if let Some(pathbuf) = self.entries.get(self.selected_index) {
-					let _ = opener::reveal(pathbuf);
-				} else {
-					let _ = opener::open(&self.path);
-				}
-				return true;
 			},
 
 			// Add char and update
@@ -358,7 +356,6 @@ impl FileBuffer {
 			KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } => {
 				self.state = BufferState::Normal;
 				self.open_selected();
-				self.update_status_text();
 			},
 
 			// Go back
@@ -396,20 +393,6 @@ impl FileBuffer {
 			KeyEvent { code: KeyCode::Char('/'), kind : KeyEventKind::Press, .. } => {
 				if self.entries.is_empty() { return; }
 				self.state = BufferState::QuickSearch( String::new() );
-			},
-
-			// Reveal in file explorer
-			KeyEvent {
-				code: KeyCode::Char('e'),
-				kind: KeyEventKind::Press,
-				modifiers: KeyModifiers::CONTROL,
-				.. 
-			} => {
-				if let Some(pathbuf) = self.entries.get(self.selected_index) {
-					let _ = opener::reveal(pathbuf);
-				} else {
-					let _ = opener::open(&self.path);
-				}
 			},
 
 			_ => {},

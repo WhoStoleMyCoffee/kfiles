@@ -25,6 +25,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPNAME: &str = env!("CARGO_PKG_NAME");
 const CONFIG_PATH: &str = "configs";
 
+const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits();
+
 
 
 // Yes.
@@ -145,11 +147,18 @@ impl App {
 				self.engine.draw();
 			},
 
-			// TODO add support for resizing screen
-			// Event::Resize(...) => { ... },
+			Event::Resize(w, h) => {
+				self.engine.resize(w as u32, h as u32);
+			},
 
-			// TODO also maybe Ctrl-t to open terminal
-
+			// Exit with Alt-F4
+			Event::Key(KeyEvent {
+				code: KeyCode::F(4),
+				kind: KeyEventKind::Press,
+				modifiers: KeyModifiers::ALT, ..
+			}) => {
+				return AppState::Exit(Some( self.file_buffer.path.clone() ));
+			},
 
 			// Exit with Ctrl-c
 			Event::Key(KeyEvent {
@@ -160,12 +169,33 @@ impl App {
 				return AppState::Exit(Some( self.file_buffer.path.clone() ));
 			},
 
+			// Reveal in file explorer and close with Ctrl-Shift-e
+			Event::Key(KeyEvent {
+				code: KeyCode::Char('E'),
+				kind: KeyEventKind::Press,
+				modifiers, ..
+			}) if modifiers.bits() == CONTROL_SHIFT => {
+				self.file_buffer.reveal()
+					.expect("Failed to reveal current directory");
+				return AppState::Exit(None);
+			},
+
+			// Reveal in file explorer with Ctrl-e
+			Event::Key(KeyEvent {
+				code: KeyCode::Char('e'),
+				kind: KeyEventKind::Press,
+				modifiers: KeyModifiers::CONTROL, ..
+			}) => {
+				self.file_buffer.reveal()
+					.expect("Failed to reveal current directory");
+			},
+
 			// Search folders with Ctrl-Shift-p
 			Event::Key(KeyEvent {
 				code: KeyCode::Char('P'),
 				kind: KeyEventKind::Press,
 				modifiers, ..
-			}) if modifiers.bits() == KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits() => {
+			}) if modifiers.bits() == CONTROL_SHIFT => {
 				if self.search_panel.is_some() { return AppState::Running; }
 				self.search_panel = Some(new_search_panel( self, SearchQueryMode::Folders(self.file_buffer.path.clone()) ));
 			},
@@ -236,8 +266,6 @@ impl App {
 					self.file_buffer.handle_key_event(key_event);
 				}
 			},
-
-			_ => {},
 		}
 
 		AppState::Running
@@ -347,8 +375,10 @@ fn main() {
 	loop {
 		let state: AppState = app.run();
 
-		if let AppState::Exit(Some(path)) = state {
-			env::set_current_dir(path) .unwrap(); // TODO why no work. eh?
+		if let AppState::Exit(exit_path) = state {
+			if let Some(path) = exit_path {
+				env::set_current_dir(path) .unwrap(); // TODO why no work. eh?
+			}
 			break;
 		}
 
