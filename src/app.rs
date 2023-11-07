@@ -12,23 +12,12 @@ use console_engine::{
 use console_engine::{events::Event, crossterm::event::KeyEvent};
 
 use crate::util::path2string;
-use crate::config::Configs;
+use crate::config::{Configs, RecentList};
 use crate::filebuffer::{FileBuffer, BufferState};
 use crate::search::{SearchPanel, SearchQueryMode, SearchPanelState};
 use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH };
 
 const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits();
-
-
-// Yes.
-fn new_search_panel(app: &App, mode: SearchQueryMode) -> SearchPanel {
-	SearchPanel::new(
-		app.engine.get_width() - SEARCH_PANEL_MARGIN.0 * 2,
-		app.engine.get_height() - SEARCH_PANEL_MARGIN.1 * 2,
-		mode,
-		Rc::clone(&app.cfg),
-	)
-}
 
 
 pub enum AppError {
@@ -68,6 +57,7 @@ pub struct App {
 	engine: ConsoleEngine,
 	file_buffer: FileBuffer,
 	search_panel: Option<SearchPanel>,
+	recent_files: RecentList<PathBuf>,
 }
 
 impl App {
@@ -100,11 +90,13 @@ impl App {
 		);
 		file_buffer.load_entries();
 
+		let max_recent_count: usize =  cfg.borrow().max_recent_count;
 		Ok(Self {
 			cfg,
 			engine,
 			file_buffer,
 			search_panel: None,
+			recent_files: RecentList::new(max_recent_count),
 		})
 	}
 
@@ -168,6 +160,7 @@ impl App {
 			}) if modifiers.bits() == CONTROL_SHIFT => {
 				self.file_buffer.reveal()
 					.expect("Failed to reveal current directory");
+				self.add_current_to_recent();
 				return AppState::Exit(None);
 			},
 
@@ -179,6 +172,7 @@ impl App {
 			}) => {
 				self.file_buffer.reveal()
 					.expect("Failed to reveal current directory");
+				self.add_current_to_recent();
 			},
 
 			// Search folders with Ctrl-Shift-p
@@ -188,7 +182,11 @@ impl App {
 				modifiers, ..
 			}) if modifiers.bits() == CONTROL_SHIFT => {
 				if self.search_panel.is_some() { return AppState::Running; }
-				self.search_panel = Some(new_search_panel( self, SearchQueryMode::Folders(self.file_buffer.path.clone()) ));
+
+				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::Folders(self.file_buffer.path.clone()) )
+					.set_title("Search Folders")
+					.set_color(Color::from(self.cfg.borrow().folder_color));
+				self.search_panel = Some(panel);
 			},
 
 			// Search files with Ctrl-p
@@ -198,7 +196,30 @@ impl App {
 				modifiers: KeyModifiers::CONTROL, ..
 			}) => {
 				if self.search_panel.is_some() { return AppState::Running; }
-				self.search_panel = Some(new_search_panel( self, SearchQueryMode::Files(self.file_buffer.path.clone()) ));
+				
+				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::Files(self.file_buffer.path.clone()) )
+					.set_title("Search Files");
+				self.search_panel = Some(panel);
+			},
+
+			// Recent files with Ctrl-o
+			Event::Key(KeyEvent {
+				code: KeyCode::Char('o'),
+				kind: KeyEventKind::Press,
+				modifiers: KeyModifiers::CONTROL, ..
+			}) => {
+				// If already open in favorites mode, close
+				if let Some(panel) = &self.search_panel {
+					if let SearchQueryMode::List(_) = panel.get_query_mode() {
+						self.search_panel = None;
+					}
+					return AppState::Running;
+				}
+
+				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List( self.recent_files.clone() ))
+					.set_title("Recent")
+					.set_color(Color::from(self.cfg.borrow().folder_color));
+				self.search_panel = Some(panel);
 			},
 
 			// Add to favorites with Ctrl-f
@@ -228,13 +249,16 @@ impl App {
 			Event::Key(KeyEvent { code: KeyCode::Char('`'), kind: KeyEventKind::Press, ..  }) => {
 				// If already open in favorites mode, close
 				if let Some(panel) = &self.search_panel {
-					if let SearchQueryMode::Favorites(_) = panel.get_query_mode() {
+					if let SearchQueryMode::List(_) = panel.get_query_mode() {
 						self.search_panel = None;
 					}
 					return AppState::Running;
 				}
 
-				self.search_panel = Some(new_search_panel( self, SearchQueryMode::Favorites( self.cfg.borrow().favorites.clone() ) ));
+				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List(self.cfg.borrow().favorites.clone() ))
+					.set_title("Favorites")
+					.set_color(Color::from(self.cfg.borrow().special_color));
+				self.search_panel = Some(panel);
 			},
 
 			Event::Mouse(mouse_event) => {
@@ -292,11 +316,28 @@ impl App {
 				}
 
 				self.search_panel = None;
-
+				self.add_current_to_recent();
 			},
 		}
 
 		Ok(())
+	}
+
+	fn create_search_panel(&self, mode: SearchQueryMode) -> SearchPanel {
+		SearchPanel::new(
+			self.engine.get_width() - SEARCH_PANEL_MARGIN.0 * 2,
+			self.engine.get_height() - SEARCH_PANEL_MARGIN.1 * 2,
+			mode,
+			Rc::clone(&self.cfg),
+		)
+	}
+
+	fn add_to_recent(&mut self, path: PathBuf) {
+		self.recent_files.add(path);
+	}
+
+	fn add_current_to_recent(&mut self) {
+		self.add_to_recent(self.file_buffer.path.clone());
 	}
 
 }

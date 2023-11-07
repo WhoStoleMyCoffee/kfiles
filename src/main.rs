@@ -144,3 +144,16 @@ Keybinds:
 	Enter		Open selected file/folder
 "#);
 }
+
+
+#[cfg(test)]
+mod tests {
+    use crate::APPNAME;
+
+	#[test]
+	fn test_path() {
+		let config_path = confy::get_configuration_file_path(APPNAME, None);
+		dbg!(&config_path);
+	}
+}
+

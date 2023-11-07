@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
+use std::ops::Deref;
 
 use console_engine::{
 	pixel, Color, KeyCode, KeyEventKind, screen::Screen, rect_style::BorderStyle
@@ -15,9 +16,73 @@ use console_engine::forms::{
 	Form, FormField, FormStyle, FormValue, FormOptions, Text,
 };
 
-
 use crate::config::Configs;
 use crate::util::*;
+
+
+
+#[derive(Debug, Clone)]
+pub struct FileEntry {
+	pub prefix: Option<String>,
+	pub path: PathBuf,
+}
+
+impl FileEntry {
+	pub fn prefix(mut self, prefix: &str) -> Self {
+		self.prefix = Some(prefix.to_string());
+		self
+	}
+
+	pub fn prefix_idx(mut self, index: usize) -> Self {
+		self.prefix = Some(format!("{index}:"));
+		self
+	}
+}
+
+impl AsRef<PathBuf> for FileEntry {
+	fn as_ref(&self) -> &PathBuf {
+		&self.path
+	}
+}
+
+impl Deref for FileEntry {
+	type Target = PathBuf;
+
+	fn deref(&self) -> &Self::Target {
+		&self.path
+	}
+}
+
+impl From<&Path> for FileEntry {
+	fn from(value: &Path) -> Self {
+		Self {
+			prefix: None,
+			path: value.to_path_buf(),
+		}
+	}
+}
+
+impl From<PathBuf> for FileEntry {
+	fn from(value: PathBuf) -> Self {
+		Self {
+			prefix: None,
+			path: value,
+		}
+	}
+}
+
+impl ToString for FileEntry {
+	fn to_string(&self) -> String {
+		if let Some(prefix) = &self.prefix {
+			format!("{}{}", prefix, self.to_string_lossy())
+		} else {
+			format!("{}",self.to_string_lossy())
+		}
+	}
+}
+
+
+
 
 #[derive(Debug, PartialEq)]
 pub enum SearchPanelState {
@@ -31,6 +96,8 @@ pub enum SearchPanelState {
 pub struct SearchPanel {
 	screen: Screen,
 	form: Form, // Input box
+	title: String,
+	color: Color,
 	selected_index: usize,
 	query: SearchQuery,
 	cfg: Rc<RefCell<Configs>>,
@@ -47,11 +114,23 @@ impl SearchPanel {
 		Self {
 			screen: Screen::new(width, height),
 			form: SearchPanel::build_form(width - 2, bg_color),
+			title: "Search".to_string(),
+			color: Color::from(cfg.borrow().file_color),
 			selected_index: 0,
 			query: SearchQuery::new(mode, max_result_count, max_stack_size, ignore_types),
-			cfg,
+			cfg: Rc::clone(&cfg),
 			state: SearchPanelState::Running,
 		}
+	}
+
+	pub fn set_title(mut self, title: &str) -> Self {
+		self.title = title.to_string();
+		self
+	}
+
+	pub fn set_color(mut self, color: Color) -> Self {
+		self.color = color;
+		self
 	}
 
 	fn build_form(width: u32, bg_color: Color) -> Form {
@@ -87,7 +166,7 @@ impl SearchPanel {
 		&self.query.mode
 	}
 
-	pub fn get_results(&self) -> &Vec<PathBuf> {
+	pub fn get_results(&self) -> &Vec<FileEntry> {
 		&self.query.results
 	}
 
@@ -135,7 +214,7 @@ impl SearchPanel {
 				self.form.handle_event(Event::Key(key_event));
 
 				if self.form.is_finished() {
-					let selected = match self.get_results().get(self.selected_index) {
+					let selected: &PathBuf = match self.get_results().get(self.selected_index) {
 						Some(de) => de,
 						None => return,
 					};
@@ -168,23 +247,26 @@ impl SearchPanel {
 			pixel::pxl_bg(' ', Color::DarkGrey)
 		);
 
-		for (i, path) in self.query.results .iter().enumerate() {
+		for (i, entry) in self.query.results .iter().enumerate() {
 			if i as u32 + offset.1 as u32 >= self.screen.get_height() - 1 { break; }
 
 			let bg: Color = if i == self.selected_index { Color::DarkGrey } else { bg_color };
 
-			// Format file name so it's easier to read
-			// Ironically, this code is hard to read.
-			let (path, fg): (&Path, (u8, u8, u8)) = match &self.query.mode {
-				SearchQueryMode::Favorites(_) => (path, self.cfg.borrow().special_color),
-				SearchQueryMode::Files(root_path) => ( path.strip_prefix(root_path) .unwrap_or(path), self.cfg.borrow().file_color ),
-				SearchQueryMode::Folders(root_path) => ( path.strip_prefix(root_path) .unwrap_or(path), self.cfg.borrow().folder_color ),
+			let path: &Path = if let SearchQueryMode::Files(root_path) | SearchQueryMode::Folders(root_path) = &self.query.mode {
+				entry.strip_prefix(root_path) .unwrap_or(entry)
+			} else {
+				entry
 			};
-			let file_name: String = path2string(path).replace('\\', "/");
+
+			let mut path_string: String = path2string(path).replace('\\', "/");
+
+			if let Some(prefix) = &entry.prefix {
+				path_string = format!("{prefix} {path_string}");
+			}
 
 			self.screen.print_fbg(
 				offset.0, i as i32 + offset.1,
-				&file_name, Color::from(fg), bg
+				&path_string, self.color, bg
 			);
 		}
 	}
@@ -202,12 +284,8 @@ impl SearchPanel {
 		self.screen.print_screen( 1, 1, self.form.draw(tick) );
 		self.display_results();
 
-		let text: &str = match self.query.mode {
-			SearchQueryMode::Files(_) => " Search Files ",
-			SearchQueryMode::Folders(_) => " Search Folders ",
-			SearchQueryMode::Favorites(_) => " Favorites ",
-		};
-		self.screen.print_fbg(2, 0, text, Color::Black, Color::Grey);
+		let text: String = format!(" {} ", &self.title);
+		self.screen.print_fbg(2, 0, &text, Color::Black, Color::Grey);
 
 		&self.screen
 	}
@@ -217,19 +295,18 @@ impl SearchPanel {
 
 
 
-
 #[derive(Debug, Clone)]
 pub enum SearchQueryMode {
 	Files(PathBuf),
 	Folders(PathBuf),
-	Favorites(Vec<PathBuf>),
+	List(Vec<PathBuf>), // Title & file list
 }
 
 struct SearchQuery {
 	query: String,
 	mode: SearchQueryMode,
-	results: Vec<PathBuf>,
-	receiver: Option< Receiver<Vec<PathBuf>> >,
+	results: Vec<FileEntry>,
+	receiver: Option< Receiver<Vec<FileEntry>> >,
 	max_result_count: usize,
 	max_stack_size: usize,
 	ignore_types: String,
@@ -253,10 +330,12 @@ impl SearchQuery {
 	}
 
 	// Get a list of dirs. Mainly used when there's no query but you don't wanna leave the user with an empty screen, yknow
-	fn list(&self) -> Vec<PathBuf> {
+	fn list(&self) -> Vec<FileEntry> {
 		match &self.mode {
-			SearchQueryMode::Favorites(favorites) => {
-				favorites.clone()
+			SearchQueryMode::List(paths) => {
+				paths.iter().enumerate()
+					.map(|(i, pathbuf)| FileEntry::from(pathbuf.as_path()) .prefix_idx(i) )
+					.collect()
 			},
 
 			SearchQueryMode::Files(path) => {
@@ -278,8 +357,9 @@ impl SearchQuery {
 					);
 				}
 
-				results.truncate(self.max_result_count);
-				results
+				results.iter() .take(self.max_result_count)
+					.map(|pathbuf| FileEntry::from(pathbuf.as_path()) )
+					.collect()
 			},
 
 			SearchQueryMode::Folders(path) => {
@@ -299,8 +379,9 @@ impl SearchQuery {
 					idx += 1;
 				}
 
-				results.truncate(self.max_result_count);
-				results
+				results.iter() .take(self.max_result_count)
+					.map(|pathbuf| FileEntry::from(pathbuf.as_path()) )
+					.collect()
 			},
 
 		}
@@ -315,8 +396,8 @@ impl SearchQuery {
 		let max_search_results: usize = self.max_result_count;
 
 		for received in rx.try_iter() {
-			for pathbuf in received.iter() .take(max_search_results - self.results.len()) {
-				self.results.push( pathbuf.clone() );
+			for entry in received.iter() .take(max_search_results - self.results.len()) {
+				self.results.push( entry.clone() );
 			}
 		}
 
@@ -338,23 +419,23 @@ impl SearchQuery {
 		self.results.clear();
 		let search_query = self.query.to_lowercase();
 
-		// Files and Folders are done on threads. Favorites isn't.
+		// Files and Folders are done on threads. List isn't.
 		// We use mpsc to send results back for this specific query
 		// A new set of sender and receiver is created for each query, replacing the old self.reveiver
 		// If that happens while the thread is running, stop searching (obviously)
 
 		// Man, that's a disgusting amount of indentation lol
 		match &self.mode {
-			SearchQueryMode::Favorites(favorites) => {
+			SearchQueryMode::List(paths) => {
 				self.receiver = None;
-				self.results = favorites.iter()
-					.filter(|pathbuf| path2string(pathbuf) .to_lowercase() .contains(&search_query) )
-					.cloned()
+				self.results = paths.iter().enumerate()
+					.map(|(i, pathbuf)| FileEntry::from(pathbuf.as_path()) .prefix_idx(i) )
+					.filter(|entry| entry.to_string().to_lowercase().contains(&search_query) )
 					.collect();
 			},
 
 			SearchQueryMode::Files(path) => {
-				let (tx, rx) = mpsc::channel::< Vec<PathBuf> >();
+				let (tx, rx) = mpsc::channel::< Vec<FileEntry> >();
 				self.receiver = Some(rx);
 				let path = path.clone();
 				let max_stack_size = self.max_stack_size;
@@ -374,11 +455,12 @@ impl SearchQuery {
 							.take( max_stack_size - stack.len() )
 							.collect());
 
-						let files: Vec<PathBuf> = files.into_iter()
+						let files: Vec<FileEntry> = files.into_iter()
 							.filter(|pathbuf|
 								!ignore_types.contains( &path2string(pathbuf.extension().unwrap_or_default()) )
 								&& path2string(pathbuf) .to_lowercase() .contains(&search_query)
 							)
+							.map(FileEntry::from)
 							.collect();
 
 						// If receiver is gone (new query or panel is closed)
@@ -391,7 +473,7 @@ impl SearchQuery {
 			},
 
 			SearchQueryMode::Folders(path) => {
-				let (tx, rx) = mpsc::channel::< Vec<PathBuf> >();
+				let (tx, rx) = mpsc::channel::< Vec<FileEntry> >();
 				self.receiver = Some(rx);
 				let path = path.clone();
 				let max_stack_size = self.max_stack_size;
@@ -411,8 +493,9 @@ impl SearchQuery {
 							.cloned()
 							.collect());
 						
-						let folders: Vec<PathBuf> = folders.into_iter()
+						let folders: Vec<FileEntry> = folders.into_iter()
 							.filter( |pathbuf| path2string(pathbuf).to_lowercase() .contains(&search_query) )
+							.map(FileEntry::from)
 							.collect();
 
 						// If receiver is gone (new query or panel is closed)
