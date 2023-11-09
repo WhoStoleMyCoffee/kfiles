@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::Write;
+use std::path::{PathBuf, Path};
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -11,13 +13,32 @@ use console_engine::{
 };
 use console_engine::{events::Event, crossterm::event::KeyEvent};
 
-use crate::util::path2string;
+use crate::util::{path2string, read_lines};
 use crate::config::{Configs, RecentList};
 use crate::filebuffer::{FileBuffer, BufferState};
 use crate::search::{SearchPanel, SearchQueryMode, SearchPanelState};
-use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH };
+use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH, get_recent_dirs_path };
 
 const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits();
+
+
+
+fn load_recent_list(path: &Path, max_count: usize) -> RecentList<PathBuf> {
+	let mut list: RecentList<PathBuf> = RecentList::new(max_count);
+
+	*list = if let Ok(lines) = read_lines(path) {
+		lines.map_while(Result::ok)
+			.map(PathBuf::from)
+			.filter(|pathbuf| pathbuf.exists())
+			.collect()
+	} else {
+		vec![]
+	};
+
+	list
+}
+
+
 
 
 pub enum AppError {
@@ -45,6 +66,28 @@ pub enum RunArg {
 	AtDefaultPath, // When running kfiles with no arguments
 }
 
+impl RunArg {
+	fn get_run_path(&self, cfg: &Rc<RefCell<Configs>>) -> PathBuf {
+		match self {
+			RunArg::AtPath(p) => p.clone(),
+			RunArg::TryFavorite(p) => {
+				let favorites = &cfg.borrow().favorites;
+				let lower_p: String = p.to_lowercase();
+
+				let res: Option<&PathBuf> = favorites.iter()
+					.find(|pathbuf| path2string(pathbuf).to_lowercase() .contains(&lower_p));
+
+				match res {
+					Some(p) => p.clone(),
+					None => cfg.borrow().default_path.clone(),
+				}
+			},
+			RunArg::AtDefaultPath => cfg.borrow().default_path.clone()
+		}
+	}
+}
+
+
 // TODO CreateFile, CreateFolder, Delete, Rename
 pub enum AppState {
 	Running,
@@ -63,26 +106,10 @@ pub struct App {
 impl App {
 	pub fn new(run_arg: RunArg) -> Result<Self, AppError> {
 		let cfg: Rc<RefCell<Configs>> = Rc::new(RefCell::new( confy::load(APPNAME, Some(CONFIG_PATH))? ));
-
-		let run_path: PathBuf = match run_arg {
-			RunArg::AtPath(p) => p,
-			RunArg::TryFavorite(p) => {
-				let favorites = &cfg.borrow().favorites;
-				let lower_p: String = p.to_lowercase();
-
-				let res: Option<&PathBuf> = favorites.iter()
-					.find(|pathbuf| path2string(pathbuf).to_lowercase() .contains(&lower_p) );
-
-				match res {
-					Some(p) => p.clone(),
-					None => cfg.borrow().default_path.clone(),
-				}
-			},
-			RunArg::AtDefaultPath => cfg.borrow().default_path.clone(),
-		};
-
+		let run_path: PathBuf = run_arg.get_run_path(&cfg);
 		let engine: ConsoleEngine = ConsoleEngine::init_fill( cfg.borrow().target_fps )?;
 
+		// Initialize file buffer
 		let mut file_buffer = FileBuffer::new(
 			&run_path,
 			Screen::new(engine.get_width() - 2, engine.get_height() - 2),
@@ -96,7 +123,7 @@ impl App {
 			engine,
 			file_buffer,
 			search_panel: None,
-			recent_files: RecentList::new(max_recent_count),
+			recent_files: load_recent_list(&get_recent_dirs_path(), max_recent_count),
 		})
 	}
 
@@ -333,11 +360,25 @@ impl App {
 	}
 
 	fn add_to_recent(&mut self, path: PathBuf) {
-		self.recent_files.add(path);
+		self.recent_files.push(path);
 	}
 
 	fn add_current_to_recent(&mut self) {
 		self.add_to_recent(self.file_buffer.path.clone());
 	}
 
+}
+
+
+impl Drop for App {
+	fn drop(&mut self) {
+		self.add_current_to_recent();
+		let bup = self.recent_files.iter()
+			.filter_map(|pathbuf| pathbuf.as_path().to_str() )
+			.collect::<Vec<&str>>()
+			.join("\n");
+
+		let mut file = File::create( get_recent_dirs_path() ) .unwrap();
+		file.write_all( bup.as_bytes() ) .unwrap();
+	}
 }

@@ -1,4 +1,7 @@
-use std::{path::{ PathBuf, Path }, ops::{Deref, DerefMut}};
+// use std::{path::{ PathBuf, Path }, ops::{Deref, DerefMut}, fs::File, io::{self, BufReader}};
+use std::path::{ Path, PathBuf };
+use std::ops::{ Deref, DerefMut };
+
 use serde::{ Deserialize, Serialize };
 use directories::UserDirs;
 
@@ -34,7 +37,7 @@ impl Default for Configs {
 			default_path: PathBuf::from(home_dir),
 			target_fps: 10,
 			search_ignore_types: String::new(),
-			max_recent_count: 8,
+			max_recent_count: 16,
 
 			folder_color: ( 105, 250, 255 ),
 			file_color: (248, 242, 250),
@@ -59,14 +62,13 @@ impl Configs {
 
 
 
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RecentList<P: PartialEq> {
+#[derive(Debug)]
+pub struct RecentList<I: PartialEq + From<String>> {
 	pub max_len: usize,
-	list: Vec<P>,
+	list: Vec<I>,
 }
 
-impl<P: PartialEq> RecentList<P> {
+impl<I: PartialEq + From<String>> RecentList<I> {
 	pub fn new(max_len: usize) -> Self {
 		Self {
 			max_len,
@@ -74,31 +76,32 @@ impl<P: PartialEq> RecentList<P> {
 		}
 	}
 
-	pub fn add(&mut self, item: P) {
+	pub fn push(&mut self, item: I) {
 		if let Some(i) = self.list.iter() .position(|element| element == &item) {
 			self.list.remove(i);
 		}
 
 		self.list.insert(0, item);
+		self.list.truncate(self.max_len);
 	}
 }
 
-impl<P: PartialEq> Deref for RecentList<P> {
-	type Target = Vec<P>;
+impl<I: PartialEq + From<String>> Deref for RecentList<I> {
+	type Target = Vec<I>;
 
 	fn deref(&self) -> &Self::Target {
 		&self.list
 	}
 }
 
-impl<P: PartialEq> DerefMut for RecentList<P> {
+impl<I: PartialEq + From<String>> DerefMut for RecentList<I> {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		&mut self.list
 	}
 }
 
-impl<P: PartialEq> AsRef<Vec<P>> for RecentList<P> {
-	fn as_ref(&self) -> &Vec<P> {
+impl<I: PartialEq + From<String>> AsRef<Vec<I>> for RecentList<I> {
+	fn as_ref(&self) -> &Vec<I> {
 		&self.list
 	}
 }

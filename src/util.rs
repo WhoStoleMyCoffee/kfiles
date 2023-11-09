@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::fs;
+use std::fs::{ self, File };
+use std::io::{ self, BufReader, BufRead };
 
 // Idk if there's any builtin methods for this
 pub fn path2string<P>(path: P) -> String
@@ -70,4 +71,11 @@ where P: AsRef<Path> {
 		.filter(|path| !path.is_symlink())
 		.partition(|path| path.is_file())
 	)
+}
+
+
+pub fn read_lines<P>(path: P) -> io::Result<io::Lines<BufReader<File>>>
+where P: AsRef<Path> {
+	let file = File::open(path)?;
+	Ok(BufReader::new(file).lines())
 }

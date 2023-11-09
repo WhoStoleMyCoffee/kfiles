@@ -18,6 +18,7 @@ const SEARCH_PANEL_MARGIN: (u32, u32) = (4, 2);
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPNAME: &str = env!("CARGO_PKG_NAME");
 const CONFIG_PATH: &str = "configs";
+const RECENT_DIRS_FILE_NAME: &str = "recent.txt";
 
 
 fn main() {
@@ -92,6 +93,16 @@ fn main() {
 
 
 
+fn get_recent_dirs_path() -> PathBuf {
+	confy::get_configuration_file_path(APPNAME, None)
+		.unwrap()
+		.parent()
+		.map(|path| path.with_file_name(RECENT_DIRS_FILE_NAME))
+		.unwrap()
+}
+
+
+
 
 fn print_help() {
 	println!(r#"
@@ -133,6 +144,7 @@ Keybinds:
 	Ctrl-c or Alt-F4		Exit the program
 	Enter		Open selected folder, file, or program
 	`		Search favorites (Esc or ` to cancel)
+	Ctrl-o		Search recent directories
 	Ctrl-p		Search files (Esc to cancel)
 	Ctrl-Shift-p		Search folders (Esc to cancel)
 	Ctrl-f		Toggle current directory as favorite
@@ -148,12 +160,59 @@ Keybinds:
 
 #[cfg(test)]
 mod tests {
+    use std::{path::PathBuf, io::Write};
+	use std::fs::File;
+
     use crate::APPNAME;
 
 	#[test]
 	fn test_path() {
-		let config_path = confy::get_configuration_file_path(APPNAME, None);
+		let config_path = confy::get_configuration_file_path(APPNAME, None) .unwrap();
 		dbg!(&config_path);
+
+		let recent_path = config_path.parent()
+			.and_then(|path| Some(path.with_file_name("recent.txt")));
+		dbg!(&recent_path);
 	}
+
+	#[test]
+	fn test_parse() {
+		let path = confy::get_configuration_file_path(APPNAME, None)
+			.unwrap()
+			.parent()
+			.and_then(|path| Some(path.with_file_name("recent.txt")))
+			.unwrap();
+
+		dbg!(&path);
+	}
+
+	#[test]
+	fn test_save_single() {
+		let path: PathBuf = PathBuf::from(r"C:\Users\ddxte\AppData\Roaming\kfiles");
+
+		let bytes = path.as_path().to_str() .unwrap() .as_bytes();
+		
+		let mut file = File::create("foo.txt") .unwrap();
+		file.write_all(bytes) .unwrap();
+	}
+
+	#[test]
+	fn test_save_multiple() {
+		let paths = vec![
+			PathBuf::from(r"C:\Users\ddxte\AppData\Roaming\kfiles"),
+			PathBuf::from(r"C:\Users\ddxte\Documents\Projects\TankInSands\Sounds"),
+			PathBuf::from(r"C:\Users\ddxte\Documents\Apps\Office Chaos"),
+		];
+
+		let bup = paths.iter()
+			.map(|pathbuf| pathbuf.as_path().to_str() )
+			.flatten()
+			.collect::<Vec<&str>>()
+			.join("\n");
+
+		let mut file = File::create("foo.txt") .unwrap();
+		file.write_all( bup.as_bytes() ) .unwrap();
+	}
+
 }
 
