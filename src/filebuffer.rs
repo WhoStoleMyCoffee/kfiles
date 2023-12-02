@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use console_engine::screen::Screen;
 use console_engine::{
 	pixel, Color, KeyCode,
-	KeyEventKind
+	KeyEventKind, KeyModifiers
 };
 use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 
@@ -22,6 +22,7 @@ pub enum BufferState {
 	Normal,
 	QuickSearch(PromptLine), // When using '/' search
     CreateDir(PromptLine),
+    CreateFile(PromptLine),
 	Error(std::io::Error),
 }
 
@@ -217,6 +218,35 @@ impl FileBuffer {
 
                     _ => {},
                 }
+            },
+            
+            BufferState::CreateFile(prompt_line) => {
+                match prompt_line.handle_key_event(event) {
+                    Some(PromptEvent::Cancel(_)) => {
+                        self.state = BufferState::Normal;
+                        self.display_path();
+                    },
+
+                    Some(PromptEvent::Enter(file_name)) => {
+                        let file_name = file_name.clone();
+                        self.state = BufferState::Normal;
+
+                        if let Err(err) = fs::File::create( self.path.join(&file_name) ) {
+                            self.status_text = (format!("Failed to create file: {}", err), Color::Red);
+                        } else {
+                            self.status_text = (format!("Created file \"{}\"", &file_name), Color::White);
+                        }
+
+                        self.load_entries();
+                        self.select( &OsString::from(&file_name) );
+                    },
+
+                    Some(PromptEvent::Input(_)) => {
+                        self.status_text = prompt_line.get_status();
+                    },
+
+                    _ => {},
+                }
             }
 
         }
@@ -246,12 +276,12 @@ impl FileBuffer {
 			// Open
 			KeyEvent { code: KeyCode::Enter, .. } => {
 				self.state = BufferState::Normal;
-				self.open_selected();
                 self.display_path();
+				self.open_selected();
 			},
 
 			// Go back
-			KeyEvent { code: KeyCode::Char('-'), .. } => {
+			KeyEvent { code: KeyCode::Char('-') | KeyCode::Backspace, .. } => {
 				let folder_name: Option<OsString> = self.path.file_name() .map(|s| s.to_os_string());
 				let went_back: bool = self.path.pop();
 				self.display_path();
@@ -295,7 +325,6 @@ impl FileBuffer {
 			// Create folder
 			KeyEvent { code: KeyCode::Char('N'), modifiers, .. }
             if modifiers.bits() == CONTROL_SHIFT => {
-
                 let prompt_line: PromptLine = PromptLine::default()
                     .with_prefix("Create folder: ");
                 self.status_text = prompt_line.get_status();
@@ -303,8 +332,11 @@ impl FileBuffer {
 			}
 
 			// Create file
-			KeyEvent { code: KeyCode::Char('N'), .. } => {
-                println!("Create file!");
+			KeyEvent { code: KeyCode::Char('n'), modifiers: KeyModifiers::CONTROL, .. } => {
+                let prompt_line: PromptLine = PromptLine::default()
+                    .with_prefix("Create file: ");
+                self.status_text = prompt_line.get_status();
+                self.state = BufferState::CreateFile(prompt_line);
 			}
 
 			_ => {},
