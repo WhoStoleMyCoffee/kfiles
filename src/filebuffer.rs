@@ -19,7 +19,7 @@ use crate::util;
 #[derive(Debug)]
 pub enum BufferState {
 	Normal,
-	QuickSearch(String), // When using '/' search
+	QuickSearch(PromptLine), // When using '/' search
 	Error(std::io::Error),
 }
 
@@ -61,17 +61,8 @@ impl FileBuffer {
 		self.scroll = 0;
 	}
 
-	pub fn update_status_text(&mut self) {
-		match &self.state {
-			BufferState::Normal => {
-				self.status_text = ( self.path.display().to_string(), Color::White );
-			},
-			BufferState::QuickSearch(pattern) => {
-				let col: Color = Color::from( self.cfg.borrow().special_color );
-				self.status_text = ( format!("Searching for: {}", pattern), col );
-			},
-			_ => {},
-		}
+	pub fn display_path(&mut self) {
+        self.status_text = ( self.path.display().to_string(), Color::White );
 	}
 
 	// Sets the path
@@ -80,7 +71,7 @@ impl FileBuffer {
 		self.path = PathBuf::from(path);
 		self.load_entries();
 		self.state = BufferState::Normal;
-		self.update_status_text();
+		self.display_path();
 	}
 
 	pub fn select(&mut self, file_name: &OsStr) {
@@ -94,10 +85,11 @@ impl FileBuffer {
 		self.entries.get(self.selected_index)
 	}
 
-	fn open_selected(&mut self) {
+    // Returns whether it was a valid directory
+	fn open_selected(&mut self) -> bool {
 		let pathbuf: &PathBuf = match self.entries.get(self.selected_index) {
 			Some(p) => p,
-			None => return,
+			None => return false,
 		};
 
 		if pathbuf.is_file() {
@@ -105,11 +97,13 @@ impl FileBuffer {
 				self.status_text = ( String::from("Could not open file. Revealing in file explorer instead"), Color::Red );
 				let _ = opener::reveal(pathbuf);
 			}
+            return false;
 		} else if pathbuf.is_dir() {
 			self.path.push( pathbuf.file_name().unwrap_or_default() );
 			self.load_entries();
-			self.update_status_text();
+            return true;
 		}
+        false
 	}
 
 	pub fn reveal(&self) -> Result<(), opener::OpenError> {
@@ -118,59 +112,6 @@ impl FileBuffer {
 		} else {
 			opener::open(&self.path)
 		}
-	}
-
-	// Returns whether the state was QuickSearch. Aaaa why
-	pub fn quicksearch_handle_key_event(&mut self, event: KeyEvent) -> bool {
-		let pattern = match &mut self.state {
-			BufferState::QuickSearch(p) => p,
-			_ => return false,
-		};
-
-		match event {
-			// Exit quick search
-			KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press, .. } => {
-				self.state = BufferState::Normal;
-				self.update_status_text();
-				return true;
-			},
-
-			// Enter to open
-			KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } => {
-				pattern.clear();
-				self.open_selected();
-				return true;
-			},
-
-			// Backspace to delete char
-			KeyEvent { code: KeyCode::Backspace, kind: KeyEventKind::Press, .. } => {
-				pattern.pop();
-			},
-
-			// Add char and update
-			KeyEvent { code: KeyCode::Char(ch), kind: KeyEventKind::Press, ..  } => {
-				pattern.push(ch);
-			},
-
-			_ => {},
-		}
-
-		// Search
-		let pattern_lowercase: String = pattern.to_lowercase();
-		for (i, pathbuf) in self.entries.iter().enumerate() {
-			let file_name = pathbuf.file_name()
-				.and_then(|osstr| osstr.to_str()) .unwrap_or_default()
-				.to_ascii_lowercase();
-
-			if file_name.starts_with(&pattern_lowercase) {
-				self.selected_index = i;
-				break;
-			}
-		}
-
-		self.update_scroll();
-		self.update_status_text();
-		true
 	}
 
 	pub fn handle_mouse_event(&mut self, event: MouseEvent) {
@@ -198,14 +139,65 @@ impl FileBuffer {
 	}
 
 	pub fn handle_key_event(&mut self, event: KeyEvent) {
-		// Quick search
-		let is_quicksearch_wait_why_did_i_do_this_again_god_theres_gotta_be_a_better_way_to_do_this: bool = self.quicksearch_handle_key_event(event);
-		if is_quicksearch_wait_why_did_i_do_this_again_god_theres_gotta_be_a_better_way_to_do_this { return; }
+        match &mut self.state {
+            BufferState::Normal => self.handle_normal_mode_event(event),
+
+            BufferState::Error(err) => {
+				self.status_text = ( format!("Error: {}", err), Color::Red );
+            },
+
+            BufferState::QuickSearch(prompt_line) => {
+                let prompt_event: PromptEvent<'_> = if let Some(e) = prompt_line.handle_key_event(event) { e } else { return };
+                match prompt_event {
+                    PromptEvent::Cancel(_) => {
+                        self.state = BufferState::Normal;
+                        self.display_path();
+                    },
+
+                    PromptEvent::Enter(_) => {
+                        prompt_line.clear();
+                        self.status_text = ( prompt_line.get_text(), prompt_line.color );
+                        let valid_dir: bool = self.open_selected();
+
+                        if !valid_dir {
+                            self.state = BufferState::Normal;
+                            self.display_path();
+                        }
+                    },
+
+                    // Search
+                    PromptEvent::Input(pattern) => {
+                        if pattern.is_empty() { return; }
+
+                        let pattern_lowercase: String = pattern.to_lowercase();
+                        for (i, pathbuf) in self.entries.iter().enumerate() {
+                            let file_name: String = pathbuf.file_name()
+                                .and_then(|osstr| osstr.to_str()). unwrap_or_default()
+                                .to_ascii_lowercase();
+
+                            if file_name.starts_with(&pattern_lowercase) {
+                                self.selected_index = i;
+                                break;
+                            }
+                        }
+
+                        self.status_text = ( prompt_line.get_text(), prompt_line.color );
+                        self.update_scroll();
+                    },
+
+                    _ => {},
+                }
+            },
+        }
+    }
+
+    fn handle_normal_mode_event(&mut self, event: KeyEvent) {
+        if event.kind != KeyEventKind::Press { return; }
 
 		// Normal mode
 		match event {
 			// Move cursor up
-			KeyEvent { code: KeyCode::Char('k') | KeyCode::Up, kind: KeyEventKind::Press, .. } => {
+			KeyEvent { code: KeyCode::Char('k') | KeyCode::Up, .. } => {
 				let len: usize = self.entries.len();
 				if len == 0 { return; }
 				self.selected_index = self.selected_index.checked_sub(1) .unwrap_or(len - 1);
@@ -213,7 +205,7 @@ impl FileBuffer {
 			},
 
 			// Move cursor down
-			KeyEvent { code: KeyCode::Char('j') | KeyCode::Down, kind: KeyEventKind::Press, .. } => {
+			KeyEvent { code: KeyCode::Char('j') | KeyCode::Down, .. } => {
 				let len: usize = self.entries.len();
 				if len == 0 { return; }
 				self.selected_index = (self.selected_index + 1) % len;
@@ -221,16 +213,17 @@ impl FileBuffer {
 			},
 
 			// Open
-			KeyEvent { code: KeyCode::Enter, kind: KeyEventKind::Press, .. } => {
+			KeyEvent { code: KeyCode::Enter, .. } => {
 				self.state = BufferState::Normal;
 				self.open_selected();
+                self.display_path();
 			},
 
 			// Go back
-			KeyEvent { code: KeyCode::Char('-'), kind: KeyEventKind::Press, .. } => {
+			KeyEvent { code: KeyCode::Char('-'), .. } => {
 				let folder_name: Option<OsString> = self.path.file_name() .map(|s| s.to_os_string());
 				let went_back: bool = self.path.pop();
-				self.update_status_text();
+				self.display_path();
 				if went_back {
 					self.state = BufferState::Normal;
 					self.load_entries();
@@ -242,7 +235,7 @@ impl FileBuffer {
 			},
 
 			// Jump to start
-			KeyEvent { code: KeyCode::Char('g'), kind: KeyEventKind::Press, .. } => {
+			KeyEvent { code: KeyCode::Char('g'), .. } => {
 				let len: usize = self.entries.len();
 				if len == 0 { return; }
 				self.selected_index = 0;
@@ -250,7 +243,7 @@ impl FileBuffer {
 			}
 
 			// Jump to end
-			KeyEvent { code: KeyCode::Char('G'), kind: KeyEventKind::Press, .. } => {
+			KeyEvent { code: KeyCode::Char('G'), .. } => {
 				let len: usize = self.entries.len();
 				if len == 0 { return; }
 				self.selected_index = len - 1;
@@ -258,9 +251,14 @@ impl FileBuffer {
 			}
 
 			// Start quick search
-			KeyEvent { code: KeyCode::Char('/'), kind : KeyEventKind::Press, .. } => {
+			KeyEvent { code: KeyCode::Char('/') | KeyCode::Char(';'), .. } => {
 				if self.entries.is_empty() { return; }
-				self.state = BufferState::QuickSearch( String::new() );
+
+                let prompt_line: PromptLine = PromptLine::default()
+                        .with_color( Color::from(self.cfg.borrow().special_color) )
+                        .with_prefix("Searching for: ");
+                self.status_text = ( prompt_line.get_text(), prompt_line.color );
+				self.state = BufferState::QuickSearch(prompt_line);
 			},
 
 			_ => {},
@@ -331,3 +329,87 @@ impl FileBuffer {
 	}
 }
 
+
+
+
+
+pub enum PromptEvent<'a> {
+    Input(&'a String),
+    Enter(&'a String),
+    Cancel(&'a String),
+    Error,
+}
+
+
+#[derive(Debug)]
+pub struct PromptLine {
+    pub color: Color,
+    pub prefix: String,
+    pub input: String,
+}
+
+impl PromptLine {
+    pub fn with_color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
+    pub fn with_prefix(mut self, prefix: &str) -> Self {
+        self.prefix = prefix.to_string();
+        self
+    }
+
+    pub fn with_initial_text(mut self, initial_text: &str) -> Self {
+        self.input = initial_text.to_string();
+        self
+    }
+
+    pub fn handle_key_event(&mut self, event: KeyEvent) -> Option<PromptEvent> {
+        if event.kind != KeyEventKind::Press {
+            return None;
+        }
+
+        match event {
+            // Exit
+            KeyEvent { code: KeyCode::Esc, .. } => Some(PromptEvent::Cancel( &self.input )),
+            // Enter
+            KeyEvent { code: KeyCode::Enter, .. } => Some(PromptEvent::Enter( &self.input )),
+            // Backspace
+            KeyEvent { code: KeyCode::Backspace, .. } => {
+                self.input.pop();
+                Some(PromptEvent::Input( &self.input ))
+            },
+
+            // Write char
+            KeyEvent { code: KeyCode::Char(ch), .. } => {
+                self.input.push(ch);
+                Some(PromptEvent::Input( &self.input ))
+            },
+
+            _ => None,
+        }
+    }
+
+    pub fn validate_with() {
+        todo!()
+    }
+
+    pub fn get_text(&self) -> String {
+        format!("{}{}", self.prefix, self.input)
+    }
+
+    pub fn clear(&mut self) {
+        self.input.clear();
+    }
+
+}
+
+impl Default for PromptLine {
+    fn default() -> Self {
+        Self {
+            color: Color::White,
+            prefix: String::new(),
+            input: String::new(),
+        }
+    }
+}
