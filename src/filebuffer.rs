@@ -1,4 +1,5 @@
 use std::ffi::{OsStr, OsString};
+use std::fs;
 use std::path::{ PathBuf, Path };
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -11,7 +12,7 @@ use console_engine::{
 use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 
 use crate::config::Configs;
-use crate::util;
+use crate::{util, CONTROL_SHIFT};
 
 
 
@@ -20,6 +21,7 @@ use crate::util;
 pub enum BufferState {
 	Normal,
 	QuickSearch(PromptLine), // When using '/' search
+    CreateDir(PromptLine),
 	Error(std::io::Error),
 }
 
@@ -147,14 +149,13 @@ impl FileBuffer {
             },
 
             BufferState::QuickSearch(prompt_line) => {
-                let prompt_event: PromptEvent<'_> = if let Some(e) = prompt_line.handle_key_event(event) { e } else { return };
-                match prompt_event {
-                    PromptEvent::Cancel(_) => {
+                match prompt_line.handle_key_event(event) {
+                    Some(PromptEvent::Cancel(_)) => {
                         self.state = BufferState::Normal;
                         self.display_path();
                     },
 
-                    PromptEvent::Enter(_) => {
+                    Some(PromptEvent::Enter(_)) => {
                         prompt_line.clear();
                         self.status_text = ( prompt_line.get_text(), prompt_line.color );
                         let valid_dir: bool = self.open_selected();
@@ -166,7 +167,7 @@ impl FileBuffer {
                     },
 
                     // Search
-                    PromptEvent::Input(pattern) => {
+                    Some(PromptEvent::Input(pattern)) => {
                         if pattern.is_empty() { return; }
 
                         let pattern_lowercase: String = pattern.to_lowercase();
@@ -188,6 +189,36 @@ impl FileBuffer {
                     _ => {},
                 }
             },
+
+            BufferState::CreateDir(prompt_line) => {
+                match prompt_line.handle_key_event(event) {
+                    Some(PromptEvent::Cancel(_)) => {
+                        self.state = BufferState::Normal;
+                        self.display_path();
+                    },
+
+                    Some(PromptEvent::Enter(dir_name)) => {
+                        let dir_name = dir_name.clone();
+                        self.state = BufferState::Normal;
+
+                        if let Err(err) = fs::create_dir_all( &self.path.join(&dir_name) ) {
+                            self.status_text = (format!("Failed to create folder: {}", err), Color::Red);
+                        } else {
+                            self.status_text = (format!("Created folder \"{}\"", &dir_name), Color::White);
+                        }
+
+                        self.load_entries();
+                        self.select( &OsString::from(&dir_name) );
+                    },
+
+                    Some(PromptEvent::Input(_)) => {
+                        self.status_text = prompt_line.get_status();
+                    },
+
+                    _ => {},
+                }
+            }
+
         }
     }
 
@@ -260,6 +291,21 @@ impl FileBuffer {
                 self.status_text = ( prompt_line.get_text(), prompt_line.color );
 				self.state = BufferState::QuickSearch(prompt_line);
 			},
+
+			// Create folder
+			KeyEvent { code: KeyCode::Char('N'), modifiers, .. }
+            if modifiers.bits() == CONTROL_SHIFT => {
+
+                let prompt_line: PromptLine = PromptLine::default()
+                    .with_prefix("Create folder: ");
+                self.status_text = prompt_line.get_status();
+                self.state = BufferState::CreateDir(prompt_line);
+			}
+
+			// Create file
+			KeyEvent { code: KeyCode::Char('N'), .. } => {
+                println!("Create file!");
+			}
 
 			_ => {},
 		}
@@ -400,6 +446,10 @@ impl PromptLine {
 
     pub fn clear(&mut self) {
         self.input.clear();
+    }
+
+    pub fn get_status(&self) -> (String, Color) {
+        (self.get_text(), self.color)
     }
 
 }

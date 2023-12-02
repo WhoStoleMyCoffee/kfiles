@@ -3,6 +3,7 @@ use std::env;
 
 use confy::ConfyError;
 use clean_path::Clean;
+use console_engine::KeyModifiers;
 
 pub mod util;
 pub mod app;
@@ -19,6 +20,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPNAME: &str = env!("CARGO_PKG_NAME");
 const CONFIG_PATH: &str = "configs";
 const RECENT_DIRS_FILE_NAME: &str = "recent.txt";
+
+const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits();
 
 
 fn main() {

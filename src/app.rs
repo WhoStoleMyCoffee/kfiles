@@ -19,7 +19,7 @@ use crate::filebuffer::{FileBuffer, BufferState};
 use crate::search::{SearchPanel, SearchQueryMode, SearchPanelState};
 use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH, get_recent_dirs_path };
 
-const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits();
+use crate::CONTROL_SHIFT;
 
 
 
