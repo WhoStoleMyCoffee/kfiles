@@ -8,7 +8,7 @@ where P: AsRef<Path> {
 	String::from( path.as_ref() .to_string_lossy() )
 }
 
-pub fn file_name(pathbuf: &PathBuf) -> String {
+pub fn file_name(pathbuf: &Path) -> String {
     path2string(pathbuf.file_name().unwrap_or_default())
 }
 

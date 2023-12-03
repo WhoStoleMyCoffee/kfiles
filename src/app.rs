@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::fs::File;
 use std::io::Write;
 use std::path::{PathBuf, Path};
@@ -15,7 +16,7 @@ use console_engine::{events::Event, crossterm::event::KeyEvent};
 
 use crate::util::{path2string, read_lines};
 use crate::config::{Configs, RecentList};
-use crate::filebuffer::{FileBuffer, BufferState};
+use crate::filebuffer::{FileBuffer, StatusLineState, StatusLine};
 use crate::search::{SearchPanel, SearchQueryMode, SearchPanelState};
 use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH, get_recent_dirs_path };
 
@@ -41,9 +42,12 @@ fn load_recent_list(path: &Path, max_count: usize) -> RecentList<PathBuf> {
 
 
 
+#[derive(Debug)]
 pub enum AppError {
 	ConfigError(confy::ConfyError),
-	EngineError(ErrorKind)
+	EngineError(ErrorKind),
+    OpenError(opener::OpenError),
+    Other(String),
 }
 
 impl From<confy::ConfyError> for AppError {
@@ -56,6 +60,29 @@ impl From<ErrorKind> for AppError {
 	fn from(value: ErrorKind) -> Self {
 		Self::EngineError(value)
 	}
+}
+
+impl From<&str> for AppError {
+    fn from(value: &str) -> Self {
+        Self::Other(value.to_string())
+    }
+}
+
+impl From<opener::OpenError> for AppError {
+    fn from(value: opener::OpenError) -> Self {
+        Self::OpenError(value)
+    }
+}
+
+impl Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConfigError(err) => err.fmt(f),
+            Self::EngineError(err) => err.fmt(f),
+            Self::OpenError(err) => err.fmt(f),
+            Self::Other(str) => write!(f, "{}", str),
+        }
+    }
 }
 
 
@@ -123,7 +150,7 @@ impl App {
 			engine,
 			file_buffer,
 			search_panel: None,
-			recent_files: load_recent_list(&get_recent_dirs_path(), max_recent_count),
+			recent_files: load_recent_list(&get_recent_dirs_path()?, max_recent_count),
 		})
 	}
 
@@ -151,8 +178,15 @@ impl App {
 
 				self.engine.print_fbg(0, 0, "Ctrl-c to exit, run with --help for help", Color::DarkGrey, bg_color);
 
-				let status_line = &self.file_buffer.status_line;
-				self.engine.print_fbg(0, self.engine.get_height() as i32 - 1, &status_line.text, status_line.color, bg_color );
+				let status_line: &StatusLine = &self.file_buffer.status_line;
+                let text: String = status_line.to_string();
+				self.engine.print_fbg(
+                    0,
+                    self.engine.get_height() as i32 - text.lines().count() as i32,
+                    &text,
+                    status_line.color,
+                    bg_color
+                );
 
 				self.engine.draw();
 			},
@@ -257,8 +291,9 @@ impl App {
 			}) => {
 				if self.search_panel.is_some() { return AppState::Running; }
 
-				self.file_buffer.state = BufferState::Normal;
+				self.file_buffer.set_state(StatusLineState::Normal);
 				let added: bool = self.cfg.borrow_mut() .toggle_favorite( self.file_buffer.path.clone() );
+
 				if let Err(err) = confy::store(APPNAME, Some(CONFIG_PATH), self.cfg.as_ref() ) {
 					self.file_buffer.status_line.set_text( &format!("Error saving configs: {}", err) )
                         .set_color(Color::Red);
@@ -269,7 +304,7 @@ impl App {
 			},
 
 			// Open / close favorites with `
-			Event::Key(KeyEvent { code: KeyCode::Char('`'), kind: KeyEventKind::Press, ..  }) => {
+			Event::Key(KeyEvent { code: KeyCode::Char('`') | KeyCode::Tab, kind: KeyEventKind::Press, ..  }) => {
 				// If already open in favorites mode, close
 				if let Some(panel) = &self.search_panel {
 					if let SearchQueryMode::List(_) = panel.get_query_mode() {
@@ -375,7 +410,8 @@ impl Drop for App {
 			.collect::<Vec<&str>>()
 			.join("\n");
 
-		let mut file = File::create( get_recent_dirs_path() ) .unwrap();
+        let recent_dir: PathBuf = if let Ok(p) = get_recent_dirs_path() { p } else { return; };
+		let mut file = File::create(recent_dir) .unwrap();
 		file.write_all( bup.as_bytes() ) .unwrap();
 	}
 }

@@ -69,7 +69,7 @@ fn main() {
 
 		// General config error
 		Err(AppError::ConfigError(err)) => {
-			println!("Error while loading configs:\n    {:?}", err);
+			println!("Error while loading configs:\n    {}", err);
 			return;
 		},
 		
@@ -78,6 +78,16 @@ fn main() {
 			println!("Error creating console engine: {}", err);
 			return;
 		},
+
+        Err(AppError::OpenError(err)) => {
+            println!("Error opening: {}", err);
+            return;
+        },
+
+        Err(AppError::Other(s)) => {
+            println!("Error: {}", s);
+            return;
+        },
 	};
 
 	// MAIN LOOP ----------------------------------------------------------------------------
@@ -86,7 +96,7 @@ fn main() {
 
 		if let app::AppState::Exit(exit_path) = state {
 			if let Some(path) = exit_path {
-				env::set_current_dir(path) .unwrap(); // TODO why no work. eh?
+				let _ = env::set_current_dir(path); // TODO why no work. eh?
 			}
 			break;
 		}
@@ -96,12 +106,13 @@ fn main() {
 
 
 
-fn get_recent_dirs_path() -> PathBuf {
+fn get_recent_dirs_path() -> Result<PathBuf, AppError> {
 	confy::get_configuration_file_path(APPNAME, None)
+        .map_err(AppError::from)
 		.unwrap()
 		.parent()
 		.map(|path| path.with_file_name(RECENT_DIRS_FILE_NAME))
-		.unwrap()
+        .ok_or("Failed to load recent directories".into())
 }
 
 
@@ -109,7 +120,7 @@ fn get_recent_dirs_path() -> PathBuf {
 
 fn print_help() {
 	println!(r#"
-{APPNAME} v{VERSION}
+Thank you for using {APPNAME} v{VERSION}
 
 Usage:
 	kfiles		Run the program at the default directory
@@ -127,6 +138,7 @@ Configs:
 You can find your config file at {}
 	scroll_margin		Minimum spacing between cursor and edge
 	max_search_stack	How "deep" to search in search panel
+    max_recent_count    How many directories to keep track of in the recent list
 	favorites		List of favorite directories
 	default_dir		Default directory when the program is run
 	target_fps		The frames per second to run the program at
@@ -142,17 +154,27 @@ You can find your config file at {}
 
 	println!(r#"
 Keybinds:
-	j, down arrow		Move cursor down
-	k, up arrow		Move cursor up
+    Navigation:
+	j or down arrow		Move cursor down
+	k or up arrow		Move cursor up
 	Ctrl-c or Alt-F4		Exit the program
 	Enter		Open selected folder, file, or program
-	`		Search favorites (Esc or ` to cancel)
+	` or Tab		Search favorites (Esc or ` to cancel)
+    / or ;      Quick search
+    g and G     Jump to the start and end of the list
+    - or Backspace      Go back
+
+    Other:
 	Ctrl-o		Search recent directories
 	Ctrl-p		Search files (Esc to cancel)
 	Ctrl-Shift-p		Search folders (Esc to cancel)
 	Ctrl-f		Toggle current directory as favorite
 	Ctrl-e		Reveal current directory in default file explorer
 	Ctrl-Shift-e		Reveal current directory in default file explorer and exit KFiles
+    Ctrl-n      Create file
+    Ctrl-Shift-n      Create folder
+    Ctrl-d      Delete file / folder
+    Ctrl-r      Rename file / folder
 
     When in search panel:
 	up and down arrows		Move cursor
