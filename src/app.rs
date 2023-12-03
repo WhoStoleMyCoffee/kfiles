@@ -151,8 +151,8 @@ impl App {
 
 				self.engine.print_fbg(0, 0, "Ctrl-c to exit, run with --help for help", Color::DarkGrey, bg_color);
 
-				let (status_text, fg) = &self.file_buffer.status_text;
-				self.engine.print_fbg(0, self.engine.get_height() as i32 - 1, status_text, *fg, bg_color );
+				let status_line = &self.file_buffer.status_line;
+				self.engine.print_fbg(0, self.engine.get_height() as i32 - 1, &status_line.text, status_line.color, bg_color );
 
 				self.engine.draw();
 			},
@@ -260,15 +260,11 @@ impl App {
 				self.file_buffer.state = BufferState::Normal;
 				let added: bool = self.cfg.borrow_mut() .toggle_favorite( self.file_buffer.path.clone() );
 				if let Err(err) = confy::store(APPNAME, Some(CONFIG_PATH), self.cfg.as_ref() ) {
-					self.file_buffer.status_text = (
-						format!("Error saving configs: {}", err),
-						Color::Red
-					);
+					self.file_buffer.status_line.set_text( &format!("Error saving configs: {}", err) )
+                        .set_color(Color::Red);
 				} else {
-					self.file_buffer.status_text = (
-						if added { String::from("Added path to favorites") } else { String::from("Removed path from favorites") },
-						Color::from( self.cfg.borrow().special_color )
-					);
+					self.file_buffer.status_line.set_text( if added { "Added path to favorites" } else { "Removed path from favorites" } )
+                        .set_color_as(self.cfg.borrow().special_color);
 				}
 			},
 
@@ -300,7 +296,8 @@ impl App {
 				// Try to update search panel first
 				if self.search_panel.is_some() {
 					if let Err(err) = self.searchpanel_handle_key_event(key_event) {
-						self.file_buffer.status_text = ( format!("Error opening: {}", err), Color::Red );
+						self.file_buffer.status_line.set_text( &format!("Error opening: {}", err) )
+                            .set_color(Color::Red);
 					}
 
 				// File buffer

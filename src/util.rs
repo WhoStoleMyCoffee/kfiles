@@ -8,6 +8,10 @@ where P: AsRef<Path> {
 	String::from( path.as_ref() .to_string_lossy() )
 }
 
+pub fn file_name(pathbuf: &PathBuf) -> String {
+    path2string(pathbuf.file_name().unwrap_or_default())
+}
+
 // Get files & folders and have folders come before files (ofc, alphabetically sorted)
 pub fn get_at_sorted<P>(path: P) -> Result<Vec<PathBuf>, std::io::Error>
 where P: AsRef<Path> {
