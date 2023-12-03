@@ -177,16 +177,7 @@ impl App {
 				}
 
 				self.engine.print_fbg(0, 0, "Ctrl-c to exit, run with --help for help", Color::DarkGrey, bg_color);
-
-				let status_line: &StatusLine = &self.file_buffer.status_line;
-                let text: String = status_line.to_string();
-				self.engine.print_fbg(
-                    0,
-                    self.engine.get_height() as i32 - text.lines().count() as i32,
-                    &text,
-                    status_line.color,
-                    bg_color
-                );
+				self.file_buffer.status_line .draw(&mut self.engine, bg_color);
 
 				self.engine.draw();
 			},

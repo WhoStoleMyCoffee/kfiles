@@ -8,7 +8,7 @@ use std::ops::Deref;
 use console_engine::screen::Screen;
 use console_engine::{
 	pixel, Color, KeyCode,
-	KeyEventKind, KeyModifiers
+	KeyEventKind, KeyModifiers, ConsoleEngine
 };
 use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 
@@ -537,6 +537,45 @@ impl StatusLine {
         self.text = prefix.unwrap_or("Error: \n").to_string();
         self
     }
+
+    pub fn draw(&self, engine: &mut ConsoleEngine, bg_color: Color) {
+        let text: String = self.to_string();
+
+        use StatusLineState as S;
+        let prompt_line: &PromptLine = match &self.state {
+            S::QuickSearch(pl) | S::CreateFile(pl) | S::CreateDir(pl) | S::Delete(pl) | S::Rename(pl) => &pl,
+            _ => {
+                engine.print_fbg(
+                    0,
+                    engine.get_height() as i32 - text.lines().count() as i32,
+                    &text,
+                    self.color,
+                    bg_color
+                    );
+                return;
+            },
+        };
+
+        // Draw prompt line
+        engine.print_fbg(
+            0,
+            engine.get_height() as i32 - 1,
+            &text,
+            self.color,
+            bg_color
+            );
+        
+        let i: i32 = prompt_line.cursor_pos as i32;
+        let ch: &str = prompt_line.get(i as usize..i as usize+1) .unwrap_or(" ");
+        engine.print_fbg(
+            i + self.text.len() as i32,
+            engine.get_height() as i32 - 1,
+            ch,
+            Color::Black,
+            Color::White
+            )
+
+    }
 }
 
 impl ToString for StatusLine {
@@ -563,12 +602,14 @@ pub enum PromptEvent {
 #[derive(Debug, Default)]
 pub struct PromptLine {
     pub input: String,
+    pub cursor_pos: usize,
 }
 
 impl PromptLine {
     pub fn new(initial_text: &str) -> Self {
         Self {
             input: initial_text.to_string(),
+            cursor_pos: 0,
         }
     }
 
@@ -577,29 +618,44 @@ impl PromptLine {
             return None;
         }
 
-        match event {
+        match event.code {
             // Exit
-            KeyEvent { code: KeyCode::Esc, .. } => Some(PromptEvent::Cancel( self.input.clone() )),
+            KeyCode::Esc => return Some(PromptEvent::Cancel( self.input.clone() )),
             // Enter
-            KeyEvent { code: KeyCode::Enter, .. } => Some(PromptEvent::Enter( self.input.clone() )),
+            KeyCode::Enter => return Some(PromptEvent::Enter( self.input.clone() )),
             // Backspace
-            KeyEvent { code: KeyCode::Backspace, .. } => {
+            KeyCode::Backspace => {
                 self.input.pop();
-                Some(PromptEvent::Input( self.input.clone() ))
+                self.move_cursor(-1);
+                return Some(PromptEvent::Input( self.input.clone() ))
             },
+
+            KeyCode::Left => self.move_cursor(-1),
+            KeyCode::Right => self.move_cursor(1),
+            KeyCode::Home => self.move_cursor(i32::MIN),
+            KeyCode::End => self.move_cursor(i32::MAX),
 
             // Write char
-            KeyEvent { code: KeyCode::Char(ch), .. } => {
+            KeyCode::Char(ch) => {
                 self.input.push(ch);
-                Some(PromptEvent::Input( self.input.clone() ))
+                self.move_cursor(1);
+                return Some(PromptEvent::Input( self.input.clone() ))
             },
 
-            _ => None,
+            _ => (),
         }
+
+        return None;
+    }
+
+    pub fn move_cursor(&mut self, amt: i32) {
+        self.cursor_pos = (self.cursor_pos as i64 + amt as i64)
+            .clamp(0, self.input.len() as i64) as usize;
     }
 
     pub fn clear(&mut self) {
         self.input.clear();
+        self.move_cursor(i32::MIN);
     }
 }
 
