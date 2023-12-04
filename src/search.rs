@@ -155,7 +155,7 @@ impl SearchPanel {
 
 	pub fn update(&mut self) {
 		self.query.update();
-		self.selected_index = self.selected_index.clamp(0, self.get_results().len());
+		self.selected_index = self.selected_index.min(self.get_results().len().max(1) - 1);
 	}
 
 	pub fn is_running(&self) -> bool {
@@ -178,7 +178,7 @@ impl SearchPanel {
 		} = event {
 			let offset: u16 = y_offset + 4;
 			let urow: u16 = row.max(offset) - offset;
-			self.selected_index = (urow as usize).min(self.get_results().len() - 1);
+			self.selected_index = (urow as usize).min(self.get_results().len().max(1) - 1);
 		}
 	}
 
@@ -190,8 +190,8 @@ impl SearchPanel {
 			// Move cursor up
 			KeyEvent { code: KeyCode::Up, .. } => {
 				self.selected_index = self.selected_index.checked_sub(1)
-					.unwrap_or(self.get_results().len() - 1);
-				// self.update_scroll();
+					.or_else(|| self.get_results().len() .checked_sub(1))
+                    .unwrap_or_default();
 				return;
 			},
 
@@ -200,7 +200,6 @@ impl SearchPanel {
 				let len: usize = self.get_results().len();
 				if len == 0 { return; }
 				self.selected_index = (self.selected_index + 1) % len;
-				// self.update_scroll();
 				return;
 			},
 

@@ -16,7 +16,7 @@ use console_engine::{events::Event, crossterm::event::KeyEvent};
 
 use crate::util::{path2string, read_lines};
 use crate::config::{Configs, RecentList};
-use crate::filebuffer::{FileBuffer, StatusLineState, StatusLine};
+use crate::filebuffer::{FileBuffer, StatusLineState};
 use crate::search::{SearchPanel, SearchQueryMode, SearchPanelState};
 use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH, get_recent_dirs_path };
 
@@ -134,7 +134,7 @@ impl App {
 	pub fn new(run_arg: RunArg) -> Result<Self, AppError> {
 		let cfg: Rc<RefCell<Configs>> = Rc::new(RefCell::new( confy::load(APPNAME, Some(CONFIG_PATH))? ));
 		let run_path: PathBuf = run_arg.get_run_path(&cfg);
-		let engine: ConsoleEngine = ConsoleEngine::init_fill( cfg.borrow().target_fps )?;
+		let engine: ConsoleEngine = ConsoleEngine::init_fill( cfg.borrow().update_rate )?;
 
 		// Initialize file buffer
 		let mut file_buffer = FileBuffer::new(
@@ -396,13 +396,13 @@ impl App {
 impl Drop for App {
 	fn drop(&mut self) {
 		self.add_current_to_recent();
-		let bup = self.recent_files.iter()
+		let baba_booey = self.recent_files.iter()
 			.filter_map(|pathbuf| pathbuf.as_path().to_str() )
 			.collect::<Vec<&str>>()
 			.join("\n");
 
         let recent_dir: PathBuf = if let Ok(p) = get_recent_dirs_path() { p } else { return; };
-		let mut file = File::create(recent_dir) .unwrap();
-		file.write_all( bup.as_bytes() ) .unwrap();
+		let mut file = File::create(recent_dir) .expect("Failed to create recent dirs file");
+		file.write_all( baba_booey.as_bytes() ) .expect("Failed to write to recent dirs file");
 	}
 }

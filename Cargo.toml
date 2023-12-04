@@ -12,3 +12,7 @@ confy = "0.5.1"
 serde = { version = "1.0.183", features = ["derive"] }
 directories = "5.0.1"
 clean-path = "0.2.1"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"

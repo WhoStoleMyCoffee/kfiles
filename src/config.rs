@@ -13,7 +13,7 @@ pub struct Configs {
 	pub max_search_stack: usize,
 	pub favorites: Vec<PathBuf>,
 	pub default_path: PathBuf,
-	pub target_fps: u32,
+	pub update_rate: u32,
 	pub search_ignore_types: String,
 
 	pub max_recent_count: usize,
@@ -35,14 +35,14 @@ impl Default for Configs {
 			max_search_stack: 512,
 			favorites: vec![ PathBuf::from(home_dir) ],
 			default_path: PathBuf::from(home_dir),
-			target_fps: 10,
+			update_rate: 12,
 			search_ignore_types: String::new(),
-			max_recent_count: 16,
+			max_recent_count: 64,
 
-			folder_color: ( 105, 250, 255 ),
-			file_color: (248, 242, 250),
-			special_color: (255, 209, 84),
-			bg_color: (21, 17, 23),
+			folder_color: ( 255, 209, 84 ),
+			file_color: ( 206, 217, 214 ),
+			special_color: ( 110, 209, 255 ),
+			bg_color: ( 35, 47, 54 ),
 		}
 	}
 }

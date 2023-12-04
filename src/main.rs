@@ -39,6 +39,7 @@ fn main() {
 					Some(arg) => arg,
 					None => {
 						println!("Error: Invalid syntax for --favorites. Expected field <query>\n Syntax: \t --favorites, -f <query>");
+                        pause(true);
 						return;
 					},
 				})
@@ -60,34 +61,39 @@ fn main() {
 
 		// Wrong config format
 		Err(AppError::ConfigError(ConfyError::BadTomlData(err))) => {
-			println!("Error while loading configs:\n    {}", err);
+			println!("Error while loading configs:\n	{}", err);
 			if let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {
-				println!("You can find your config file at {}", p.display());
+				println!("Tip: You can find your config file at {}", p.display());
 			}
+            pause(true);
 			return;
 		},
 
 		// General config error
 		Err(AppError::ConfigError(err)) => {
-			println!("Error while loading configs:\n    {}", err);
+			println!("Error while loading configs:\n	{}", err);
+            pause(false);
 			return;
 		},
 		
 		// Engine init error
 		Err(AppError::EngineError(err)) => {
 			println!("Error creating console engine: {}", err);
+            pause(false);
 			return;
 		},
 
-        Err(AppError::OpenError(err)) => {
-            println!("Error opening: {}", err);
-            return;
-        },
+		Err(AppError::OpenError(err)) => {
+			println!("Error opening: {}", err);
+            pause(false);
+			return;
+		},
 
-        Err(AppError::Other(s)) => {
-            println!("Error: {}", s);
-            return;
-        },
+		Err(AppError::Other(s)) => {
+			println!("Error: {}", s);
+            pause(false);
+			return;
+		},
 	};
 
 	// MAIN LOOP ----------------------------------------------------------------------------
@@ -108,11 +114,20 @@ fn main() {
 
 fn get_recent_dirs_path() -> Result<PathBuf, AppError> {
 	confy::get_configuration_file_path(APPNAME, None)
-        .map_err(AppError::from)
+		.map_err(AppError::from)
 		.unwrap()
 		.parent()
 		.map(|path| path.with_file_name(RECENT_DIRS_FILE_NAME))
-        .ok_or("Failed to load recent directories".into())
+		.ok_or("Failed to load recent directories".into())
+}
+
+
+fn pause(with_help_tip: bool) {
+    if with_help_tip {
+        println!("Tip: You can run KFiles with `kfiles --help` for more info");
+    }
+    println!("Press ENTER to continue...");
+    let _ = std::io::stdin().read_line(&mut String::new());
 }
 
 
@@ -138,10 +153,10 @@ Configs:
 You can find your config file at {}
 	scroll_margin		Minimum spacing between cursor and edge
 	max_search_stack	How "deep" to search in search panel
-    max_recent_count    How many directories to keep track of in the recent list
+	max_recent_count	How many directories to keep track of in the recent list
 	favorites		List of favorite directories
 	default_dir		Default directory when the program is run
-	target_fps		The frames per second to run the program at
+	update_rate		The frames per second to run the program at
 	search_ignore_types		The types of files to ignore while searching
 		E.g. "import,txt" will ignore all .import and .txt files
 
@@ -154,29 +169,29 @@ You can find your config file at {}
 
 	println!(r#"
 Keybinds:
-    Navigation:
+	Navigation:
 	j or down arrow		Move cursor down
 	k or up arrow		Move cursor up
 	Ctrl-c or Alt-F4		Exit the program
 	Enter		Open selected folder, file, or program
 	` or Tab		Search favorites (Esc or ` to cancel)
-    / or ;      Quick search
-    g and G     Jump to the start and end of the list
-    - or Backspace      Go back
+	/ or ;	  Quick search
+	g and G	 Jump to the start and end of the list
+	- or Backspace	  Go back
 
-    Other:
+	Other:
 	Ctrl-o		Search recent directories
 	Ctrl-p		Search files (Esc to cancel)
 	Ctrl-Shift-p		Search folders (Esc to cancel)
 	Ctrl-f		Toggle current directory as favorite
 	Ctrl-e		Reveal current directory in default file explorer
 	Ctrl-Shift-e		Reveal current directory in default file explorer and exit KFiles
-    Ctrl-n      Create file
-    Ctrl-Shift-n      Create folder
-    Ctrl-d      Delete file / folder
-    Ctrl-r      Rename file / folder
+	Ctrl-n	  Create file
+	Ctrl-Shift-n	  Create folder
+	Ctrl-d	  Delete file / folder
+	Ctrl-r	  Rename file / folder
 
-    When in search panel:
+	When in search panel:
 	up and down arrows		Move cursor
 	Enter		Open selected file/folder
 "#);
@@ -185,10 +200,10 @@ Keybinds:
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, io::Write};
+	use std::{path::PathBuf, io::Write};
 	use std::fs::File;
 
-    use crate::APPNAME;
+	use crate::APPNAME;
 
 	#[test]
 	fn test_path() {

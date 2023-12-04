@@ -62,7 +62,7 @@ impl FileBuffer {
 		self.entries = match util::get_at_sorted(&self.path) {
 			Ok(v) => { v },
 			Err(err) => {
-                self.status_line.error(err.into(), None);
+                self.status_line.set_error(err.into(), None);
 				Vec::new()
 			},
 		};
@@ -75,8 +75,8 @@ impl FileBuffer {
             .set_color(Color::White);
 	}
 
-	// Sets the path
-	// Don't confuse this with open_selected() lol
+	/// Sets the path
+	/// Don't confuse this with open_selected() lol
 	pub fn open_dir(&mut self, path: &Path) {
 		self.path = PathBuf::from(path);
 		self.load_entries();
@@ -91,34 +91,46 @@ impl FileBuffer {
 		}
 	}
 
+    /// Does a simple case-insensitive search over the entries
+    /// TODO clean up
+    pub fn search_pattern(&self, pattern: &str) -> Option<usize> {
+        if pattern.is_empty() { return None; }
+        let pattern_lowercase: String = pattern.to_lowercase();
+
+        self.entries.iter()
+            .position(|pathbuf: &PathBuf| 
+                pathbuf.file_name()
+                .and_then(|osstr| osstr.to_str()) .unwrap_or_default()
+                .to_ascii_lowercase()
+                .starts_with(&pattern_lowercase)
+            )
+    }
+
 	pub fn get_selected_path(&self) -> Option<&PathBuf> {
 		self.entries.get(self.selected_index)
 	}
 
-    // Returns whether it was a valid directory
-	fn open_selected(&mut self) -> bool {
+    /// Returns whether it was a valid directory
+	fn open_selected(&mut self) -> Result<bool, AppError> {
 		let pathbuf: &PathBuf = match self.entries.get(self.selected_index) {
 			Some(p) => p,
-			None => return false,
+			None => return Err("No directory selected".into()),
 		};
 
 		if pathbuf.is_file() {
 			if opener::open(pathbuf).is_ok() {
-                return false;
+                return Ok(false);
 			}
-
-            self.status_line.error("Could not open file. Revealing in file explorer instead".into(), None);
             if let Err(err) = opener::reveal(pathbuf) {
-                self.status_line.error(err.into(), None);
+                return Err(err.into());
             }
-
-            return false;
+            return Err("Could not open file. Revealing in file explorer instead".into());
 		} else if pathbuf.is_dir() {
 			self.path.push( pathbuf.file_name().unwrap_or_default() );
 			self.load_entries();
-            return true;
+            return Ok(true);
 		}
-        false
+        Ok(false)
 	}
 
 	pub fn reveal(&self) -> Result<(), opener::OpenError> {
@@ -155,62 +167,39 @@ impl FileBuffer {
 	}
 
 	pub fn handle_key_event(&mut self, event: KeyEvent) {
-        match &mut self.status_line.state {
-            StatusLineState::Normal | StatusLineState::Error(_) => self.handle_normal_mode_event(event),
+       let StatusLineState::Prompt { prompt_line, mode } = &mut self.status_line.state else {
+           self.handle_normal_mode_event(event);
+           return;
+       };
 
-            StatusLineState::QuickSearch(prompt_line) => {
-                match prompt_line.handle_key_event(event) {
-                    Some(PromptEvent::Cancel(_)) => {
-                        self.set_state(StatusLineState::Normal);
-                        self.display_path();
-                    },
-
-                    Some(PromptEvent::Enter(_)) => {
-                        prompt_line.clear();
-                        let valid_dir: bool = self.open_selected();
-
-                        if !valid_dir {
-                            self.set_state(StatusLineState::Normal);
-                            self.display_path();
-                        }
-                    },
-
-                    // Search
-                    Some(PromptEvent::Input(pattern)) => {
-                        if pattern.is_empty() { return; }
-
-                        let pattern_lowercase: String = pattern.to_lowercase();
-                        for (i, pathbuf) in self.entries.iter().enumerate() {
-                            let file_name: String = pathbuf.file_name()
-                                .and_then(|osstr| osstr.to_str()). unwrap_or_default()
-                                .to_ascii_lowercase();
-
-                            if file_name.starts_with(&pattern_lowercase) {
-                                self.selected_index = i;
-                                break;
-                            }
-                        }
-
-                        self.update_scroll();
-                    },
-
-                    None => {},
-                }
+        match prompt_line.handle_key_event(event) {
+            Some(PromptEvent::Cancel(_)) => {
+                self.set_state(StatusLineState::Normal);
+                self.display_path();
             },
 
-            StatusLineState::CreateDir(prompt_line) => {
-                match prompt_line.handle_key_event(event) {
-                    Some(PromptEvent::Cancel(_)) => {
-                        self.set_state(StatusLineState::Normal);
-                        self.display_path();
+            Some(PromptEvent::Enter(text)) => {
+                match mode {
+                    PromptMode::QuickSearch => {
+                        prompt_line.clear();
+                        match self.open_selected() {
+                            Ok(true) => {},
+                            Ok(false) => {
+                                self.status_line.set_state(StatusLineState::Normal);
+                                self.display_path();
+                            },
+                            Err(err) => {
+                                self.status_line.set_error(err, None);
+                            },
+                        }
                     },
 
-                    Some(PromptEvent::Enter(dir_name)) => {
-                        let dir_name = dir_name.clone();
-                        self.set_state(StatusLineState::Normal);
+                    PromptMode::CreateDir => {
+                        let dir_name: String = text.clone();
+                        self.status_line.set_state(StatusLineState::Normal);
 
                         if let Err(err) = fs::create_dir_all( self.path.join(&dir_name) ) {
-                            self.status_line.error(err.into(), Some("Failed to create folder: "));
+                            self.status_line.set_error(err.into(), Some("Failed to create folder: "));
                         } else {
                             self.status_line.set_text( &format!("Created folder \"{}\"", &dir_name) )
                                 .set_color_as(self.cfg.borrow().special_color);
@@ -220,23 +209,12 @@ impl FileBuffer {
                         self.select( &OsString::from(&dir_name) );
                     },
 
-                    _ => {},
-                }
-            },
-            
-            StatusLineState::CreateFile(prompt_line) => {
-                match prompt_line.handle_key_event(event) {
-                    Some(PromptEvent::Cancel(_)) => {
-                        self.set_state(StatusLineState::Normal);
-                        self.display_path();
-                    },
-
-                    Some(PromptEvent::Enter(file_name)) => {
-                        let file_name = file_name.clone();
-                        self.set_state(StatusLineState::Normal);
+                    PromptMode::CreateFile => {
+                        let file_name: String = text.clone();
+                        self.status_line.set_state(StatusLineState::Normal);
 
                         if let Err(err) = fs::File::create( self.path.join(&file_name) ) {
-                            self.status_line.error(err.into(), Some("Failed to create file: "));
+                            self.status_line.set_error(err.into(), Some("Failed to create file: "));
                         } else {
                             self.status_line.set_text( &format!("Created file \"{}\"", &file_name) )
                                 .set_color_as(self.cfg.borrow().special_color);
@@ -246,71 +224,64 @@ impl FileBuffer {
                         self.select( &OsString::from(&file_name) );
                     },
 
-                    _ => {},
-                }
-            },
-
-            StatusLineState::Delete(prompt_line) => {
-                match prompt_line.handle_key_event(event) {
-                    Some(PromptEvent::Cancel(_)) => {
-                        self.set_state(StatusLineState::Normal);
-                        self.display_path();
-                    },
-
-                    Some(PromptEvent::Enter(text)) => {
+                    PromptMode::Delete(pathbuf) => {
                         if text.to_lowercase() != "y" {
-                            self.set_state(StatusLineState::Normal);
+                            self.status_line.set_state(StatusLineState::Normal);
                             self.display_path();
                             return;
                         }
 
-                        let pathbuf: &PathBuf = if let Some(p) = self.get_selected_path() { p } else { return; };
+                        let selected_idx: usize = self.selected_index;
                         let res = if pathbuf.is_dir() {
-                            fs::remove_dir_all( self.path.join(pathbuf) )
+                            fs::remove_dir_all(&pathbuf)
                         } else {
-                            fs::remove_file( self.path.join(pathbuf) )
+                            fs::remove_file(&pathbuf)
                         };
 
                         if let Err(err) = res {
-                            self.status_line.error(err.into(), Some("Failed to delete: "));
+                            self.status_line.set_error(err.into(), Some("Failed to delete: "));
                         } else {
-                            self.status_line.set_text( &format!("Successfully deleted \"{}\"", util::file_name(pathbuf) ) )
+                            let text: String = format!("Successfully deleted \"{}\"", util::file_name(pathbuf) );
+                            self.status_line.set_text( &text )
                                 .set_color_as(self.cfg.borrow().special_color);
                         }
 
                         self.set_state(StatusLineState::Normal);
                         self.load_entries();
+                        self.selected_index = selected_idx.clamp(0, self.entries.len());
                     },
 
-                    _ => {},
-                }
-            },
+                    PromptMode::Rename(pathbuf) => {
+                        let new_path: PathBuf = self.path.join(&text);
 
-            StatusLineState::Rename(prompt_line) => {
-                match prompt_line.handle_key_event(event) {
-                    Some(PromptEvent::Cancel(_)) => {
-                        self.set_state(StatusLineState::Normal);
-                        self.display_path();
-                    },
-
-                    Some(PromptEvent::Enter(new_file_name)) => {
-                        let new_path = self.path.join(&new_file_name);
-                        let old_path = if let Some(p) = self.get_selected_path() { self.path.join(p) } else { return };
-
-                        if let Err(err) = fs::rename(old_path, new_path) {
-                            self.status_line.error(err.into(), Some("Failed to rename: "));
+                        if let Err(err) = fs::rename(pathbuf, new_path) {
+                            self.status_line.set_error(err.into(), Some("Failed to rename: "));
                         } else {
-                            self.status_line.set_text( &format!("Successfully renamed to \"{}\"", &new_file_name) )
+                            self.status_line.set_text( &format!("Successfully renamed to \"{}\"", &text) )
                                 .set_color_as(self.cfg.borrow().special_color);
                         }
 
                         self.set_state(StatusLineState::Normal);
                         self.load_entries();
+                        self.select( &OsString::from(&text) );
                     },
+                }
 
-                    _ => {},
+            },
+
+            Some(PromptEvent::Input(text)) => {
+                match mode {
+                    PromptMode::QuickSearch => (),
+                    _ => return,
+                }
+
+                if let Some(index) = self.search_pattern(&text) {
+                    self.selected_index = index;
+                    self.update_scroll();
                 }
             },
+
+            None => {},
         }
     }
 
@@ -338,8 +309,11 @@ impl FileBuffer {
 			// Open
 			KeyEvent { code: KeyCode::Enter, .. } => {
 				self.set_state(StatusLineState::Normal);
-				self.open_selected();
-                // self.display_path();
+				if let Err(err) = self.open_selected() {
+                    self.status_line.set_error(err, None);
+                } else {
+                    self.display_path();
+                }
 			},
 
 			// Go back
@@ -379,7 +353,7 @@ impl FileBuffer {
 
                 self.status_line.set_text("Searching for: ")
                     .set_color_as(self.cfg.borrow().special_color)
-                    .set_state(StatusLineState::QuickSearch( PromptLine::default() ));
+                    .set_prompt(PromptLine::default(), PromptMode::QuickSearch);
 			},
 
 			// Create folder with Ctrl + Shift + n
@@ -387,14 +361,14 @@ impl FileBuffer {
             if modifiers.bits() == CONTROL_SHIFT => {
                 self.status_line.set_text("Create folder: ")
                     .set_color_as(self.cfg.borrow().special_color)
-                    .set_state(StatusLineState::CreateDir( PromptLine::default() ));
+                    .set_prompt(PromptLine::default(), PromptMode::CreateDir);
 			}
 
 			// Create file with Ctrl + n
 			KeyEvent { code: KeyCode::Char('n'), modifiers: KeyModifiers::CONTROL, .. } => {
                 self.status_line.set_text("Create file: ")
                     .set_color_as(self.cfg.borrow().special_color)
-                    .set_state(StatusLineState::CreateFile( PromptLine::default() ));
+                    .set_prompt(PromptLine::default(), PromptMode::CreateFile);
 			}
 
 			// Delete with Ctrl + d
@@ -404,9 +378,13 @@ impl FileBuffer {
                     None => return,
                 };
 
+                let Some(selected_path) = self.get_selected_path().cloned() else {
+                    self.status_line.set_error("No directory selected".into(), None);
+                    return;
+                };
                 self.status_line.set_text( format!("Delete {}? (y/n): ", &file_name).as_str() )
                     .set_color(Color::Red)
-                    .set_state(StatusLineState::Delete( PromptLine::default() ));
+                    .set_prompt( PromptLine::default(), PromptMode::Delete(selected_path) );
 			},
 
 			// Rename with Ctrl + r
@@ -416,9 +394,23 @@ impl FileBuffer {
                     None => return,
                 };
 
+                let Some(selected_path) = self.get_selected_path().cloned() else {
+                    self.status_line.set_error("No directory selected".into(), None);
+                    return;
+                };
+
+                let i: usize = file_name.len() - file_name.chars().rev()
+                    .position(|ch| ch == '.')
+                    .map_or(0, |i| i + 1);
                 self.status_line.set_text( format!("Rename \"{}\" to: ", &file_name).as_str() )
                     .set_color_as(self.cfg.borrow().special_color)
-                    .set_state(StatusLineState::Rename( PromptLine::new(&file_name) ));
+                    .set_prompt(
+                        PromptLine {
+                            input: file_name,
+                            cursor_pos: i,
+                        },
+                        PromptMode::Rename(selected_path)
+                        );
 			}
 
 			_ => {},
@@ -490,17 +482,23 @@ impl FileBuffer {
 }
 
 
-
+#[derive(Debug)]
+pub enum PromptMode {
+   QuickSearch,
+   CreateDir,
+   CreateFile,
+   Delete(PathBuf),
+   Rename(PathBuf),
+}
 
 #[derive(Debug)]
 pub enum StatusLineState {
 	Normal,
-	QuickSearch(PromptLine),
-    CreateDir(PromptLine),
-    CreateFile(PromptLine),
-    Delete(PromptLine),
-    Rename(PromptLine),
 	Error(AppError),
+    Prompt {
+        prompt_line: PromptLine,
+        mode: PromptMode,
+    },
 }
 
 pub struct StatusLine {
@@ -531,19 +529,26 @@ impl StatusLine {
         self
     }
 
-    pub fn error(&mut  self, err: AppError, prefix: Option<&str>) -> &mut Self {
+    pub fn set_error(&mut  self, err: AppError, prefix: Option<&str>) -> &mut Self {
         self.state = StatusLineState::Error(err);
         self.color = Color::Red;
         self.text = prefix.unwrap_or("Error: \n").to_string();
         self
     }
 
+    pub fn set_prompt(&mut self, prompt_line: PromptLine, prompt_mode: PromptMode) -> &mut Self {
+        self.state = StatusLineState::Prompt {
+            prompt_line,
+            mode: prompt_mode,
+        };
+        self
+    }
+
     pub fn draw(&self, engine: &mut ConsoleEngine, bg_color: Color) {
         let text: String = self.to_string();
 
-        use StatusLineState as S;
         let prompt_line: &PromptLine = match &self.state {
-            S::QuickSearch(pl) | S::CreateFile(pl) | S::CreateDir(pl) | S::Delete(pl) | S::Rename(pl) => &pl,
+            StatusLineState::Prompt { prompt_line, .. } => prompt_line,
             _ => {
                 engine.print_fbg(
                     0,
@@ -580,15 +585,11 @@ impl StatusLine {
 
 impl ToString for StatusLine {
     fn to_string(&self) -> String {
-        use StatusLineState as S;
-
-        let after: String = match &self.state {
-            S::Normal => return self.text.clone(),
-            S::Error(err) => err.to_string(),
-            S::QuickSearch(pl) | S::CreateFile(pl) | S::CreateDir(pl) | S::Delete(pl) | S::Rename(pl) => pl.as_ref().clone(),
-        };
-
-        format!("{}{}", &self.text, after)
+        match &self.state {
+            StatusLineState::Normal => self.text.clone(),
+            StatusLineState::Error(err) => format!("{}{}", &self.text, err),
+            StatusLineState::Prompt { prompt_line, .. } => format!("{}{}", &self.text, prompt_line.as_ref()),
+        }
     }
 }
 
@@ -606,27 +607,20 @@ pub struct PromptLine {
 }
 
 impl PromptLine {
-    pub fn new(initial_text: &str) -> Self {
-        Self {
-            input: initial_text.to_string(),
-            cursor_pos: 0,
-        }
-    }
-
     pub fn handle_key_event(&mut self, event: KeyEvent) -> Option<PromptEvent> {
         if event.kind != KeyEventKind::Press {
             return None;
         }
 
         match event.code {
-            // Exit
             KeyCode::Esc => return Some(PromptEvent::Cancel( self.input.clone() )),
-            // Enter
             KeyCode::Enter => return Some(PromptEvent::Enter( self.input.clone() )),
-            // Backspace
             KeyCode::Backspace => {
-                self.input.pop();
-                self.move_cursor(-1);
+                self.remove_char(1);
+                return Some(PromptEvent::Input( self.input.clone() ))
+            },
+            KeyCode::Delete => {
+                self.remove_char(-1);
                 return Some(PromptEvent::Input( self.input.clone() ))
             },
 
@@ -637,20 +631,52 @@ impl PromptLine {
 
             // Write char
             KeyCode::Char(ch) => {
-                self.input.push(ch);
-                self.move_cursor(1);
+                self.put_char(ch);
                 return Some(PromptEvent::Input( self.input.clone() ))
             },
 
             _ => (),
         }
 
-        return None;
+        None
     }
+
+    /// Insert a character at the position of the cursor
+    pub fn put_char(&mut self, chr: char) {
+        let mut new_buffer = String::with_capacity(self.input.capacity() + 1);
+        new_buffer.extend(
+            self.input.chars()
+                .take(self.cursor_pos)
+                .chain(std::iter::once(chr))
+                .chain(self.input.chars().skip(self.cursor_pos)),
+        );
+        self.input = new_buffer;
+        self.move_cursor(1);
+    }
+
+    /// Removes a certain amount of characters either on the left (positive) or right (negative) side of the cursor
+    pub fn remove_char(&mut self, amount: i32) {
+        if amount == 0 { return; }
+
+        let off_l = amount.max(0) as usize; // offset to the left from cursor, `positive` or 0
+        let off_r = amount.min(0).unsigned_abs() as usize; // offset to the right from cursor,  `-negative` or 0
+        let pos_l = self.cursor_pos.saturating_sub(off_l);
+        let pos_r = self.cursor_pos
+            .saturating_add(off_r)
+            .min(self.input.len());
+        self.input = self.input.chars().take(pos_l).collect::<String>()
+            + &self.input.chars().skip(pos_r).collect::<String>(); // this skips the cursor +/- offsets
+        self.move_cursor(-amount.max(0));
+    }
+
 
     pub fn move_cursor(&mut self, amt: i32) {
         self.cursor_pos = (self.cursor_pos as i64 + amt as i64)
             .clamp(0, self.input.len() as i64) as usize;
+    }
+
+    pub fn set_cursor_pos(&mut self, p: usize) {
+        self.cursor_pos = p.clamp(0, self.input.len());
     }
 
     pub fn clear(&mut self) {
