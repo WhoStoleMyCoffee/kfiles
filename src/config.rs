@@ -7,7 +7,7 @@ use directories::UserDirs;
 
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Configs {
 	pub scroll_margin: u8,
 	pub max_search_stack: usize,
@@ -24,6 +24,19 @@ pub struct Configs {
 	pub special_color: (u8, u8, u8),
 	pub bg_color: (u8, u8, u8),
 }
+
+impl Configs {
+	// Returns true if path was added to favorites, false otherwise
+	pub fn toggle_favorite(&mut self, path: PathBuf) -> bool {
+		if let Some(index) = self.favorites.iter() .position(|p| p == &path) {
+			self.favorites.remove(index);
+			return false;
+		}
+		self.favorites.push(path);
+		true
+	}
+}
+
 
 impl Default for Configs {
 	fn default() -> Self {
@@ -44,18 +57,6 @@ impl Default for Configs {
 			special_color: ( 110, 209, 255 ),
 			bg_color: ( 35, 47, 54 ),
 		}
-	}
-}
-
-impl Configs {
-	// Returns true if path was added to favorites, false otherwise
-	pub fn toggle_favorite(&mut self, path: PathBuf) -> bool {
-		if let Some(index) = self.favorites.iter() .position(|p| p == &path) {
-			self.favorites.remove(index);
-			return false;
-		}
-		self.favorites.push(path);
-		true
 	}
 }
 

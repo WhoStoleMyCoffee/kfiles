@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::path::{PathBuf, Path};
 use std::rc::Rc;
-use std::cell::RefCell;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::ops::Deref;
@@ -16,8 +15,7 @@ use console_engine::forms::{
 	Form, FormField, FormStyle, FormValue, FormOptions, Text,
 };
 
-use crate::config::Configs;
-use crate::util::*;
+use crate::{util::*, Cfg};
 
 
 
@@ -100,12 +98,12 @@ pub struct SearchPanel {
 	color: Color,
 	selected_index: usize,
 	query: SearchQuery,
-	cfg: Rc<RefCell<Configs>>,
+    cfg: Cfg,
 	pub state: SearchPanelState,
 }
 
 impl SearchPanel {
-	pub fn new(width: u32, height: u32, mode: SearchQueryMode, cfg: Rc<RefCell<Configs>>) -> Self {
+	pub fn new(width: u32, height: u32, mode: SearchQueryMode, cfg: Cfg) -> Self {
 		let max_result_count: usize = (height - 5) as usize;
 		let max_stack_size: usize = cfg.borrow().max_search_stack;
 		let ignore_types: String = cfg.borrow().search_ignore_types.clone();
@@ -118,7 +116,7 @@ impl SearchPanel {
 			color: Color::from(cfg.borrow().file_color),
 			selected_index: 0,
 			query: SearchQuery::new(mode, max_result_count, max_stack_size, ignore_types),
-			cfg: Rc::clone(&cfg),
+            cfg: Rc::clone(&cfg),
 			state: SearchPanelState::Running,
 		}
 	}

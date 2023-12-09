@@ -1,9 +1,12 @@
-use std::path::PathBuf;
+use std::cell::RefCell;
+use std::{path::PathBuf, rc::Rc};
 use std::env;
+use std::fmt::Display;
 
+use config::Configs;
 use confy::ConfyError;
-use clean_path::Clean;
 use console_engine::KeyModifiers;
+use clean_path::Clean;
 
 pub mod util;
 pub mod app;
@@ -11,7 +14,7 @@ pub mod config;
 pub mod filebuffer;
 pub mod search;
 
-use app::{ App, RunArg, AppError };
+use app::App;
 
 
 // Search panel offset from the edges of the screen
@@ -24,76 +27,112 @@ const RECENT_DIRS_FILE_NAME: &str = "recent.txt";
 const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits();
 
 
+type Cfg = Rc<RefCell<Configs>>;
+
+
+
+
+#[derive(Debug)]
+pub enum AppError {
+	ConfigError(confy::ConfyError),
+	IO(std::io::Error),
+    OpenError(opener::OpenError),
+    Other(String),
+}
+
+impl From<confy::ConfyError> for AppError {
+	fn from(value: confy::ConfyError) -> Self {
+		Self::ConfigError(value)
+	}
+}
+
+impl From<std::io::Error> for AppError {
+	fn from(value: std::io::Error) -> Self {
+		Self::IO(value)
+	}
+}
+
+impl From<&str> for AppError {
+    fn from(value: &str) -> Self {
+        Self::Other(value.to_string())
+    }
+}
+
+impl From<opener::OpenError> for AppError {
+    fn from(value: opener::OpenError) -> Self {
+        Self::OpenError(value)
+    }
+}
+
+impl Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConfigError(err) => err.fmt(f),
+            Self::IO(err) => err.fmt(f),
+            Self::OpenError(err) => err.fmt(f),
+            Self::Other(str) => write!(f, "{}", str),
+        }
+    }
+}
+
+
+pub enum RunOption {
+	AtPath(PathBuf),
+    TryFavorite(String),
+    AtDefaultPath,
+    Help,
+}
+
+
+
+
 fn main() {
-	// Load command line variables
-	let mut args = env::args().skip(1);
-	let run_args: RunArg = if let Some(a) = args.next() {
-		match a.as_str() {
-			"--help" | "-h" => {
-				print_help();
-				return;
-			},
+    let cfg: Result<Configs, AppError> = confy::load(APPNAME, Some(CONFIG_PATH))
+        .map_err(AppError::from);
 
-			"--favorites" | "-f" => {
-				RunArg::TryFavorite(match args.next() {
-					Some(arg) => arg,
-					None => {
-						println!("Error: Invalid syntax for --favorites. Expected field <query>\n Syntax: \t --favorites, -f <query>");
-                        pause(true);
-						return;
-					},
-				})
-			},
+    // Process command line arguments
+    let (run_path, cfg): (PathBuf, Configs) = match (parse_cli(env::args()), cfg) {
+        // We don't care about the configs when showing help message
+        (Ok(RunOption::Help), _) => {
+            print_help();
+            pause(false);
+            return;
+        },
 
-			s => {
-				let path: PathBuf = env::current_dir() .expect("Failed to get current working directory") .join(s);
-				RunArg::AtPath( path.clean() )
-			},
-		}
-	} else {
-		RunArg::AtDefaultPath
-	};
+        // Error occured somewhere
+        (Err(err), _) | (_, Err(err)) => {
+            handle_app_err(err);
+            return;
+        },
+
+        // All good, keep parsing
+        (Ok(opt), Ok(cfg)) => match opt {
+            RunOption::AtDefaultPath => (cfg.default_path.clone(), cfg),
+
+            RunOption::AtPath(p) => (p, cfg),
+
+            RunOption::TryFavorite(query) => {
+                let query: String = query.to_lowercase();
+                let path: &PathBuf = cfg.favorites.iter()
+                    .find(|pathbuf| util::path2string(pathbuf).to_lowercase() .contains(&query))
+                    .unwrap_or(&cfg.default_path);
+                (path.clone(), cfg)
+            },
+
+            RunOption::Help => unreachable!(), // Already checked at first match pattern
+        },
+    };
 
 
 	// Setup app
-	let mut app: App = match App::new(run_args) {
+	let mut app: App = match App::new( &run_path, cfg ) {
 		Ok(app) => app,
 
-		// Wrong config format
-		Err(AppError::ConfigError(ConfyError::BadTomlData(err))) => {
-			println!("Error while loading configs:\n	{}", err);
-			if let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {
-				println!("Tip: You can find your config file at {}", p.display());
-			}
-            pause(true);
-			return;
-		},
+        Err(err) => {
+            handle_app_err(err);
+            return;
+        },
 
-		// General config error
-		Err(AppError::ConfigError(err)) => {
-			println!("Error while loading configs:\n	{}", err);
-            pause(false);
-			return;
-		},
-		
-		// Engine init error
-		Err(AppError::EngineError(err)) => {
-			println!("Error creating console engine: {}", err);
-            pause(false);
-			return;
-		},
-
-		Err(AppError::OpenError(err)) => {
-			println!("Error opening: {}", err);
-            pause(false);
-			return;
-		},
-
-		Err(AppError::Other(s)) => {
-			println!("Error: {}", s);
-            pause(false);
-			return;
-		},
 	};
 
 	// MAIN LOOP ----------------------------------------------------------------------------
@@ -112,13 +151,76 @@ fn main() {
 
 
 
+fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
+	if let Some(a) = args.nth(1) {
+		match a.as_str() {
+			"--help" | "-h" => {
+                Ok(RunOption::Help)
+			},
+
+			"--favorites" | "-f" => {
+                let query: String = args.next()
+                    .ok_or("Error: Invalid syntax for --favorites. Expected field <query>\n Syntax: \t --favorites, -f <query>")?;
+                Ok(RunOption::TryFavorite(query))
+			},
+
+			s => {
+                let current_dir: PathBuf = env::current_dir()
+                    .map_err(AppError::from)?;
+                let joined = current_dir.join(s);
+                Ok(RunOption::AtPath( if joined.exists() { joined.clean() } else { current_dir } ))
+			},
+		}
+	} else {
+		Ok(RunOption::AtDefaultPath)
+	}
+}
+
+
+
+
 fn get_recent_dirs_path() -> Result<PathBuf, AppError> {
 	confy::get_configuration_file_path(APPNAME, None)
-		.map_err(AppError::from)
-		.unwrap()
+		.map_err(AppError::from)?
 		.parent()
 		.map(|path| path.with_file_name(RECENT_DIRS_FILE_NAME))
 		.ok_or("Failed to load recent directories".into())
+}
+
+
+fn handle_app_err(err: AppError) {
+    match err {
+		// Wrong config format
+		AppError::ConfigError(ConfyError::BadTomlData(err)) => {
+			println!("Error while loading configs:\n	{}", err);
+			if let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {
+				println!("Tip: You can find your config file at {}", p.display());
+			}
+            pause(true);
+		},
+
+		// General config error
+		AppError::ConfigError(err) => {
+			println!("Error while loading configs:\n	{}", err);
+            pause(false);
+		},
+		
+		// Engine init error
+		AppError::IO(err) => {
+			println!("Error: {}", err);
+            pause(false);
+		},
+
+		AppError::OpenError(err) => {
+			println!("Error opening: {}", err);
+            pause(false);
+		},
+
+		AppError::Other(s) => {
+			println!("Error: {}", s);
+            pause(false);
+		},
+    }
 }
 
 
@@ -253,6 +355,5 @@ mod tests {
 		let mut file = File::create("foo.txt") .unwrap();
 		file.write_all( bup.as_bytes() ) .unwrap();
 	}
-
 }
 

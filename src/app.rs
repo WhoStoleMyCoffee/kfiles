@@ -1,11 +1,9 @@
-use std::fmt::Display;
 use std::fs::File;
 use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use console_engine::crossterm::ErrorKind;
 use console_engine::pixel;
 use console_engine::screen::Screen;
 use console_engine::{
@@ -14,13 +12,14 @@ use console_engine::{
 };
 use console_engine::{events::Event, crossterm::event::KeyEvent};
 
-use crate::util::{path2string, read_lines};
+use crate::util::read_lines;
 use crate::config::{Configs, RecentList};
-use crate::filebuffer::{FileBuffer, StatusLineState};
+use crate::filebuffer::FileBuffer;
 use crate::search::{SearchPanel, SearchQueryMode, SearchPanelState};
-use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH, get_recent_dirs_path };
+use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH, get_recent_dirs_path, Cfg };
+use crate::try_err;
 
-use crate::CONTROL_SHIFT;
+use crate::{ CONTROL_SHIFT, AppError };
 
 
 
@@ -42,80 +41,6 @@ fn load_recent_list(path: &Path, max_count: usize) -> RecentList<PathBuf> {
 
 
 
-#[derive(Debug)]
-pub enum AppError {
-	ConfigError(confy::ConfyError),
-	EngineError(ErrorKind),
-    OpenError(opener::OpenError),
-    Other(String),
-}
-
-impl From<confy::ConfyError> for AppError {
-	fn from(value: confy::ConfyError) -> Self {
-		Self::ConfigError(value)
-	}
-}
-
-impl From<ErrorKind> for AppError {
-	fn from(value: ErrorKind) -> Self {
-		Self::EngineError(value)
-	}
-}
-
-impl From<&str> for AppError {
-    fn from(value: &str) -> Self {
-        Self::Other(value.to_string())
-    }
-}
-
-impl From<opener::OpenError> for AppError {
-    fn from(value: opener::OpenError) -> Self {
-        Self::OpenError(value)
-    }
-}
-
-impl Display for AppError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ConfigError(err) => err.fmt(f),
-            Self::EngineError(err) => err.fmt(f),
-            Self::OpenError(err) => err.fmt(f),
-            Self::Other(str) => write!(f, "{}", str),
-        }
-    }
-}
-
-
-
-pub enum RunArg {
-	TryFavorite(String), // When running  kfiles -f <path>
-	AtPath(PathBuf), // When running  kfiles <path>
-	AtDefaultPath, // When running kfiles with no arguments
-}
-
-impl RunArg {
-	fn get_run_path(&self, cfg: &Rc<RefCell<Configs>>) -> PathBuf {
-		match self {
-			RunArg::AtPath(p) => p.clone(),
-			RunArg::TryFavorite(p) => {
-				let favorites = &cfg.borrow().favorites;
-				let lower_p: String = p.to_lowercase();
-
-				let res: Option<&PathBuf> = favorites.iter()
-					.find(|pathbuf| path2string(pathbuf).to_lowercase() .contains(&lower_p));
-
-				match res {
-					Some(p) => p.clone(),
-					None => cfg.borrow().default_path.clone(),
-				}
-			},
-			RunArg::AtDefaultPath => cfg.borrow().default_path.clone()
-		}
-	}
-}
-
-
-// TODO CreateFile, CreateFolder, Delete, Rename
 pub enum AppState {
 	Running,
 	Exit(Option<PathBuf>),
@@ -123,7 +48,7 @@ pub enum AppState {
 
 
 pub struct App {
-	cfg: Rc<RefCell<Configs>>,
+    cfg: Cfg,
 	engine: ConsoleEngine,
 	file_buffer: FileBuffer,
 	search_panel: Option<SearchPanel>,
@@ -131,26 +56,30 @@ pub struct App {
 }
 
 impl App {
-	pub fn new(run_arg: RunArg) -> Result<Self, AppError> {
-		let cfg: Rc<RefCell<Configs>> = Rc::new(RefCell::new( confy::load(APPNAME, Some(CONFIG_PATH))? ));
-		let run_path: PathBuf = run_arg.get_run_path(&cfg);
-		let engine: ConsoleEngine = ConsoleEngine::init_fill( cfg.borrow().update_rate )?;
+	pub fn new(at_path: &Path, cfg: Configs) -> Result<Self, AppError> {
+		let engine: ConsoleEngine = ConsoleEngine::init_fill( cfg.update_rate )?;
+
+        let cfg: Cfg = Rc::new(RefCell::new( cfg ));
 
 		// Initialize file buffer
 		let mut file_buffer = FileBuffer::new(
-			&run_path,
+			at_path,
 			Screen::new(engine.get_width() - 2, engine.get_height() - 2),
-			Rc::clone(&cfg)
+            Rc::clone(&cfg),
 		);
-		file_buffer.load_entries();
 
-		let max_recent_count: usize =  cfg.borrow().max_recent_count;
+	 	try_err!( file_buffer.load_entries() => file_buffer );
+
+        let max_recent_count: usize = cfg.borrow().max_recent_count;
 		Ok(Self {
-			cfg,
+            cfg,
 			engine,
 			file_buffer,
 			search_panel: None,
-			recent_files: load_recent_list(&get_recent_dirs_path()?, max_recent_count),
+			recent_files: load_recent_list(
+                &get_recent_dirs_path()?,
+                max_recent_count,
+            ),
 		})
 	}
 
@@ -282,7 +211,7 @@ impl App {
 			}) => {
 				if self.search_panel.is_some() { return AppState::Running; }
 
-				self.file_buffer.set_state(StatusLineState::Normal);
+				self.file_buffer.status_line.normal();
 				let added: bool = self.cfg.borrow_mut() .toggle_favorite( self.file_buffer.path.clone() );
 
 				if let Err(err) = confy::store(APPNAME, Some(CONFIG_PATH), self.cfg.as_ref() ) {
@@ -304,7 +233,7 @@ impl App {
 					return AppState::Running;
 				}
 
-				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List(self.cfg.borrow().favorites.clone() ))
+				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List(self.cfg.borrow() .favorites.clone() ))
 					.set_title("Favorites")
 					.set_color(Color::from(self.cfg.borrow().special_color));
 				self.search_panel = Some(panel);
@@ -322,8 +251,9 @@ impl App {
 				// Try to update search panel first
 				if self.search_panel.is_some() {
 					if let Err(err) = self.searchpanel_handle_key_event(key_event) {
-						self.file_buffer.status_line.set_text( &format!("Error opening: {}", err) )
-                            .set_color(Color::Red);
+						self.file_buffer.status_line.error( err.as_str().into(), Some("Error opening: \n" ));
+						// self.file_buffer.status_line.set_text( &format!("Error opening: {}", err) )
+                            // .set_color(Color::Red);
 					}
 
 				// File buffer
@@ -338,9 +268,7 @@ impl App {
 
 	// I put this stuff in its own function because that would've been a disgusting amount of indentation
 	fn searchpanel_handle_key_event(&mut self, key_event: KeyEvent) -> Result<(), String> {
-		let search_panel: &mut SearchPanel = unsafe {
-			self.search_panel.as_mut() .unwrap_unchecked()
-		};
+		let search_panel: &mut SearchPanel = self.search_panel.as_mut() .expect("SearchPanel not set");
 
 		search_panel.handle_key_event(key_event);
 
@@ -378,7 +306,7 @@ impl App {
 			self.engine.get_width() - SEARCH_PANEL_MARGIN.0 * 2,
 			self.engine.get_height() - SEARCH_PANEL_MARGIN.1 * 2,
 			mode,
-			Rc::clone(&self.cfg),
+            Rc::clone(&self.cfg),
 		)
 	}
 
@@ -406,3 +334,9 @@ impl Drop for App {
 		file.write_all( baba_booey.as_bytes() ) .expect("Failed to write to recent dirs file");
 	}
 }
+
+
+
+
+
+
