@@ -81,6 +81,7 @@ pub enum RunOption {
     TryFavorite(String),
     AtDefaultPath,
     Help,
+    Config,
 }
 
 
@@ -96,6 +97,25 @@ fn main() {
         (Ok(RunOption::Help), _) => {
             print_help();
             pause(false);
+            return;
+        },
+
+        (Ok(RunOption::Config), _) => {
+            let Ok(cfg_path) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) else {
+                println!("Error: Failed to get configuration file path.");
+                pause(true);
+                return;
+            };
+
+            if let Err(err) = opener::open(&cfg_path) {
+                println!("Error: Failed to open configuration file:\n\t{}.\nRevealing in file explorer instead...", err);
+                if let Err(err) = opener::reveal(&cfg_path) {
+                    println!("Error: Failed to reveal configuration file in file explorer:\n\t{}", err);
+                    pause(false);
+                }
+                return;
+            }
+
             return;
         },
 
@@ -119,7 +139,7 @@ fn main() {
                 (path.clone(), cfg)
             },
 
-            RunOption::Help => unreachable!(), // Already checked at first match pattern
+            RunOption::Help | RunOption::Config => unreachable!(), // Already checked at first match pattern
         },
     };
 
@@ -157,6 +177,10 @@ fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
 			"--help" | "-h" => {
                 Ok(RunOption::Help)
 			},
+
+            "--config" | "--configs" | "-c" | "-cfg" | "--cfg" => {
+                Ok(RunOption::Config)
+            },
 
 			"--favorites" | "-f" => {
                 let query: String = args.next()
@@ -247,6 +271,7 @@ Usage:
 Options:
 	--help, -h		Show this message
 	--favorites, -f <query>		Opens the program with the first result that matches <query> in your favorites
+	--config, --configs, -c, -cfg, --cfg		Opens the configuration file
 "#);
 
 	if let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {

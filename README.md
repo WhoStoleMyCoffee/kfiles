@@ -16,6 +16,8 @@ E.g.
 
 `--favorites <query>` or `-f <query>`: Run the app with the first result that matches `<query>` in your favorites
 
+`--config`, `--configs`, `-c`, `-cfg`, or `--cfg`: Opens the configuration file
+
 `<path>`: Run at the specified `<path>`
 
 ## Keybinds
