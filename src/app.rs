@@ -1,8 +1,8 @@
-use std::fs::File;
-use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::thread;
+use std::time::Duration;
 
 use console_engine::pixel;
 use console_engine::screen::Screen;
@@ -12,32 +12,13 @@ use console_engine::{
 };
 use console_engine::{events::Event, crossterm::event::KeyEvent};
 
-use crate::util::read_lines;
-use crate::config::{Configs, RecentList};
+use crate::config::{Configs, RecentList, FavoritesList};
 use crate::filebuffer::FileBuffer;
 use crate::search::{SearchPanel, SearchQueryMode, SearchPanelState};
-use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH, get_recent_dirs_path, Cfg };
+use crate::{ APPNAME, SEARCH_PANEL_MARGIN, CONFIG_PATH, get_recent_dirs_path, Cfg, get_favorites_list_path };
 use crate::try_err;
 
 use crate::{ CONTROL_SHIFT, AppError };
-
-
-
-fn load_recent_list(path: &Path, max_count: usize) -> RecentList<PathBuf> {
-	let mut list: RecentList<PathBuf> = RecentList::new(max_count);
-
-	*list = if let Ok(lines) = read_lines(path) {
-		lines.map_while(Result::ok)
-			.map(PathBuf::from)
-			.filter(|pathbuf| pathbuf.exists())
-			.collect()
-	} else {
-		vec![]
-	};
-
-	list
-}
-
 
 
 
@@ -48,38 +29,38 @@ pub enum AppState {
 
 
 pub struct App {
-    cfg: Cfg,
+	cfg: Cfg,
 	engine: ConsoleEngine,
 	file_buffer: FileBuffer,
 	search_panel: Option<SearchPanel>,
-	recent_files: RecentList<PathBuf>,
+	recent_dirs: RecentList,
+	favorites: FavoritesList,
 }
 
 impl App {
 	pub fn new(at_path: &Path, cfg: Configs) -> Result<Self, AppError> {
 		let engine: ConsoleEngine = ConsoleEngine::init_fill( cfg.update_rate )?;
 
-        let cfg: Cfg = Rc::new(RefCell::new( cfg ));
+		let cfg: Cfg = Rc::new(RefCell::new( cfg ));
 
 		// Initialize file buffer
 		let mut file_buffer = FileBuffer::new(
 			at_path,
 			Screen::new(engine.get_width() - 2, engine.get_height() - 2),
-            Rc::clone(&cfg),
+			Rc::clone(&cfg),
 		);
 
 	 	try_err!( file_buffer.load_entries() => file_buffer );
 
-        let max_recent_count: usize = cfg.borrow().max_recent_count;
+		let max_recent_count: usize = cfg.borrow().max_recent_count;
 		Ok(Self {
-            cfg,
+			cfg,
 			engine,
 			file_buffer,
 			search_panel: None,
-			recent_files: load_recent_list(
-                &get_recent_dirs_path()?,
-                max_recent_count,
-            ),
+			recent_dirs: RecentList::load( &get_recent_dirs_path()?, max_recent_count )
+				.unwrap_or_else(|_| RecentList::new(max_recent_count) ),
+			favorites: FavoritesList::load( &get_favorites_list_path()? ).unwrap_or_default()
 		})
 	}
 
@@ -197,7 +178,7 @@ impl App {
 					return AppState::Running;
 				}
 
-				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List( self.recent_files.clone() ))
+				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List( self.recent_dirs.clone() ))
 					.set_title("Recent")
 					.set_color(Color::from(self.cfg.borrow().folder_color));
 				self.search_panel = Some(panel);
@@ -212,14 +193,14 @@ impl App {
 				if self.search_panel.is_some() { return AppState::Running; }
 
 				self.file_buffer.status_line.normal();
-				let added: bool = self.cfg.borrow_mut() .toggle_favorite( self.file_buffer.path.clone() );
+				let added: bool = self.favorites.toggle( self.file_buffer.path.clone() );
 
 				if let Err(err) = confy::store(APPNAME, Some(CONFIG_PATH), self.cfg.as_ref() ) {
 					self.file_buffer.status_line.set_text( &format!("Error saving configs: {}", err) )
-                        .set_color(Color::Red);
+						.set_color(Color::Red);
 				} else {
 					self.file_buffer.status_line.set_text( if added { "Added path to favorites" } else { "Removed path from favorites" } )
-                        .set_color_as(self.cfg.borrow().special_color);
+						.set_color_as(self.cfg.borrow().special_color);
 				}
 			},
 
@@ -233,7 +214,7 @@ impl App {
 					return AppState::Running;
 				}
 
-				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List(self.cfg.borrow() .favorites.clone() ))
+				let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List( self.favorites.clone() ))
 					.set_title("Favorites")
 					.set_color(Color::from(self.cfg.borrow().special_color));
 				self.search_panel = Some(panel);
@@ -253,7 +234,7 @@ impl App {
 					if let Err(err) = self.searchpanel_handle_key_event(key_event) {
 						self.file_buffer.status_line.error( err.as_str().into(), Some("Error opening: \n" ));
 						// self.file_buffer.status_line.set_text( &format!("Error opening: {}", err) )
-                            // .set_color(Color::Red);
+							// .set_color(Color::Red);
 					}
 
 				// File buffer
@@ -306,37 +287,67 @@ impl App {
 			self.engine.get_width() - SEARCH_PANEL_MARGIN.0 * 2,
 			self.engine.get_height() - SEARCH_PANEL_MARGIN.1 * 2,
 			mode,
-            Rc::clone(&self.cfg),
+			Rc::clone(&self.cfg),
 		)
 	}
 
-	fn add_to_recent(&mut self, path: PathBuf) {
-		self.recent_files.push(path);
+	pub fn add_to_recent(&mut self, path: PathBuf) {
+		self.recent_dirs.push(path);
 	}
 
-	fn add_current_to_recent(&mut self) {
+	pub fn add_current_to_recent(&mut self) {
 		self.add_to_recent(self.file_buffer.path.clone());
 	}
-
 }
 
 
 impl Drop for App {
 	fn drop(&mut self) {
-		self.add_current_to_recent();
-		let baba_booey = self.recent_files.iter()
-			.filter_map(|pathbuf| pathbuf.as_path().to_str() )
-			.collect::<Vec<&str>>()
-			.join("\n");
+		let recent_res = get_recent_dirs_path()
+			.and_then(|path| {
+				self.add_current_to_recent();
+				self.recent_dirs.save(&path) .map_err(AppError::from)
+			});
 
-        let recent_dir: PathBuf = if let Ok(p) = get_recent_dirs_path() { p } else { return; };
-		let mut file = File::create(recent_dir) .expect("Failed to create recent dirs file");
-		file.write_all( baba_booey.as_bytes() ) .expect("Failed to write to recent dirs file");
+		let favorites_res = get_favorites_list_path()
+			.and_then(|path| self.favorites.save(&path) .map_err(AppError::from));
+
+		if recent_res.is_ok() && favorites_res.is_ok() { return; }
+
+		let bg_color: Color = Color::from(self.cfg.borrow().bg_color);
+		let text_color: Color = Color::from(self.cfg.borrow().file_color);
+		let mut y: i32 = 0;
+
+		self.engine.fill(pixel::pxl_bg(' ', bg_color));
+
+		if let Err(err) = recent_res {
+			self.engine.print_fbg(0, y,
+				&format!("Error while saving recent directories list:\n {err}"),
+				Color::Red, bg_color);
+			y += 3;
+		}
+
+		if let Err(err) = favorites_res {
+			self.engine.print_fbg(0, y,
+				&format!("Error while saving favorites list:\n {err}"),
+				Color::Red, bg_color);
+			y += 3;
+		}
+
+		self.engine.print_fbg(0, y, "Press Enter to continue...", text_color, bg_color);
+		self.engine.draw();
+
+        let exit_codes: [KeyCode; 3] = [
+            KeyCode::Enter,
+            KeyCode::Esc,
+            KeyCode::Char(' '),
+        ];
+
+		while !exit_codes.iter() .any(|c| self.engine.is_key_pressed(c.clone()) ) {
+			self.engine.wait_frame();
+		}
+
 	}
 }
-
-
-
-
 
 
