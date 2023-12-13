@@ -1,7 +1,7 @@
-use std::cell::RefCell;
 use std::env;
 use std::fmt::Display;
-use std::{path::PathBuf, rc::Rc};
+use std::sync::OnceLock;
+use std::path::PathBuf;
 
 use clean_path::Clean;
 use config::{Configs, FavoritesList};
@@ -26,7 +26,9 @@ const FAVORITES_LIST_FILE_NAME: &str = "favorites.txt";
 
 const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits();
 
-type Cfg = Rc<RefCell<Configs>>;
+static CONFIGS: OnceLock<Configs> = OnceLock::new();
+
+
 
 #[derive(Debug)]
 pub enum AppError {
@@ -82,10 +84,11 @@ pub enum RunOption {
 }
 
 fn main() {
-    let cfg: Result<Configs, AppError> =
-        confy::load(APPNAME, Some(CONFIG_PATH)).map_err(AppError::from);
+    let cfg: Result<Configs, AppError> = confy::load(APPNAME, Some(CONFIG_PATH))
+        .map_err(AppError::from);
 
     // Process command line arguments
+    // TODO check
     let (run_path, cfg): (PathBuf, Configs) = match (parse_cli(env::args()), cfg) {
         // We don't care about the configs when showing help message
         (Ok(RunOption::Help), _) => {
@@ -147,8 +150,14 @@ fn main() {
         },
     };
 
+    if let Err(_) = CONFIGS.set(cfg) {
+        println!("Failed to set global configs.");
+        pause(false);
+        return;
+    }
+
     // Setup app
-    let mut app: App = match App::new(&run_path, cfg) {
+    let mut app: App = match App::new(&run_path) {
         Ok(app) => app,
 
         Err(err) => {
@@ -170,6 +179,8 @@ fn main() {
         }
     }
 }
+
+
 
 fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
     if let Some(a) = args.nth(1) {
@@ -198,6 +209,9 @@ fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
         Ok(RunOption::AtDefaultPath)
     }
 }
+
+
+
 
 fn get_recent_dirs_path() -> Result<PathBuf, AppError> {
     confy::get_configuration_file_path(APPNAME, None)

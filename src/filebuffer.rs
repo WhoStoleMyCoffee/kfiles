@@ -8,7 +8,8 @@ use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use console_engine::screen::Screen;
 use console_engine::{pixel, Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::{util, AppError, Cfg, CONTROL_SHIFT};
+use crate::config::Configs;
+use crate::{util, AppError, CONTROL_SHIFT};
 
 /// Syntax:
 /// ```rust
@@ -49,19 +50,17 @@ pub struct FileBuffer {
     screen: Screen,
     selected_index: usize,
     scroll: usize,
-    cfg: Cfg,
     pub entries: Vec<PathBuf>, // List of folders & files
     pub status_line: StatusLine,
 }
 
 impl FileBuffer {
-    pub fn new(path: &Path, screen: Screen, cfg: Cfg) -> Self {
+    pub fn new(path: &Path, screen: Screen) -> Self {
         FileBuffer {
             path: PathBuf::from(path),
             screen,
             selected_index: 0,
             scroll: 0,
-            cfg,
             entries: vec![],
             status_line: StatusLine {
                 text: util::path2string(path),
@@ -258,7 +257,7 @@ impl FileBuffer {
                     try_err!(self.load_entries() => self; else {
                         self.status_line.normal()
                             .set_text( &format!("Created folder \"{}\"", &dir_name) )
-                            .set_color_as(self.cfg.borrow().special_color);
+                            .set_color_as( Configs::global().special_color );
                         self.select( &OsString::from(&dir_name) );
                     });
                 }
@@ -284,7 +283,7 @@ impl FileBuffer {
                     try_err!(self.load_entries() => self; else {
                         self.status_line.normal()
                             .set_text( &format!("Created file \"{}\"", &file_name) )
-                            .set_color_as(self.cfg.borrow().special_color);
+                            .set_color_as(Configs::global().special_color);
                         self.select( &OsString::from(&file_name) );
                     });
                 }
@@ -312,7 +311,7 @@ impl FileBuffer {
                             format!("Successfully deleted \"{}\"", util::file_name(pathbuf));
                         self.status_line
                             .set_text(&text)
-                            .set_color_as(self.cfg.borrow().special_color);
+                            .set_color_as(Configs::global().special_color);
                     }
 
                     try_err!(self.load_entries() => self; else {
@@ -331,7 +330,7 @@ impl FileBuffer {
                     } else {
                         self.status_line
                             .set_text(&format!("Successfully renamed to \"{}\"", &text))
-                            .set_color_as(self.cfg.borrow().special_color);
+                            .set_color_as(Configs::global().special_color);
                     }
 
                     try_err!(self.load_entries() => self; else {
@@ -461,7 +460,7 @@ impl FileBuffer {
 
                 self.status_line
                     .set_text("Searching for: ")
-                    .set_color_as(self.cfg.borrow().special_color)
+                    .set_color_as(Configs::global().special_color)
                     .prompt(PromptLine::default(), PromptMode::QuickSearch);
             }
 
@@ -473,7 +472,7 @@ impl FileBuffer {
             } if modifiers.bits() == CONTROL_SHIFT => {
                 self.status_line
                     .set_text("Create folder: ")
-                    .set_color_as(self.cfg.borrow().special_color)
+                    .set_color_as(Configs::global().special_color)
                     .prompt(PromptLine::default(), PromptMode::CreateDir);
             }
 
@@ -485,7 +484,7 @@ impl FileBuffer {
             } => {
                 self.status_line
                     .set_text("Create file: ")
-                    .set_color_as(self.cfg.borrow().special_color)
+                    .set_color_as(Configs::global().special_color)
                     .prompt(PromptLine::default(), PromptMode::CreateFile);
             }
 
@@ -534,7 +533,7 @@ impl FileBuffer {
                         .map_or(0, |i| i + 1);
                 self.status_line
                     .set_text(format!("Rename \"{}\" to: ", &file_name).as_str())
-                    .set_color_as(self.cfg.borrow().special_color)
+                    .set_color_as(Configs::global().special_color)
                     .prompt(
                         PromptLine {
                             input: file_name,
@@ -549,7 +548,7 @@ impl FileBuffer {
     }
 
     fn update_scroll(&mut self) {
-        let u_scroll_margin: usize = self.cfg.borrow().scroll_margin as usize;
+        let u_scroll_margin: usize = Configs::global().scroll_margin as usize;
         let max_bound: usize = self.screen.get_height() as usize - u_scroll_margin;
 
         if self.selected_index < self.scroll + u_scroll_margin {
@@ -561,7 +560,7 @@ impl FileBuffer {
     }
 
     pub fn draw(&mut self) -> &Screen {
-        let bg_color = Color::from(self.cfg.borrow().bg_color);
+        let bg_color = Color::from(Configs::global().bg_color);
         self.screen.fill(pixel::pxl_bg(' ', bg_color));
 
         // Display empty
@@ -572,8 +571,8 @@ impl FileBuffer {
         }
 
         let screen_selected_idx: isize = self.selected_index as isize - self.scroll as isize;
-        let folder_color: Color = Color::from(self.cfg.borrow().folder_color);
-        let file_color: Color = Color::from(self.cfg.borrow().file_color);
+        let folder_color: Color = Color::from(Configs::global().folder_color);
+        let file_color: Color = Color::from(Configs::global().file_color);
 
         // Highlight line
         self.screen.h_line(

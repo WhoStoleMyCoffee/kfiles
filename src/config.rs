@@ -7,6 +7,7 @@ use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::util::{self, read_lines};
+use crate::CONFIGS;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Configs {
@@ -22,6 +23,12 @@ pub struct Configs {
     pub file_color: (u8, u8, u8),
     pub special_color: (u8, u8, u8),
     pub bg_color: (u8, u8, u8),
+}
+
+impl Configs {
+    pub fn global() -> &'static Self {
+        CONFIGS.get() .expect("Configs not initialized")
+    }
 }
 
 impl Default for Configs {

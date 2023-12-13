@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
@@ -13,7 +12,9 @@ use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use console_engine::events::Event;
 use console_engine::forms::{Form, FormField, FormOptions, FormStyle, FormValue, Text};
 
-use crate::{util::*, Cfg};
+use crate::config::Configs;
+use crate::util::*;
+
 
 #[derive(Debug, Clone)]
 pub struct FileEntry {
@@ -90,25 +91,24 @@ pub struct SearchPanel {
     color: Color,
     selected_index: usize,
     query: SearchQuery,
-    cfg: Cfg,
     pub state: SearchPanelState,
 }
 
 impl SearchPanel {
-    pub fn new(width: u32, height: u32, mode: SearchQueryMode, cfg: Cfg) -> Self {
+    pub fn new(width: u32, height: u32, mode: SearchQueryMode) -> Self {
+        let cfg: &Configs = Configs::global();
         let max_result_count: usize = (height - 5) as usize;
-        let max_stack_size: usize = cfg.borrow().max_search_stack;
-        let ignore_types: String = cfg.borrow().search_ignore_types.clone();
-        let bg_color = Color::from(cfg.borrow().bg_color);
+        let max_stack_size: usize = cfg.max_search_stack;
+        let ignore_types: String = cfg.search_ignore_types.clone();
+        let bg_color = Color::from(cfg.bg_color);
 
         Self {
             screen: Screen::new(width, height),
             form: SearchPanel::build_form(width - 2, bg_color),
             title: "Search".to_string(),
-            color: Color::from(cfg.borrow().file_color),
+            color: Color::from(cfg.file_color),
             selected_index: 0,
             query: SearchQuery::new(mode, max_result_count, max_stack_size, ignore_types),
-            cfg: Rc::clone(&cfg),
             state: SearchPanelState::Running,
         }
     }
@@ -249,7 +249,7 @@ impl SearchPanel {
         }
 
         let offset: (i32, i32) = (2, 4);
-        let bg_color = Color::from(self.cfg.borrow().bg_color);
+        let bg_color = Color::from(Configs::global().bg_color);
 
         // Highlight selected line
         self.screen.h_line(
@@ -290,7 +290,7 @@ impl SearchPanel {
     }
 
     pub fn draw(&mut self, tick: usize) -> &Screen {
-        let bg_color = Color::from(self.cfg.borrow().bg_color);
+        let bg_color = Color::from(Configs::global().bg_color);
         self.screen.fill(pixel::pxl_bg(' ', bg_color));
 
         self.screen.rect_border(
