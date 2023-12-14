@@ -3,11 +3,19 @@ use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
+use console_engine::Color;
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::util::{self, read_lines};
 use crate::CONFIGS;
+
+#[macro_export]
+macro_rules! themevar {
+    ($c:ident) => {
+        Color::from(Configs::global().theme.$c)
+    };
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Configs {
@@ -17,17 +25,16 @@ pub struct Configs {
     pub update_rate: u32,
     pub search_ignore_types: String,
     pub max_recent_count: usize,
-
-    // The best feature: colors
-    pub folder_color: (u8, u8, u8),
-    pub file_color: (u8, u8, u8),
-    pub special_color: (u8, u8, u8),
-    pub bg_color: (u8, u8, u8),
+    pub theme: ColorTheme,
 }
 
 impl Configs {
     pub fn global() -> &'static Self {
-        CONFIGS.get() .expect("Configs not initialized")
+        CONFIGS.get().expect("Configs not initialized")
+    }
+
+    pub fn theme() -> &'static ColorTheme {
+        &CONFIGS.get().expect("Configs not initialized").theme
     }
 }
 
@@ -43,11 +50,7 @@ impl Default for Configs {
             update_rate: 12,
             search_ignore_types: String::new(),
             max_recent_count: 64,
-
-            folder_color: (255, 209, 84),
-            file_color: (206, 217, 214),
-            special_color: (110, 209, 255),
-            bg_color: (35, 47, 54),
+            theme: ColorTheme::default(),
         }
     }
 }
@@ -192,3 +195,51 @@ impl AsRef<Vec<PathBuf>> for RecentList {
         &self.list
     }
 }
+
+pub type Col8 = (u8, u8, u8);
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ColorTheme {
+    pub folder_color: Col8,
+    pub file_color: Col8,
+    pub special_color: Col8,
+    pub bg_color: Col8,
+    pub text_color: Col8,
+    pub comment_color: Col8,
+    pub error_color: Col8,
+}
+
+impl Default for ColorTheme {
+    fn default() -> Self {
+        Self {
+            folder_color: (255, 209, 84),
+            file_color: (206, 217, 214),
+            special_color: (110, 209, 255),
+            bg_color: (35, 47, 54),
+            text_color: (220, 220, 200),
+            comment_color: (100, 100, 100),
+            error_color: (224, 88, 79),
+        }
+    }
+}
+
+/// Literally `std::ops::Neg`
+pub trait Invert {
+    type Output;
+    fn inv(self) -> Self::Output;
+}
+
+impl Invert for (u8, u8, u8) {
+    type Output = Self;
+    fn inv(self) -> Self::Output {
+        (255 - self.0, 255 - self.1, 255 - self.2)
+    }
+}
+
+// Nah maybe someday
+// impl Invert for Color {
+//     type Output = Self;
+//     fn inv(self) -> Self::Output {
+//         todo!()
+//     }
+// }

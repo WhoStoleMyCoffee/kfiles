@@ -8,15 +8,16 @@ use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use console_engine::screen::Screen;
 use console_engine::{pixel, Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::config::Configs;
+use crate::config::{ColorTheme, Configs, Invert};
+use crate::themevar;
 use crate::{util, AppError, CONTROL_SHIFT};
 
 /// Syntax:
 /// ```rust
-/// let_err!( self.load_entries() => self );
-/// let_err!( self.load_entries() => self, "context" );
-/// let_err!( self.load_entries() => self; else { ... } );
-/// let_err!( self.load_entries() => self, else "context"; { ... } );
+/// let_err!( some_result=> self );
+/// let_err!( some_result => self, "context" );
+/// let_err!( some_result => self; else { ... } );
+/// let_err!( some_result => self, "context"; else { ... } );
 /// ```
 #[macro_export]
 macro_rules! try_err {
@@ -64,7 +65,7 @@ impl FileBuffer {
             entries: vec![],
             status_line: StatusLine {
                 text: util::path2string(path),
-                color: Color::White,
+                color: themevar!(text_color),
                 state: StatusLineState::Normal,
             },
         }
@@ -99,7 +100,7 @@ impl FileBuffer {
     pub fn display_path(&mut self) {
         self.status_line
             .set_text(&self.path.display().to_string())
-            .set_color(Color::White);
+            .set_color(themevar!(text_color));
     }
 
     /// Sets the path
@@ -257,7 +258,7 @@ impl FileBuffer {
                     try_err!(self.load_entries() => self; else {
                         self.status_line.normal()
                             .set_text( &format!("Created folder \"{}\"", &dir_name) )
-                            .set_color_as( Configs::global().special_color );
+                            .set_color( themevar!(special_color) );
                         self.select( &OsString::from(&dir_name) );
                     });
                 }
@@ -283,7 +284,7 @@ impl FileBuffer {
                     try_err!(self.load_entries() => self; else {
                         self.status_line.normal()
                             .set_text( &format!("Created file \"{}\"", &file_name) )
-                            .set_color_as(Configs::global().special_color);
+                            .set_color( themevar!(special_color) );
                         self.select( &OsString::from(&file_name) );
                     });
                 }
@@ -311,7 +312,7 @@ impl FileBuffer {
                             format!("Successfully deleted \"{}\"", util::file_name(pathbuf));
                         self.status_line
                             .set_text(&text)
-                            .set_color_as(Configs::global().special_color);
+                            .set_color(themevar!(special_color));
                     }
 
                     try_err!(self.load_entries() => self; else {
@@ -330,7 +331,7 @@ impl FileBuffer {
                     } else {
                         self.status_line
                             .set_text(&format!("Successfully renamed to \"{}\"", &text))
-                            .set_color_as(Configs::global().special_color);
+                            .set_color(themevar!(special_color));
                     }
 
                     try_err!(self.load_entries() => self; else {
@@ -460,7 +461,7 @@ impl FileBuffer {
 
                 self.status_line
                     .set_text("Searching for: ")
-                    .set_color_as(Configs::global().special_color)
+                    .set_color(themevar!(special_color))
                     .prompt(PromptLine::default(), PromptMode::QuickSearch);
             }
 
@@ -472,7 +473,7 @@ impl FileBuffer {
             } if modifiers.bits() == CONTROL_SHIFT => {
                 self.status_line
                     .set_text("Create folder: ")
-                    .set_color_as(Configs::global().special_color)
+                    .set_color(themevar!(special_color))
                     .prompt(PromptLine::default(), PromptMode::CreateDir);
             }
 
@@ -484,7 +485,7 @@ impl FileBuffer {
             } => {
                 self.status_line
                     .set_text("Create file: ")
-                    .set_color_as(Configs::global().special_color)
+                    .set_color(themevar!(special_color))
                     .prompt(PromptLine::default(), PromptMode::CreateFile);
             }
 
@@ -505,7 +506,7 @@ impl FileBuffer {
                 };
                 self.status_line
                     .set_text(format!("Delete {}? (y/n): ", &file_name).as_str())
-                    .set_color(Color::Red)
+                    .set_color(themevar!(error_color))
                     .prompt(PromptLine::default(), PromptMode::Delete(selected_path));
             }
 
@@ -533,7 +534,7 @@ impl FileBuffer {
                         .map_or(0, |i| i + 1);
                 self.status_line
                     .set_text(format!("Rename \"{}\" to: ", &file_name).as_str())
-                    .set_color_as(Configs::global().special_color)
+                    .set_color(themevar!(special_color))
                     .prompt(
                         PromptLine {
                             input: file_name,
@@ -560,26 +561,27 @@ impl FileBuffer {
     }
 
     pub fn draw(&mut self) -> &Screen {
-        let bg_color = Color::from(Configs::global().bg_color);
+        let theme: &ColorTheme = Configs::theme();
+        let bg_color: Color = theme.bg_color.into();
         self.screen.fill(pixel::pxl_bg(' ', bg_color));
 
         // Display empty
         if self.entries.is_empty() {
             self.screen
-                .print_fbg(0, 0, "(Empty)", Color::DarkGrey, bg_color);
+                .print_fbg(0, 0, "(Empty)", themevar!(comment_color), bg_color);
             return &self.screen;
         }
 
         let screen_selected_idx: isize = self.selected_index as isize - self.scroll as isize;
-        let folder_color: Color = Color::from(Configs::global().folder_color);
-        let file_color: Color = Color::from(Configs::global().file_color);
+        let folder_color: Color = theme.folder_color.into();
+        let file_color: Color = theme.file_color.into();
 
         // Highlight line
         self.screen.h_line(
             0,
             screen_selected_idx as i32,
             self.screen.get_width() as i32,
-            pixel::pxl_bg(' ', Color::DarkGrey),
+            pixel::pxl_bg(' ', theme.comment_color.into()),
         );
 
         // Display entries
@@ -590,7 +592,7 @@ impl FileBuffer {
             let mut file_name: String = util::file_name(pathbuf);
 
             let bg: Color = if i == screen_selected_idx as usize {
-                Color::DarkGrey
+                theme.comment_color.into()
             } else {
                 bg_color
             };
@@ -643,14 +645,6 @@ impl StatusLine {
         self
     }
 
-    pub fn set_color_as<C>(&mut self, color: C) -> &mut Self
-    where
-        C: Into<Color>,
-    {
-        self.color = color.into();
-        self
-    }
-
     pub fn normal(&mut self) -> &mut Self {
         self.state = StatusLineState::Normal;
         self
@@ -658,7 +652,7 @@ impl StatusLine {
 
     pub fn error(&mut self, err: AppError, prefix: Option<&str>) -> &mut Self {
         self.state = StatusLineState::Error(err);
-        self.color = Color::Red;
+        self.color = themevar!(error_color);
         self.text = prefix.unwrap_or("Error: \n ").to_string();
         self
     }
@@ -671,7 +665,7 @@ impl StatusLine {
         self
     }
 
-    pub fn draw(&self, engine: &mut ConsoleEngine, bg_color: Color) {
+    pub fn draw(&self, engine: &mut ConsoleEngine) {
         let text: String = self.to_string();
 
         let prompt_line: &PromptLine = match &self.state {
@@ -682,7 +676,7 @@ impl StatusLine {
                     engine.get_height() as i32 - text.lines().count() as i32,
                     &text,
                     self.color,
-                    bg_color,
+                    themevar!(bg_color),
                 );
                 return;
             }
@@ -694,17 +688,18 @@ impl StatusLine {
             engine.get_height() as i32 - 1,
             &text,
             self.color,
-            bg_color,
+            themevar!(bg_color),
         );
 
         let i: i32 = prompt_line.cursor_pos as i32;
         let ch: &str = prompt_line.get(i as usize..i as usize + 1).unwrap_or(" ");
+        let text_col = Configs::theme().text_color;
         engine.print_fbg(
             i + self.text.len() as i32,
             engine.get_height() as i32 - 1,
             ch,
-            Color::Black,
-            Color::White,
+            text_col.inv().into(),
+            text_col.into(),
         )
     }
 }

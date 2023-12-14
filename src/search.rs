@@ -12,9 +12,8 @@ use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use console_engine::events::Event;
 use console_engine::forms::{Form, FormField, FormOptions, FormStyle, FormValue, Text};
 
-use crate::config::Configs;
-use crate::util::*;
-
+use crate::config::{ColorTheme, Configs, Invert};
+use crate::{themevar, util::*};
 
 #[derive(Debug, Clone)]
 pub struct FileEntry {
@@ -97,16 +96,16 @@ pub struct SearchPanel {
 impl SearchPanel {
     pub fn new(width: u32, height: u32, mode: SearchQueryMode) -> Self {
         let cfg: &Configs = Configs::global();
+
         let max_result_count: usize = (height - 5) as usize;
         let max_stack_size: usize = cfg.max_search_stack;
         let ignore_types: String = cfg.search_ignore_types.clone();
-        let bg_color = Color::from(cfg.bg_color);
 
         Self {
             screen: Screen::new(width, height),
-            form: SearchPanel::build_form(width - 2, bg_color),
+            form: SearchPanel::build_form(width - 2, cfg.theme.bg_color.into()),
             title: "Search".to_string(),
-            color: Color::from(cfg.file_color),
+            color: cfg.theme.file_color.into(),
             selected_index: 0,
             query: SearchQuery::new(mode, max_result_count, max_stack_size, ignore_types),
             state: SearchPanelState::Running,
@@ -125,7 +124,7 @@ impl SearchPanel {
 
     fn build_form(width: u32, bg_color: Color) -> Form {
         let theme = FormStyle {
-            border: Some(BorderStyle::new_light().with_colors(Color::White, bg_color)),
+            border: Some(BorderStyle::new_light().with_colors(themevar!(text_color), bg_color)),
             bg: bg_color,
             ..Default::default()
         };
@@ -249,14 +248,15 @@ impl SearchPanel {
         }
 
         let offset: (i32, i32) = (2, 4);
-        let bg_color = Color::from(Configs::global().bg_color);
+        let theme: &ColorTheme = Configs::theme();
+        let bg_color = Color::from(theme.bg_color);
 
         // Highlight selected line
         self.screen.h_line(
             offset.0,
             self.selected_index as i32 + offset.1,
             self.screen.get_width() as i32 - 2,
-            pixel::pxl_bg(' ', Color::DarkGrey),
+            pixel::pxl_bg(' ', theme.comment_color.into()),
         );
 
         for (i, entry) in self.query.results.iter().enumerate() {
@@ -265,7 +265,7 @@ impl SearchPanel {
             }
 
             let bg: Color = if i == self.selected_index {
-                Color::DarkGrey
+                theme.comment_color.into()
             } else {
                 bg_color
             };
@@ -289,16 +289,20 @@ impl SearchPanel {
         }
     }
 
+    // TODO optimize maybe
     pub fn draw(&mut self, tick: usize) -> &Screen {
-        let bg_color = Color::from(Configs::global().bg_color);
-        self.screen.fill(pixel::pxl_bg(' ', bg_color));
+        let theme: &ColorTheme = Configs::theme();
+        let bg_color = theme.bg_color;
+        let bg_inverted = theme.bg_color.inv();
+
+        self.screen.fill(pixel::pxl_bg(' ', bg_color.into()));
 
         self.screen.rect_border(
             0,
             0,
             self.screen.get_width() as i32 - 1,
             self.screen.get_height() as i32 - 1,
-            BorderStyle::new_light().with_colors(Color::Grey, bg_color),
+            BorderStyle::new_light().with_colors(bg_inverted.into(), bg_color.into()),
         );
 
         self.screen.print_screen(1, 1, self.form.draw(tick));
@@ -306,7 +310,7 @@ impl SearchPanel {
 
         let text: String = format!(" {} ", &self.title);
         self.screen
-            .print_fbg(2, 0, &text, Color::Black, Color::Grey);
+            .print_fbg(2, 0, &text, bg_color.into(), bg_inverted.into());
 
         &self.screen
     }

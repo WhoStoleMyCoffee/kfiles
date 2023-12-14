@@ -1,7 +1,7 @@
 use std::env;
 use std::fmt::Display;
-use std::sync::OnceLock;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use clean_path::Clean;
 use config::{Configs, FavoritesList};
@@ -27,8 +27,6 @@ const FAVORITES_LIST_FILE_NAME: &str = "favorites.txt";
 const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits();
 
 static CONFIGS: OnceLock<Configs> = OnceLock::new();
-
-
 
 #[derive(Debug)]
 pub enum AppError {
@@ -84,8 +82,8 @@ pub enum RunOption {
 }
 
 fn main() {
-    let cfg: Result<Configs, AppError> = confy::load(APPNAME, Some(CONFIG_PATH))
-        .map_err(AppError::from);
+    let cfg: Result<Configs, AppError> =
+        confy::load(APPNAME, Some(CONFIG_PATH)).map_err(AppError::from);
 
     // Process command line arguments
     // TODO check
@@ -150,7 +148,7 @@ fn main() {
         },
     };
 
-    if let Err(_) = CONFIGS.set(cfg) {
+    if CONFIGS.set(cfg).is_err() {
         println!("Failed to set global configs.");
         pause(false);
         return;
@@ -180,8 +178,6 @@ fn main() {
     }
 }
 
-
-
 fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
     if let Some(a) = args.nth(1) {
         match a.as_str() {
@@ -209,9 +205,6 @@ fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
         Ok(RunOption::AtDefaultPath)
     }
 }
-
-
-
 
 fn get_recent_dirs_path() -> Result<PathBuf, AppError> {
     confy::get_configuration_file_path(APPNAME, None)
@@ -275,12 +268,12 @@ fn print_help() {
         r#"
 Thank you for using {APPNAME} v{VERSION}
 
-Usage:
+USAGE:
 	kfiles		Run the program at the default directory
 	kfiles <path>		Run the program at the specified directory
 	kfiles [options ..]
 
-Options:
+OPTIONS:
 	--help, -h		Show this message
 	--favorites, -f <query>		Opens the program with the first result that matches <query> in your favorites
 	--config, --configs, -c, -cfg, --cfg		Opens the configuration file
@@ -290,7 +283,7 @@ Options:
     if let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {
         println!(
             r#"
-Configs:
+CONFIGS:
 You can find your config file at {}
 	scroll_margin		Minimum spacing between cursor and edge
 	max_search_stack	How "deep" to search in search panel
@@ -301,10 +294,14 @@ You can find your config file at {}
 	search_ignore_types		The types of files to ignore while searching
 		E.g. "import,txt" will ignore all .import and .txt files
 
-	folder_color		The RGB color values for displaying folders
-	file_color		The RGB color values for displaying files
-	special_color		The RGB color values for displaying special text
-	bg_color		The RGB color values for the background
+    THEME (all in RGB color values):
+	folder_color		Color for displaying folders
+	file_color		Color for displaying files
+	special_color		Color for special text
+	bg_color		App's background color
+    text_color      Color for normal text
+    comment_color       Color for dimmed text (comments)
+    error_color     Color for errors
 "#,
             p.display()
         );
@@ -312,7 +309,7 @@ You can find your config file at {}
 
     println!(
         r#"
-Keybinds:
+KEYBINDS:
 	Navigation:
 	j or down arrow		Move cursor down
 	k or up arrow		Move cursor up
@@ -323,7 +320,7 @@ Keybinds:
 	g and G	 Jump to the start and end of the list
 	- or Backspace	  Go back
 
-	Other:
+	OTHER:
 	Ctrl-o		Search recent directories
 	Ctrl-p		Search files (Esc to cancel)
 	Ctrl-Shift-p		Search folders (Esc to cancel)
@@ -335,7 +332,7 @@ Keybinds:
 	Ctrl-d	  Delete file / folder
 	Ctrl-r	  Rename file / folder
 
-	When in search panel:
+	WHEN IN SEARCH PANEL:
 	up and down arrows		Move cursor
 	Enter		Open selected file/folder
 "#
