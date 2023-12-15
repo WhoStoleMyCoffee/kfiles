@@ -367,6 +367,7 @@ impl FileBuffer {
             // Move cursor up
             KeyEvent {
                 code: KeyCode::Char('k') | KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
                 ..
             } => {
                 let len: usize = self.entries.len();
@@ -380,6 +381,7 @@ impl FileBuffer {
             // Move cursor down
             KeyEvent {
                 code: KeyCode::Char('j') | KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
                 ..
             } => {
                 let len: usize = self.entries.len();
@@ -390,9 +392,39 @@ impl FileBuffer {
                 self.update_scroll();
             }
 
+            // Move down half a page
+            KeyEvent {
+                code: KeyCode::Char('d') | KeyCode::PageDown,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                let len: usize = self.entries.len();
+                if len == 0 { return; }
+
+                let half_height: usize = self.screen.get_height() as usize / 2;
+                self.selected_index = (self.selected_index + half_height)
+                    .clamp(0, len-1);
+                self.update_scroll();
+            }
+
+            // Move up half a page
+            KeyEvent {
+                code: KeyCode::Char('u') | KeyCode::PageUp,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                let len: usize = self.entries.len();
+                if len == 0 { return; }
+
+                let half_height: usize = self.screen.get_height() as usize / 2;
+                self.selected_index = self.selected_index.clamp(half_height, len-1) - half_height;
+                self.update_scroll();
+            }
+
             // Open
             KeyEvent {
                 code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
                 ..
             } => {
                 try_err!(self.open_selected() => self; else {
@@ -404,6 +436,7 @@ impl FileBuffer {
             // Go back
             KeyEvent {
                 code: KeyCode::Char('-') | KeyCode::Backspace,
+                modifiers: KeyModifiers::NONE,
                 ..
             } => {
                 let folder_name: Option<OsString> = self.path.file_name().map(|s| s.to_os_string());
@@ -427,6 +460,7 @@ impl FileBuffer {
             // Jump to start
             KeyEvent {
                 code: KeyCode::Char('g'),
+                modifiers: KeyModifiers::NONE,
                 ..
             } => {
                 let len: usize = self.entries.len();

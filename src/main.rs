@@ -86,7 +86,6 @@ fn main() {
         confy::load(APPNAME, Some(CONFIG_PATH)).map_err(AppError::from);
 
     // Process command line arguments
-    // TODO check
     let (run_path, cfg): (PathBuf, Configs) = match (parse_cli(env::args()), cfg) {
         // We don't care about the configs when showing help message
         (Ok(RunOption::Help), _) => {
@@ -144,12 +143,12 @@ fn main() {
                 (list.query(&query).unwrap_or(&cfg.default_path).clone(), cfg)
             }
 
-            RunOption::Help | RunOption::Config => unreachable!(), // Already checked at first match pattern
+            RunOption::Help | RunOption::Config => unreachable!(), // Already checked up there
         },
     };
 
     if CONFIGS.set(cfg).is_err() {
-        println!("Failed to set global configs.");
+        println!("Error: Failed to set global configs.");
         pause(false);
         return;
     }
@@ -187,7 +186,7 @@ fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
 
             "--favorites" | "-f" => {
                 let query: String = args.next()
-                    .ok_or("Error: Invalid syntax for --favorites. Expected field <query>\n Syntax: \t --favorites, -f <query>")?;
+                    .ok_or("Invalid syntax for --favorites. Expected field <query>\n Syntax: \t --favorites <query> or -f <query>")?;
                 Ok(RunOption::TryFavorite(query))
             }
 
@@ -263,81 +262,120 @@ fn pause(with_help_tip: bool) {
     let _ = std::io::stdin().read_line(&mut String::new());
 }
 
+
+
+macro_rules! printhelp {
+    ($al:expr; $name:expr, $desc:expr) => {
+        println!("    {}{}{}", $name, " ".repeat($al - $name.len() - 4), $desc);
+    };
+
+    ($t:expr => $al:expr; $name:expr, $desc:expr) => {
+        println!("{}{}{}{}", " ".repeat($t), $name, " ".repeat($al - $name.len() - $t), $desc);
+    };
+
+    ($al:expr; $( $name:expr, $desc:expr );*;) => {
+        {
+            let mut v: Vec<String> = Vec::new();
+            $(
+                v.push( format!("    {}{}{}", $name, " ".repeat($al - $name.len() - 4), $desc ) );
+            )*
+            println!("{}", v.join("\n"));
+        }
+    };
+
+    ($t:expr => $al:expr; $( $name:expr, $desc:expr );*;) => {
+        {
+            let mut v: Vec<String> = Vec::new();
+            let t: &str = &" ".repeat($t);
+            $(
+                v.push( format!("{}{}{}{}", &t, $name, " ".repeat($al - $name.len() - $t), $desc ) );
+            )*
+            println!("{}", v.join("\n"));
+        }
+    };
+}
+
+
+
 fn print_help() {
-    println!(
-        r#"
-Thank you for using {APPNAME} v{VERSION}
+    let align: usize = 32;
+    let tab: &str = &" ".repeat(4);
 
-USAGE:
-	kfiles		Run the program at the default directory
-	kfiles <path>		Run the program at the specified directory
-	kfiles [options ..]
+    println!("Thank you for using {APPNAME} v{VERSION}\n\nUSAGE:");
+    printhelp!{align;
+        "kfiles", "Run the program at the default directory";
+        "kfiles <path>", "Run the program at the specified directory";
+	    "kfiles [options ..]", "";
+    };
 
-OPTIONS:
-	--help, -h		Show this message
-	--favorites, -f <query>		Opens the program with the first result that matches <query> in your favorites
-	--config, --configs, -c, -cfg, --cfg		Opens the configuration file
-"#
-    );
+    println!("\n\nOPTIONS:");
+    printhelp!{align;
+	    "--help, -h", "Show this message";
+	    "--favorites, -f <query>", "Opens the program with the first result that matches <query> in your favorites";
+    };
+
+	println!("{tab}--config, --configs, -c, -cfg, --cfg");
+	printhelp!(align; "", "Opens the configuration file");
 
     if let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {
-        println!(
-            r#"
-CONFIGS:
-You can find your config file at {}
-	scroll_margin		Minimum spacing between cursor and edge
-	max_search_stack	How "deep" to search in search panel
-	max_recent_count	How many directories to keep track of in the recent list
-	favorites		List of favorite directories
-	default_dir		Default directory when the program is run
-	update_rate		The frames per second to run the program at
-	search_ignore_types		The types of files to ignore while searching
-		E.g. "import,txt" will ignore all .import and .txt files
+        println!("\n\nCONFIGS:\nYou can find your config file at: {}", p.display());
+        printhelp!{align;
+            "scroll_margin", "Minimum spacing between cursor and edge";
+            "max_search_stack", "How \"deep\" to search in search panel";
+            "max_recent_count", "How many directories to keep track of in the recent list";
+            "favorites", "List of favorite directories";
+            "default_dir", "Default directory when the program is run";
+            "update_rate", "The frames per second to run the program at";
+            "search_ignore_types", "The types of files to ignore while searching";
+        };
+        println!("{tab}{tab}E.g. \"import,txt\" will ignore all .import and .txt files\n");
 
-    THEME (all in RGB color values):
-	folder_color		Color for displaying folders
-	file_color		Color for displaying files
-	special_color		Color for special text
-	bg_color		App's background color
-    text_color      Color for normal text
-    comment_color       Color for dimmed text (comments)
-    error_color     Color for errors
-"#,
-            p.display()
-        );
+        println!("{tab}THEME (all in RGB color values):");
+        printhelp!{align;
+            "folder_color", "Color for displaying folders";
+            "file_color", "Color for displaying files";
+            "special_color", "Color for special text";
+            "bg_color", "App's background color";
+            "text_color", "Color for normal text";
+            "comment_color", "Color for dimmed text (comments)";
+            "error_color", "Color for errors";
+        };
     }
 
-    println!(
-        r#"
-KEYBINDS:
-	Navigation:
-	j or down arrow		Move cursor down
-	k or up arrow		Move cursor up
-	Ctrl-c or Alt-F4		Exit the program
-	Enter		Open selected folder, file, or program
-	` or Tab		Search favorites (Esc or ` to cancel)
-	/ or ;	  Quick search
-	g and G	 Jump to the start and end of the list
-	- or Backspace	  Go back
+    println!("\n\nKEYBINDS:\n{tab}NAVIGATION:");
+    printhelp!{align;
+        "j or down arrow", "Move cursor down";
+        "k or up arrow", "Move cursor up";
+        "Ctrl-c or Alt-F4", "Exit the program";
+        "Enter", "Open selected folder, file, or program";
+        "` or Tab", "Search favorites (Esc or ` to cancel)";
+        "/ or ;", "Quick search";
+        "g and G", "Jump to the start and end of the list";
+        "- or Backspace", "Go back";
+        "u and d", "Jump up or down half a page";
+    };
 
-	OTHER:
-	Ctrl-o		Search recent directories
-	Ctrl-p		Search files (Esc to cancel)
-	Ctrl-Shift-p		Search folders (Esc to cancel)
-	Ctrl-f		Toggle current directory as favorite
-	Ctrl-e		Reveal current directory in default file explorer
-	Ctrl-Shift-e		Reveal current directory in default file explorer and exit KFiles
-	Ctrl-n	  Create file
-	Ctrl-Shift-n	  Create folder
-	Ctrl-d	  Delete file / folder
-	Ctrl-r	  Rename file / folder
+    println!("\n{tab}OTHER:");
+    printhelp!{align;
+        "Ctrl-o", "Search recent directories";
+        "Ctrl-p", "Search files (Esc to cancel)";
+        "Ctrl-Shift-p", "Search folders (Esc to cancel)";
+        "Ctrl-f", "Toggle current directory as favorite";
+        "Ctrl-e", "Reveal current directory in default file explorer";
+        "Ctrl-Shift-e", "Reveal current directory in default file explorer and exit KFiles";
+        "Ctrl-n", "Create file";
+        "Ctrl-Shift-n", "Create folder";
+        "Ctrl-d", "Delete file / folder";
+        "Ctrl-r", "Rename file / folder";
+    };
 
-	WHEN IN SEARCH PANEL:
-	up and down arrows		Move cursor
-	Enter		Open selected file/folder
-"#
-    );
+    println!("\n{tab}WHEN IN SEARCH PANEL:");
+    printhelp!{align;
+        "up and down arrows", "Move cursor";
+        "Enter", "Open selected file/folder";
+    };
 }
+
 
 #[cfg(test)]
 mod tests {

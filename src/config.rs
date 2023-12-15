@@ -3,7 +3,6 @@ use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
-use console_engine::Color;
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 
