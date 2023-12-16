@@ -472,10 +472,8 @@ impl SearchQuery {
         match &self.mode {
             SearchQueryMode::List(paths) => {
                 self.receiver = None;
-                self.results = paths
-                    .iter()
-                    .enumerate()
-                    .map(|(i, pathbuf)| FileEntry::from(pathbuf.as_path()).prefix_idx(i))
+                self.results = paths.iter().enumerate()
+                    .map(|(i, pathbuf)| FileEntry::from(pathbuf.as_path()) .prefix_idx(i))
                     .filter(|entry| entry.to_string().to_lowercase().contains(&search_query))
                     .collect();
             }
@@ -495,23 +493,17 @@ impl SearchQuery {
                             Ok(pair) => pair,
                             Err(_) => continue,
                         };
-                        stack.append(
-                            &mut folders
-                                .into_iter()
+
+                        stack.append(&mut folders.into_iter()
                                 // Don't search inside folders that start with "." (like .git/)
-                                .filter(|pathbuf| {
-                                    !path2string(pathbuf.file_name().unwrap_or_default())
-                                        .starts_with('.')
-                                })
+                                .filter(|pathbuf| !path2string(pathbuf.file_name().unwrap_or_default()) .starts_with('.'))
                                 .take(max_stack_size - stack.len())
                                 .collect(),
                         );
 
-                        let files: Vec<FileEntry> = files
-                            .into_iter()
+                        let files: Vec<FileEntry> = files.into_iter()
                             .filter(|pathbuf| {
-                                !ignore_types
-                                    .contains(&path2string(pathbuf.extension().unwrap_or_default()))
+                                !ignore_types.contains(&path2string(pathbuf.extension().unwrap_or_default()))
                                     && path2string(pathbuf).to_lowercase().contains(&search_query)
                             })
                             .map(FileEntry::from)
@@ -525,11 +517,12 @@ impl SearchQuery {
                 });
             }
 
+            // TODO optimize this first
             SearchQueryMode::Folders(path) => {
                 let (tx, rx) = mpsc::channel::<Vec<FileEntry>>();
                 self.receiver = Some(rx);
-                let path = path.clone();
-                let max_stack_size = self.max_stack_size;
+                let path: PathBuf = path.clone();
+                let max_stack_size: usize = self.max_stack_size;
 
                 thread::spawn(move || {
                     let mut stack: VecDeque<PathBuf> = VecDeque::from([path]);
@@ -539,21 +532,15 @@ impl SearchQuery {
                             Ok(v) => v,
                             Err(_) => continue,
                         };
-                        stack.append(
-                            &mut folders
-                                .iter()
+                        stack.append(&mut folders.iter()
                                 // Don't search inside folders that start with "." (like .git/)
-                                .filter(|pathbuf| {
-                                    !path2string(pathbuf.file_name().unwrap_or_default())
-                                        .starts_with('.')
-                                })
+                                .filter(|pathbuf| !path2string(pathbuf.file_name().unwrap_or_default()) .starts_with('.') )
                                 .take(max_stack_size - stack.len())
                                 .cloned()
                                 .collect(),
                         );
 
-                        let folders: Vec<FileEntry> = folders
-                            .into_iter()
+                        let folders: Vec<FileEntry> = folders.into_iter()
                             .filter(|pathbuf| {
                                 path2string(pathbuf).to_lowercase().contains(&search_query)
                             })

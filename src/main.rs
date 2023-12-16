@@ -379,9 +379,11 @@ fn print_help() {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::fs::File;
     use std::{io::Write, path::PathBuf};
 
+    use crate::util::*;
     use crate::{get_favorites_list_path, APPNAME};
 
     #[test]
@@ -436,8 +438,76 @@ mod tests {
     }
 
     #[test]
-    fn test_fav_path() {
-        let path = get_favorites_list_path();
-        dbg!(&path);
+    fn test_search_seq() {
+        let path: PathBuf = PathBuf::from(r"C:/Users/ddxte");
+        let max_stack_size: usize = 1024;
+        let mut stack: VecDeque<PathBuf> = VecDeque::from([ path ]);
+
+        let query: &str = "sprites";
+
+        while let Some(search_path) = stack.pop_front() {
+            let Ok(folders) = get_all_folders_at(search_path) else { continue; };
+            stack.append(&mut folders.iter()
+                .filter(|pathbuf| !path2string(pathbuf.file_name().unwrap_or_default()) .starts_with('.') )
+                .take(max_stack_size - stack.len())
+                .cloned()
+                .collect()
+            );
+
+            let folders: Vec<PathBuf> = folders.into_iter()
+                .filter(|pathbuf| {
+                    path2string(pathbuf).to_lowercase().contains(query)
+                })
+                .collect();
+
+            if folders.is_empty() { continue; }
+            println!("{:#?}", folders);
+        }
     }
+
+    #[test]
+    fn test_search_threaded() {
+        use threads_pool::*;
+        use std::sync::{ Arc, Mutex };
+
+        let pool = ThreadPool::new(4);
+        let path: PathBuf = PathBuf::from(r"C:/Users/ddxte");
+        let max_stack_size: usize = 1024;
+
+        let stack = Arc::new(Mutex::new( VecDeque::from([ path ]) ));
+        let query: &str = "sprites";
+
+        loop {
+            let Some(search_path) = stack.lock().unwrap() .pop_front().clone() else { // Stack is empty
+                if Arc::strong_count(&stack) == 1 { break; } // 1, not 0, because of the declaration up there ^
+                continue;
+            };
+
+            let stack = Arc::clone(&stack);
+            pool.execute(move || {
+                let Ok(folders) = get_all_folders_at(search_path) else { return; };
+
+                let mut s = stack.lock().unwrap();
+                let len: usize = s.len();
+                s.append(&mut folders.iter()
+                         .filter(|pathbuf| !path2string(pathbuf.file_name().unwrap_or_default()) .starts_with('.') )
+                         .take(max_stack_size - len)
+                         .cloned()
+                         .collect()
+                        );
+                drop(s); // Unlock mutex
+
+                let folders: Vec<PathBuf> = folders.into_iter()
+                    .filter(|pathbuf| {
+                        path2string(pathbuf).to_lowercase().contains(query)
+                    })
+                .collect();
+
+                if folders.is_empty() { return; }
+                println!("{:#?}", folders);
+            }).unwrap();
+
+        }
+    }
+
 }
