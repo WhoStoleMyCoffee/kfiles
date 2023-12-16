@@ -318,6 +318,7 @@ impl FileBuffer {
                     try_err!(self.load_entries() => self; else {
                         self.status_line.normal();
                         self.selected_index = selected_idx.clamp(0, self.entries.len());
+                        self.update_scroll();
                     });
                 }
 

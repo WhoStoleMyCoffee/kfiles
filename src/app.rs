@@ -241,8 +241,7 @@ impl App {
                     return AppState::Running;
                 }
 
-                let panel: SearchPanel = self
-                    .create_search_panel(SearchQueryMode::List(self.favorites.clone()))
+                let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List(self.favorites.clone()))
                     .set_title("Favorites")
                     .set_color(themevar!(special_color));
                 self.search_panel = Some(panel);

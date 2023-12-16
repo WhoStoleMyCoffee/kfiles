@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{Sender, Receiver, self};
+use std::sync::{ Arc, Mutex };
 use std::thread;
 
 use console_engine::{
@@ -11,6 +12,8 @@ use console_engine::{
 use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use console_engine::events::Event;
 use console_engine::forms::{Form, FormField, FormOptions, FormStyle, FormValue, Text};
+
+use threads_pool::ThreadPool;
 
 use crate::config::{ColorTheme, Configs, Invert};
 use crate::{themevar, util::*};
@@ -216,6 +219,7 @@ impl SearchPanel {
                 code: KeyCode::Esc, ..
             } => {
                 self.state = SearchPanelState::Exit(None);
+                return;
             }
 
             // Form input
@@ -223,11 +227,10 @@ impl SearchPanel {
                 self.form.handle_event(Event::Key(key_event));
 
                 if self.form.is_finished() {
-                    let selected: &PathBuf = match self.get_results().get(self.selected_index) {
-                        Some(de) => de,
-                        None => return,
+                    let Some(selected) = self.get_results().get(self.selected_index) else {
+                        return;
                     };
-                    self.state = SearchPanelState::Exit(Some(selected.clone()));
+                    self.state = SearchPanelState::Exit(Some(selected.as_ref().clone()));
                     return;
                 }
             }
@@ -320,7 +323,7 @@ impl SearchPanel {
 pub enum SearchQueryMode {
     Files(PathBuf),
     Folders(PathBuf),
-    List(Vec<PathBuf>), // Title & file list
+    List(Vec<PathBuf>),
 }
 
 struct SearchQuery {
@@ -329,7 +332,7 @@ struct SearchQuery {
     results: Vec<FileEntry>,
     receiver: Option<Receiver<Vec<FileEntry>>>,
     max_result_count: usize,
-    max_stack_size: usize,
+    max_queue_size: usize,
     ignore_types: String,
 }
 
@@ -344,10 +347,10 @@ impl SearchQuery {
         let mut q = Self {
             query: String::new(),
             mode,
-            results: vec![],
+            results: Vec::new(),
             receiver: None,
             max_result_count,
-            max_stack_size,
+            max_queue_size: max_stack_size,
             ignore_types,
         };
 
@@ -383,7 +386,7 @@ impl SearchQuery {
                     stack.append(
                         &mut folders
                             .iter()
-                            .take(self.max_stack_size - stack.len())
+                            .take(self.max_queue_size - stack.len())
                             .cloned()
                             .collect(),
                     );
@@ -428,17 +431,12 @@ impl SearchQuery {
     }
 
     fn update(&mut self) {
-        let rx = match &mut self.receiver {
-            Some(rx) => rx,
-            None => return,
-        };
+        let Some(rx) = &mut self.receiver else { return; };
 
         let max_search_results: usize = self.max_result_count;
 
         for received in rx.try_iter() {
-            for entry in received
-                .iter()
-                .take(max_search_results - self.results.len())
+            for entry in received.iter().take(max_search_results - self.results.len())
             {
                 self.results.push(entry.clone());
             }
@@ -461,7 +459,7 @@ impl SearchQuery {
         }
 
         self.results.clear();
-        let search_query = self.query.to_lowercase();
+        let search_query: String = self.query.to_lowercase();
 
         // Files and Folders are done on threads. List isn't.
         // We use mpsc to send results back for this specific query
@@ -478,11 +476,12 @@ impl SearchQuery {
                     .collect();
             }
 
+            // TODO optimize this
             SearchQueryMode::Files(path) => {
                 let (tx, rx) = mpsc::channel::<Vec<FileEntry>>();
                 self.receiver = Some(rx);
                 let path = path.clone();
-                let max_stack_size = self.max_stack_size;
+                let max_stack_size = self.max_queue_size;
                 let ignore_types: String = self.ignore_types.clone();
 
                 thread::spawn(move || {
@@ -517,41 +516,37 @@ impl SearchQuery {
                 });
             }
 
-            // TODO optimize this first
             SearchQueryMode::Folders(path) => {
                 let (tx, rx) = mpsc::channel::<Vec<FileEntry>>();
                 self.receiver = Some(rx);
                 let path: PathBuf = path.clone();
-                let max_stack_size: usize = self.max_stack_size;
+                let max_stack_size: usize = self.max_queue_size;
 
                 thread::spawn(move || {
-                    let mut stack: VecDeque<PathBuf> = VecDeque::from([path]);
+                    let pool: ThreadPool = ThreadPool::new(4); // TODO make configurable
+                    let queue = Arc::new(Mutex::new( VecDeque::from( [path] ) ));
 
-                    while let Some(search_path) = stack.pop_front() {
-                        let folders: Vec<PathBuf> = match get_all_folders_at(search_path) {
-                            Ok(v) => v,
-                            Err(_) => continue,
+                    loop {
+                        // Get search path, else if queue is empty...
+                        let Some(search_path) = queue.lock().unwrap() .pop_front().clone() else {
+                            // All work is done; break
+                            if Arc::strong_count(&queue) == 1 { break; }
+                            continue; // Queue is empty but we might still be searching in other threads
                         };
-                        stack.append(&mut folders.iter()
-                                // Don't search inside folders that start with "." (like .git/)
-                                .filter(|pathbuf| !path2string(pathbuf.file_name().unwrap_or_default()) .starts_with('.') )
-                                .take(max_stack_size - stack.len())
-                                .cloned()
-                                .collect(),
-                        );
 
-                        let folders: Vec<FileEntry> = folders.into_iter()
-                            .filter(|pathbuf| {
-                                path2string(pathbuf).to_lowercase().contains(&search_query)
-                            })
-                            .map(FileEntry::from)
-                            .collect();
+                        // Check connection
+                        if tx.send(Vec::new()).is_err() { break; }
 
-                        // If receiver is gone (new query or panel is closed)
-                        if tx.send(folders).is_err() {
-                            break;
-                            // Behold, the avalanche of closing brackets:
-                        }
+                        let queue = Arc::clone(&queue);
+                        let search_query: String = search_query.clone();
+                        let tx = tx.clone();
+                        pool.execute(move || query_search_folders(
+                                search_path,
+                                search_query,
+                                queue,
+                                max_stack_size,
+                                tx,
+                        )).unwrap();
                     }
                 });
             }
@@ -559,3 +554,37 @@ impl SearchQuery {
     }
 }
 // Beautiful
+
+
+
+fn query_search_folders(
+    search_path: PathBuf,
+    query: String,
+    queue: Arc<Mutex< VecDeque<PathBuf> >>,
+    max_stack_size: usize,
+    sender: Sender<Vec<FileEntry>>,
+) {
+    let Ok(folders) = get_all_folders_at(search_path) else { return; };
+
+    let mut q = queue.lock().unwrap();
+    let take_count: usize = max_stack_size - q.len();
+    q.append(&mut folders.iter()
+             // Don't search inside folders that start with "." (like .git/)
+             .filter(|pathbuf| !path2string(pathbuf.file_name().unwrap_or_default()) .starts_with('.') )
+             .take(take_count)
+             .cloned()
+             .collect(),
+             );
+    drop(q); // Unlock mutex
+
+    let folders: Vec<FileEntry> = folders.into_iter()
+        .filter(|pathbuf| {
+            // path2string(pathbuf).to_lowercase().contains(&query)
+            pathbuf.display().to_string().to_lowercase().contains(&query)
+        })
+    .map(FileEntry::from)
+        .collect();
+    if folders.is_empty() { return; }
+    let _ = sender.send(folders);
+
+}
