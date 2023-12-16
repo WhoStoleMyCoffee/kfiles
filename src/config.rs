@@ -19,7 +19,8 @@ macro_rules! themevar {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Configs {
     pub scroll_margin: u8,
-    pub max_search_stack: usize,
+    pub max_search_queue_len: usize,
+    pub search_thread_count: usize,
     pub default_path: PathBuf,
     pub update_rate: u32,
     pub search_ignore_types: String,
@@ -44,7 +45,8 @@ impl Default for Configs {
 
         Self {
             scroll_margin: 4,
-            max_search_stack: 512,
+            max_search_queue_len: 1024,
+            search_thread_count: 4,
             default_path: PathBuf::from(home_dir),
             update_rate: 12,
             search_ignore_types: String::new(),

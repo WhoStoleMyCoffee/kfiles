@@ -319,18 +319,19 @@ fn print_help() {
 
     if let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {
         println!("\n\nCONFIGS:\nYou can find your config file at: {}", p.display());
+        println!("or run with --config to open it");
         printhelp!{align;
-            "scroll_margin", "Minimum spacing between cursor and edge";
-            "max_search_stack", "How \"deep\" to search in search panel";
+            "scroll_margin", "Minimum spacing between cursor and edge of the window";
             "max_recent_count", "How many directories to keep track of in the recent list";
-            "favorites", "List of favorite directories";
-            "default_dir", "Default directory when the program is run";
-            "update_rate", "The frames per second to run the program at";
+            "default_path", "Default directory when the program is run";
             "search_ignore_types", "The types of files to ignore while searching";
+            "", "E.g. \"import,txt\" will ignore all .import and .txt files";
+            "PERFORMANCE OPTIONS:", "";
+            "update_rate", "The frames per second to run the program at";
+            "max_search_queue_len", "How \"deep\" to search in search panel";
+            "search_thread_count", "How many threads to use while searching";
         };
-        println!("{tab}{tab}E.g. \"import,txt\" will ignore all .import and .txt files\n");
-
-        println!("{tab}THEME (all in RGB color values):");
+        println!("\n{tab}THEME (all in RGB color values):");
         printhelp!{align;
             "folder_color", "Color for displaying folders";
             "file_color", "Color for displaying files";
