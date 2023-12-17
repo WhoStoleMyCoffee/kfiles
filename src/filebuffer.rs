@@ -132,8 +132,7 @@ impl FileBuffer {
         let pattern_lowercase: String = pattern.to_lowercase();
 
         self.entries.iter().position(|pathbuf: &PathBuf| {
-            pathbuf
-                .file_name()
+            pathbuf.file_name()
                 .and_then(|osstr| osstr.to_str())
                 .unwrap_or_default()
                 .to_ascii_lowercase()

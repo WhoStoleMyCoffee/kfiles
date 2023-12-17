@@ -19,6 +19,7 @@ use crate::{AppError, CONTROL_SHIFT};
 pub enum AppState {
     Running,
     Exit(Option<PathBuf>),
+    Help,
 }
 
 pub struct App {
@@ -43,14 +44,18 @@ impl App {
         try_err!( file_buffer.load_entries() => file_buffer );
 
         let max_recent_count: usize = cfg.max_recent_count;
-        Ok(Self {
+        let mut app = Self {
             engine,
             file_buffer,
             search_panel: None,
             recent_dirs: RecentList::load(&get_recent_dirs_path()?, max_recent_count)
                 .unwrap_or_else(|_| RecentList::new(max_recent_count)),
-            favorites: FavoritesList::load(&get_favorites_list_path()?).unwrap_or_default(),
-        })
+            favorites: FavoritesList::load(&get_favorites_list_path()?)
+                .unwrap_or_default(),
+        };
+
+        app.set_title_to_current();
+        Ok(app)
     }
 
     pub fn run(&mut self) -> AppState {
@@ -78,13 +83,11 @@ impl App {
                 self.engine.print_fbg(
                     0,
                     0,
-                    "Ctrl-c to exit, run with --help for help",
+                    "Press F1 to show help message, Ctrl-c or Alt-F4 to exit",
                     themevar!(comment_color),
                     bg_color,
                 );
-                self.file_buffer
-                    .status_line
-                    .draw(&mut self.engine);
+                self.file_buffer.status_line.draw(&mut self.engine);
 
                 self.engine.draw();
             }
@@ -93,47 +96,68 @@ impl App {
                 self.engine.resize(w as u32, h as u32);
             }
 
+            Event::Mouse(mouse_event) => {
+                if let Some(panel) = &mut self.search_panel {
+                    panel.handle_mouse_event(mouse_event, SEARCH_PANEL_MARGIN.1 as u16);
+                } else {
+                    self.file_buffer.handle_mouse_event(mouse_event);
+                }
+            }
+
+            Event::Key(key_event) => {
+                return self.handle_key_event(key_event);
+            }
+
+        }
+
+        AppState::Running
+    }
+
+    fn handle_key_event(&mut self, event: KeyEvent) -> AppState {
+        match event {
             // Exit with Alt-F4
-            Event::Key(KeyEvent {
+            KeyEvent {
                 code: KeyCode::F(4),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::ALT,
                 ..
-            }) => {
+            } => {
                 return AppState::Exit(Some(self.file_buffer.path.clone()));
             }
 
             // Exit with Ctrl-c
-            Event::Key(KeyEvent {
+            // TODO remove?
+            KeyEvent {
                 code: KeyCode::Char('c'),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            }) => {
+            } => {
                 return AppState::Exit(Some(self.file_buffer.path.clone()));
             }
 
             // Reveal in file explorer and close with Ctrl-Shift-e
-            Event::Key(KeyEvent {
+            KeyEvent {
                 code: KeyCode::Char('E'),
                 kind: KeyEventKind::Press,
                 modifiers,
                 ..
-            }) if modifiers.bits() == CONTROL_SHIFT => {
+            } if modifiers.bits() == CONTROL_SHIFT => {
                 self.file_buffer
                     .reveal()
                     .expect("Failed to reveal current directory");
-                self.add_current_to_recent();
+                // Gets called in drop() anyways (See impl Drop for App)
+                // self.add_current_to_recent();
                 return AppState::Exit(None);
             }
 
             // Reveal in file explorer with Ctrl-e
-            Event::Key(KeyEvent {
+            KeyEvent {
                 code: KeyCode::Char('e'),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            }) => {
+            } => {
                 self.file_buffer
                     .reveal()
                     .expect("Failed to reveal current directory");
@@ -141,12 +165,12 @@ impl App {
             }
 
             // Search folders with Ctrl-Shift-p
-            Event::Key(KeyEvent {
+            KeyEvent {
                 code: KeyCode::Char('P'),
                 kind: KeyEventKind::Press,
                 modifiers,
                 ..
-            }) if modifiers.bits() == CONTROL_SHIFT => {
+            } if modifiers.bits() == CONTROL_SHIFT => {
                 if self.search_panel.is_some() {
                     return AppState::Running;
                 }
@@ -159,12 +183,12 @@ impl App {
             }
 
             // Search files with Ctrl-p
-            Event::Key(KeyEvent {
+            KeyEvent {
                 code: KeyCode::Char('p'),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            }) => {
+            } => {
                 if self.search_panel.is_some() {
                     return AppState::Running;
                 }
@@ -176,12 +200,12 @@ impl App {
             }
 
             // Recent files with Ctrl-o
-            Event::Key(KeyEvent {
+            KeyEvent {
                 code: KeyCode::Char('o'),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            }) => {
+            } => {
                 // If already open in favorites mode, close
                 if let Some(panel) = &self.search_panel {
                     if let SearchQueryMode::List(_) = panel.get_query_mode() {
@@ -198,12 +222,12 @@ impl App {
             }
 
             // Add to favorites with Ctrl-f
-            Event::Key(KeyEvent {
+            KeyEvent {
                 code: KeyCode::Char('f'),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            }) => {
+            } => {
                 if self.search_panel.is_some() {
                     return AppState::Running;
                 }
@@ -227,12 +251,13 @@ impl App {
                 }
             }
 
-            // Open / close favorites with `
-            Event::Key(KeyEvent {
+            // Open / close favorites with ` or Tab
+            KeyEvent {
                 code: KeyCode::Char('`') | KeyCode::Tab,
                 kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::NONE,
                 ..
-            }) => {
+            } => {
                 // If already open in favorites mode, close
                 if let Some(panel) = &self.search_panel {
                     if let SearchQueryMode::List(_) = panel.get_query_mode() {
@@ -247,15 +272,17 @@ impl App {
                 self.search_panel = Some(panel);
             }
 
-            Event::Mouse(mouse_event) => {
-                if let Some(panel) = &mut self.search_panel {
-                    panel.handle_mouse_event(mouse_event, SEARCH_PANEL_MARGIN.1 as u16);
-                } else {
-                    self.file_buffer.handle_mouse_event(mouse_event);
-                }
+            // Print help with F1
+            KeyEvent {
+                code: KeyCode::F(1),
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                return AppState::Help;
             }
 
-            Event::Key(key_event) => {
+            key_event => {
                 // Try to update search panel first
                 if self.search_panel.is_some() {
                     if let Err(err) = self.searchpanel_handle_key_event(key_event) {
@@ -266,7 +293,13 @@ impl App {
 
                 // File buffer
                 } else {
+                    let prev_path: &Path = &self.get_path().clone();
                     self.file_buffer.handle_key_event(key_event);
+
+                    if self.get_path() != prev_path {
+                        self.set_title_to_current();
+                    }
+
                 }
             }
         }
@@ -275,35 +308,34 @@ impl App {
     }
 
     // I put this stuff in its own function because that would've been a disgusting amount of indentation
-    fn searchpanel_handle_key_event(&mut self, key_event: KeyEvent) -> Result<(), String> {
-        let search_panel: &mut SearchPanel =
-            self.search_panel.as_mut().expect("SearchPanel not set");
+    fn searchpanel_handle_key_event(&mut self, event: KeyEvent) -> Result<(), String> {
+        let search_panel: &mut SearchPanel = self.search_panel.as_mut()
+            .expect("SearchPanel not set");
 
-        search_panel.handle_key_event(key_event);
+        search_panel.handle_key_event(event);
 
         match &search_panel.state {
             SearchPanelState::Running => {}
+
             SearchPanelState::Exit(path_maybe) => {
-                let path = match path_maybe {
-                    Some(p) => p,
-                    None => {
-                        self.search_panel = None;
-                        return Ok(());
-                    }
+                let Some(path) = path_maybe.clone() else {
+                    self.search_panel = None;
+                    return Ok(());
                 };
 
+                self.add_current_to_recent();
                 if path.is_dir() {
-                    self.file_buffer.open_dir(path);
+                    self.file_buffer.open_dir(&path);
                 } else if path.is_file() {
-                    let file_name = path.file_name().ok_or("Invalid file name")?;
-                    let path = path.parent().ok_or("Parent directory not foud")?;
+                    let file_name = path.file_name() .ok_or("Invalid file name")?;
+                    let path: &Path = path.parent() .ok_or("Parent directory not foud")?;
 
                     self.file_buffer.open_dir(path);
                     self.file_buffer.select(file_name);
                 }
 
+                self.set_title_to_current();
                 self.search_panel = None;
-                self.add_current_to_recent();
             }
         }
 
@@ -316,6 +348,23 @@ impl App {
             self.engine.get_height() - SEARCH_PANEL_MARGIN.1 * 2,
             mode,
         )
+    }
+
+    pub fn get_path(&self) -> &PathBuf {
+        &self.file_buffer.path
+    }
+
+    /// Sets the window's title to `title`
+    pub fn set_title(&mut self, title: &str) {
+        self.engine.set_title( &format!("KFiles | {}", title) );
+    }
+
+    /// Sets the window's title using the current dir
+    pub fn set_title_to_current(&mut self) {
+        let Some(pathname) = self.file_buffer.path.file_name().and_then(|osstr| osstr.to_str()) else {
+            return;
+        };
+        self.engine.set_title( &format!("KFiles | {}", pathname) );
     }
 
     pub fn add_to_recent(&mut self, path: PathBuf) {

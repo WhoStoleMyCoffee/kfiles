@@ -7,6 +7,7 @@ use clean_path::Clean;
 use config::{Configs, FavoritesList};
 use confy::ConfyError;
 use console_engine::KeyModifiers;
+use dialoguer::{ Confirm, theme::ColorfulTheme };
 
 pub mod app;
 pub mod config;
@@ -14,7 +15,8 @@ pub mod filebuffer;
 pub mod search;
 pub mod util;
 
-use app::App;
+use app::{ App, AppState };
+use help::print_help;
 
 // Search panel offset from the edges of the screen
 const SEARCH_PANEL_MARGIN: (u32, u32) = (4, 2);
@@ -89,31 +91,13 @@ fn main() {
     let (run_path, cfg): (PathBuf, Configs) = match (parse_cli(env::args()), cfg) {
         // We don't care about the configs when showing help message
         (Ok(RunOption::Help), _) => {
-            print_help();
-            pause(false);
+            help::print_help();
+            pause!();
             return;
         }
 
         (Ok(RunOption::Config), _) => {
-            let Ok(cfg_path) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH))
-            else {
-                println!("Error: Failed to get configuration file path.");
-                pause(true);
-                return;
-            };
-
-            if let Err(err) = opener::open(&cfg_path) {
-                println!("Error: Failed to open configuration file:\n\t{}.\nRevealing in file explorer instead...", err);
-                if let Err(err) = opener::reveal(&cfg_path) {
-                    println!(
-                        "Error: Failed to reveal configuration file in file explorer:\n\t{}",
-                        err
-                    );
-                    pause(false);
-                }
-                return;
-            }
-
+            help::open_config_file();
             return;
         }
 
@@ -134,13 +118,16 @@ fn main() {
                     Ok(p) => p,
                     Err(err) => {
                         println!("Error: Failed to get favorites list path.\n\t{}", err);
-                        pause(false);
+                        pause!();
                         return;
                     }
                 };
 
                 let list = FavoritesList::load(&list_path).unwrap_or_default();
-                (list.query(&query).unwrap_or(&cfg.default_path).clone(), cfg)
+                (
+                    list.query(&query).unwrap_or(&cfg.default_path).clone(),
+                    cfg
+                )
             }
 
             RunOption::Help | RunOption::Config => unreachable!(), // Already checked up there
@@ -148,8 +135,8 @@ fn main() {
     };
 
     if CONFIGS.set(cfg).is_err() {
-        println!("Error: Failed to set global configs.");
-        pause(false);
+        println!("Error: Failed to set global configs (somehow?)");
+        pause!();
         return;
     }
 
@@ -165,14 +152,37 @@ fn main() {
 
     // MAIN LOOP ----------------------------------------------------------------------------
     loop {
-        let state: app::AppState = app.run();
+        let state: AppState = app.run();
 
-        if let app::AppState::Exit(_exit_path) = state {
-            // TODO why no work. eh?
-            // if let Some(path) = exit_path {
-            // 	let _ = env::set_current_dir(path);
-            // }
-            break;
+        match state {
+            AppState::Running => {},
+
+            AppState::Exit(_exit_path) => {
+                // TODO why no work. eh?
+                // if let Some(path) = exit_path {
+                // 	let _ = env::set_current_dir(path);
+                // }
+                break;
+            },
+
+            AppState::Help => {
+                let path: PathBuf = app.get_path().clone();
+                drop(app);
+
+                print_help();
+                pause!();
+
+                // Rebuild app
+                app = match App::new(&path) {
+                    Ok(app) => app,
+
+                    Err(err) => {
+                        handle_app_err(err);
+                        return;
+                    }
+                };
+
+            },
         }
     }
 }
@@ -205,6 +215,7 @@ fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
     }
 }
 
+
 fn get_recent_dirs_path() -> Result<PathBuf, AppError> {
     confy::get_configuration_file_path(APPNAME, None)
         .map_err(AppError::from)?
@@ -219,108 +230,208 @@ fn get_favorites_list_path() -> Result<PathBuf, AppError> {
         .map(|path| path.with_file_name(FAVORITES_LIST_FILE_NAME))
 }
 
+/// Pauses automatically (via `pause!()`)
 fn handle_app_err(err: AppError) {
+    use help::*;
+
     match err {
         // Wrong config format
         AppError::ConfigError(ConfyError::BadTomlData(err)) => {
             println!("Error while loading configs:\n	{}", err);
-            if let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {
-                println!("Tip: You can find your config file at {}", p.display());
+            if confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)).is_err() {
+                print_help_tip();
+                pause!();
+                return;
+            };
+
+            let do_open_cfg = Confirm::with_theme(&ColorfulTheme::default())
+                .with_prompt("Do you wish to open the configuration file?")
+                .default(true)
+                .interact();
+
+            match do_open_cfg {
+                Ok(true) => {
+                    open_config_file();
+                    help::print_config_help();
+                },
+                Ok(false) => print_help_tip(),
+                Err(err) => println!("Error: {}", err),
             }
-            pause(true);
         }
 
         // General config error
         AppError::ConfigError(err) => {
             println!("Error while loading configs:\n	{}", err);
-            pause(false);
         }
 
         // Engine init error
         AppError::IO(err) => {
-            println!("Error: {}", err);
-            pause(false);
+            println!("IO error: {}", err);
         }
 
         AppError::OpenError(err) => {
             println!("Error opening: {}", err);
-            pause(false);
         }
 
         AppError::Other(s) => {
             println!("Error: {}", s);
-            pause(false);
         }
     }
+    pause!();
 }
 
-fn pause(with_help_tip: bool) {
-    if with_help_tip {
+
+
+
+#[macro_use]
+mod help {
+    use crate::{ CONFIG_PATH, APPNAME, VERSION };
+    use crate::pause;
+
+    const ALIGN: usize = 32;
+    const TAB: &str = "    ";
+    /// Artificial delay when printing help message
+    /// The aim is to have the user subconsciously know that there is more than one screen worth of
+    /// help text
+    const DELAY: u64 = 2;
+
+    pub fn open_config_file() {
+        let Ok(cfg_path) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) else {
+            println!("Error: Failed to get configuration file path.");
+            print_help_tip();
+            pause!();
+            return;
+        };
+
+        if let Err(err) = opener::open(&cfg_path) {
+            println!("Error: Failed to open configuration file:\n\t{}.\nRevealing in file explorer instead...", err);
+            if let Err(err) = opener::reveal(&cfg_path) {
+                println!("Error: Failed to reveal configuration file in file explorer:\n\t{}", err);
+                pause!();
+            }
+        }
+    }
+
+
+
+    pub fn print_help_tip() {
         println!("Tip: You can run KFiles with `kfiles --help` for more info");
     }
-    println!("Press ENTER to continue...");
-    let _ = std::io::stdin().read_line(&mut String::new());
-}
 
 
 
-macro_rules! printhelp {
-    ($al:expr; $name:expr, $desc:expr) => {
-        println!("    {}{}{}", $name, " ".repeat($al - $name.len() - 4), $desc);
-    };
+    #[macro_export]
+    macro_rules! pause {
+        () => {
+            println!("Press ENTER to continue...");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        };
 
-    ($t:expr => $al:expr; $name:expr, $desc:expr) => {
-        println!("{}{}{}{}", " ".repeat($t), $name, " ".repeat($al - $name.len() - $t), $desc);
-    };
-
-    ($al:expr; $( $name:expr, $desc:expr );*;) => {
-        {
-            let mut v: Vec<String> = Vec::new();
-            $(
-                v.push( format!("    {}{}{}", $name, " ".repeat($al - $name.len() - 4), $desc ) );
-            )*
-            println!("{}", v.join("\n"));
+        ($t:expr) => {
+            std::thread::sleep( std::time::Duration::from_millis($t) );
         }
-    };
-
-    ($t:expr => $al:expr; $( $name:expr, $desc:expr );*;) => {
-        {
-            let mut v: Vec<String> = Vec::new();
-            let t: &str = &" ".repeat($t);
-            $(
-                v.push( format!("{}{}{}{}", &t, $name, " ".repeat($al - $name.len() - $t), $desc ) );
-            )*
-            println!("{}", v.join("\n"));
-        }
-    };
-}
+    }
 
 
+    macro_rules! printhelp {
+        ($al:expr; $name:expr, $desc:expr) => {
+            println!("    {}{}{}", $name, " ".repeat($al - $name.len() - 4), $desc);
+        };
 
-fn print_help() {
-    let align: usize = 32;
-    let tab: &str = &" ".repeat(4);
+        ($t:expr => $al:expr; $name:expr, $desc:expr) => {
+            println!("{}{}{}{}", " ".repeat($t), $name, " ".repeat($al - $name.len() - $t), $desc);
+        };
 
-    println!("Thank you for using {APPNAME} v{VERSION}\n\nUSAGE:");
-    printhelp!{align;
-        "kfiles", "Run the program at the default directory";
-        "kfiles <path>", "Run the program at the specified directory";
-	    "kfiles [options ..]", "";
-    };
+        ($al:expr; $( $name:expr, $desc:expr );*;) => {
+            {
+                let mut v: Vec<String> = Vec::new();
+                $(
+                    v.push( format!("    {}{}{}", $name, " ".repeat($al - $name.len() - 4), $desc ) );
+                )*
+                println!("{}", v.join("\n"));
+            }
+        };
 
-    println!("\n\nOPTIONS:");
-    printhelp!{align;
-	    "--help, -h", "Show this message";
-	    "--favorites, -f <query>", "Opens the program with the first result that matches <query> in your favorites";
-    };
+        ($t:expr => $al:expr; $( $name:expr, $desc:expr );*;) => {
+            {
+                let mut v: Vec<String> = Vec::new();
+                let t: &str = &" ".repeat($t);
+                $(
+                    v.push( format!("{}{}{}{}", &t, $name, " ".repeat($al - $name.len() - $t), $desc ) );
+                )*
+                println!("{}", v.join("\n"));
+            }
+        };
+    }
 
-	println!("{tab}--config, --configs, -c, -cfg, --cfg");
-	printhelp!(align; "", "Opens the configuration file");
 
-    if let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {
+
+    pub fn print_help() {
+        println!("Thank you for using {APPNAME} v{VERSION}\n\nUSAGE:");
+        pause!(DELAY);
+        printhelp!{ALIGN;
+            "kfiles", "Run the program at the default directory";
+            "kfiles <path>", "Run the program at the specified directory";
+            "kfiles [options ..]", "";
+        };
+
+        pause!(DELAY);
+        println!("\n\nOPTIONS:");
+        printhelp!{ALIGN;
+            "--help, -h", "Show this message";
+            "--favorites, -f <query>", "Opens the program with the first result that matches <query> in your favorites";
+        };
+        println!("{TAB}--config, --configs, -c, -cfg, --cfg");
+        printhelp!(ALIGN; "", "Opens the configuration file");
+
+        pause!(DELAY);
+        print_config_help();
+
+        pause!(DELAY);
+        println!("\n\nKEYBINDS:\n{TAB}NAVIGATION:");
+        printhelp!{ALIGN;
+            "j or down arrow", "Move cursor down";
+            "k or up arrow", "Move cursor up";
+            "Ctrl-c or Alt-F4", "Exit the program";
+            "Enter", "Open selected folder, file, or program";
+            "` or Tab", "Search favorites (Esc or ` to cancel)";
+            "/ or ;", "Quick search";
+            "g and G", "Jump to the start and end of the list";
+            "- or Backspace", "Go back";
+            "u and d", "Jump up or down half a page";
+        };
+
+        pause!(DELAY);
+        println!("\n{TAB}OTHER:");
+        printhelp!{ALIGN;
+            "Ctrl-o", "Search recent directories";
+            "Ctrl-p", "Search files (Esc to cancel)";
+            "Ctrl-Shift-p", "Search folders (Esc to cancel)";
+            "Ctrl-f", "Toggle current directory as favorite";
+            "Ctrl-e", "Reveal current directory in default file explorer";
+            "Ctrl-Shift-e", "Reveal current directory in default file explorer and exit KFiles";
+            "Ctrl-n", "Create file";
+            "Ctrl-Shift-n", "Create folder";
+            "Ctrl-d", "Delete file / folder";
+            "Ctrl-r", "Rename file / folder";
+        };
+
+        pause!(DELAY);
+        println!("\n{TAB}WHEN IN SEARCH PANEL:");
+        printhelp!{ALIGN;
+            "up and down arrows", "Move cursor";
+            "Enter", "Open selected file/folder";
+        };
+    }
+    
+    /// Prints the CONFIGS chapter of the help message
+    pub fn print_config_help() {
+        let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) else {
+            return;
+        };
         println!("\n\nCONFIGS:\nYou can find your config file at: {}", p.display());
         println!("or run with --config to open it");
-        printhelp!{align;
+        printhelp!{ALIGN;
             "scroll_margin", "Minimum spacing between cursor and edge of the window";
             "max_recent_count", "How many directories to keep track of in the recent list";
             "default_path", "Default directory when the program is run";
@@ -331,8 +442,8 @@ fn print_help() {
             "max_search_queue_len", "How \"deep\" to search in search panel";
             "search_thread_count", "How many threads to use while searching";
         };
-        println!("\n{tab}THEME (all in RGB color values):");
-        printhelp!{align;
+        println!("\n{TAB}THEME (all in RGB color values):");
+        printhelp!{ALIGN;
             "folder_color", "Color for displaying folders";
             "file_color", "Color for displaying files";
             "special_color", "Color for special text";
@@ -342,40 +453,9 @@ fn print_help() {
             "error_color", "Color for errors";
         };
     }
-
-    println!("\n\nKEYBINDS:\n{tab}NAVIGATION:");
-    printhelp!{align;
-        "j or down arrow", "Move cursor down";
-        "k or up arrow", "Move cursor up";
-        "Ctrl-c or Alt-F4", "Exit the program";
-        "Enter", "Open selected folder, file, or program";
-        "` or Tab", "Search favorites (Esc or ` to cancel)";
-        "/ or ;", "Quick search";
-        "g and G", "Jump to the start and end of the list";
-        "- or Backspace", "Go back";
-        "u and d", "Jump up or down half a page";
-    };
-
-    println!("\n{tab}OTHER:");
-    printhelp!{align;
-        "Ctrl-o", "Search recent directories";
-        "Ctrl-p", "Search files (Esc to cancel)";
-        "Ctrl-Shift-p", "Search folders (Esc to cancel)";
-        "Ctrl-f", "Toggle current directory as favorite";
-        "Ctrl-e", "Reveal current directory in default file explorer";
-        "Ctrl-Shift-e", "Reveal current directory in default file explorer and exit KFiles";
-        "Ctrl-n", "Create file";
-        "Ctrl-Shift-n", "Create folder";
-        "Ctrl-d", "Delete file / folder";
-        "Ctrl-r", "Rename file / folder";
-    };
-
-    println!("\n{tab}WHEN IN SEARCH PANEL:");
-    printhelp!{align;
-        "up and down arrows", "Move cursor";
-        "Enter", "Open selected file/folder";
-    };
 }
+
+
 
 
 #[cfg(test)]
@@ -385,7 +465,7 @@ mod tests {
     use std::{io::Write, path::PathBuf};
 
     use crate::util::*;
-    use crate::{get_favorites_list_path, APPNAME};
+    use crate::APPNAME;
 
     #[test]
     fn test_path() {
@@ -509,6 +589,18 @@ mod tests {
             }).unwrap();
 
         }
+    }
+
+    #[test]
+    fn test_dialog() {
+        use dialoguer::Confirm;
+        use dialoguer::theme::ColorfulTheme;
+
+        let c = Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt("Is it bup time?")
+            .default(true)
+            .interact().unwrap();
+        dbg!(c);
     }
 
 }
