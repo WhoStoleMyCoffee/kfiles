@@ -387,6 +387,8 @@ mod help {
         pause!(DELAY);
         print_config_help();
 
+	// Show keybinds at the bottom so it's the first thing the user sees
+	// when they summon the almighty help message
         pause!(DELAY);
         println!("\n\nKEYBINDS:\n{TAB}NAVIGATION:");
         printhelp!{ALIGN;
