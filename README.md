@@ -1,7 +1,8 @@
 # kfiles v1.0.0
 A keybind-heavy 'OK' file explorer written in Rust
 
-<img width="674" alt="kfiles_screenshot" src="https://github.com/WhoStoleMyCoffee/kfiles/assets/79783809/ae7c54c6-d2d5-49cb-8244-46e84d7c3cfb">
+<img width="674" alt="kfiles screenshot" src="https://github.com/WhoStoleMyCoffee/kfiles/assets/79783809/9ec99321-d205-408a-8167-42593eb92ffc">
+
 
 *Keybind heavy? Does that mean I have to learn a new set of keybinds just for a file explorer?*
 
@@ -26,12 +27,15 @@ If you wish your file explorer had color theme and performance (yes, performance
 
 1. **Quick search**
 Enter quick search mode via `/` or `;` (`Esc` to exit), where you can \*quickly* \*search* through the files and folders of the current directory.
+<img width="960" alt="quicksearch" src="https://github.com/WhoStoleMyCoffee/kfiles/assets/79783809/6c318229-eeb1-47ee-af5e-6ec35c750a0e">
+
 
 1. **Deeper search through files**
 
 	It is also possible to make a deeper search for files and folders via `Ctrl-p` (for files) and `Ctrl-Shift-p` (for folders).
 
 	The searching is multi-threaded with [a configurable number of threads](#performance-options) if you're low on resources.
+<img width="960" alt="deepsearch" src="https://github.com/WhoStoleMyCoffee/kfiles/assets/79783809/73e75269-d763-41e3-9ae0-93369b5bc881">
 
 
 1. **Favorites and recently visited directories list**
@@ -41,6 +45,8 @@ Enter quick search mode via `/` or `;` (`Esc` to exit), where you can \*quickly*
 1. **Customizability!**
 
 	KFiles is pretty [customizable](#configs), with more configuration options coming soon!
+<img width="674" alt="colortheme" src="https://github.com/WhoStoleMyCoffee/kfiles/assets/79783809/2d41df4f-3e47-41ce-923a-c40ba670d249">
+
 
 1. **Run in the terminal**
 
