@@ -582,7 +582,7 @@ impl FileBuffer {
         }
     }
 
-    fn update_scroll(&mut self) {
+    pub fn update_scroll(&mut self) {
         let u_scroll_margin: usize = Configs::global().scroll_margin as usize;
         let max_bound: usize = self.screen.get_height() as usize - u_scroll_margin;
 

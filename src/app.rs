@@ -282,6 +282,19 @@ impl App {
                 return AppState::Help;
             }
 
+            // Reload with F5
+            KeyEvent {
+                code: KeyCode::F(5),
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                try_err!(self.file_buffer.load_entries() => self.file_buffer; else {
+                    self.file_buffer.display_path();
+                    self.file_buffer.update_scroll();
+                });
+            },
+
             key_event => {
                 // Try to update search panel first
                 if self.search_panel.is_some() {
