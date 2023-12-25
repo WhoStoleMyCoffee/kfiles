@@ -466,10 +466,13 @@ mod tests {
     use std::fs::File;
     use std::{io::Write, path::PathBuf};
 
+    use dialoguer::Input;
+
     use crate::util::*;
     use crate::APPNAME;
 
     #[test]
+    #[ignore]
     fn test_path() {
         let config_path = confy::get_configuration_file_path(APPNAME, None).unwrap();
         dbg!(&config_path);
@@ -481,46 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse() {
-        let path = confy::get_configuration_file_path(APPNAME, None)
-            .unwrap()
-            .parent()
-            .and_then(|path| Some(path.with_file_name("recent.txt")))
-            .unwrap();
-
-        dbg!(&path);
-    }
-
-    #[test]
-    fn test_save_single() {
-        let path: PathBuf = PathBuf::from(r"C:\Users\ddxte\AppData\Roaming\kfiles");
-
-        let bytes = path.as_path().to_str().unwrap().as_bytes();
-
-        let mut file = File::create("foo.txt").unwrap();
-        file.write_all(bytes).unwrap();
-    }
-
-    #[test]
-    fn test_save_multiple() {
-        let paths = vec![
-            PathBuf::from(r"C:\Users\ddxte\AppData\Roaming\kfiles"),
-            PathBuf::from(r"C:\Users\ddxte\Documents\Projects\TankInSands\Sounds"),
-            PathBuf::from(r"C:\Users\ddxte\Documents\Apps\Office Chaos"),
-        ];
-
-        let bup = paths
-            .iter()
-            .map(|pathbuf| pathbuf.as_path().to_str())
-            .flatten()
-            .collect::<Vec<&str>>()
-            .join("\n");
-
-        let mut file = File::create("foo.txt").unwrap();
-        file.write_all(bup.as_bytes()).unwrap();
-    }
-
-    #[test]
+    #[ignore]
     fn test_search_seq() {
         let path: PathBuf = PathBuf::from(r"C:/Users/ddxte");
         let max_stack_size: usize = 1024;
@@ -549,6 +513,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_search_threaded() {
         use threads_pool::*;
         use std::sync::{ Arc, Mutex };
@@ -594,15 +559,34 @@ mod tests {
     }
 
     #[test]
-    fn test_dialog() {
-        use dialoguer::Confirm;
-        use dialoguer::theme::ColorfulTheme;
+    fn test_strsearch4() {
+        let haystack = [
+            "C:/Users/ddxte/Documents/Projects/",
+            "Just as a gardener cultivates his plot, keeping it free from weeds, and growing the fruits and flowers which he requires, so may a man tend the garden of his mind, weeding all the wrong, useless, and impure thoughts, and cultivating towards perfection the flowers and fruits of of right, useful, and pure thoughts.",
+            "it is always bup time.txt",
+            "some_other_file.txt",
+            "lorem ipsum dolor sit amet",
+            "main.rs",
+        ];
+        
+        let input: String = Input::<String>::new()
+            .interact().unwrap()
+            .to_lowercase();
 
-        let c = Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt("Is it bup time?")
-            .default(true)
-            .interact().unwrap();
-        dbg!(c);
+        let match_index: Option<usize> = haystack.iter().enumerate()
+            .filter_map(|(i, s)| {
+                s.to_lowercase()
+                    .match_indices(&input).next()
+                    .map(|m| (i, m.0))
+            })
+            .min_by(|a, b| a.1.cmp(&b.1))
+            .map(|(i, _score)| i);
+
+        if let Some(index) = match_index {
+            println!("Found in \"{}\"", haystack[index]);
+        } else {
+            println!("No match found!");
+        }
     }
 
 }

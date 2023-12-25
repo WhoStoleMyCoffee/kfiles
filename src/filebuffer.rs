@@ -11,6 +11,7 @@ use console_engine::{pixel, Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModi
 use crate::config::{ColorTheme, Configs, Invert};
 use crate::themevar;
 use crate::{util, AppError, CONTROL_SHIFT};
+use crate::search_str;
 
 /// Syntax:
 /// ```rust
@@ -129,15 +130,14 @@ impl FileBuffer {
         if pattern.is_empty() {
             return None;
         }
-        let pattern_lowercase: String = pattern.to_lowercase();
 
-        self.entries.iter().position(|pathbuf: &PathBuf| {
-            pathbuf.file_name()
-                .and_then(|osstr| osstr.to_str())
-                .unwrap_or_default()
-                .to_ascii_lowercase()
-                .starts_with(&pattern_lowercase)
-        })
+        search_str!(self.entries.iter()
+            .map(|pathbuf|
+                 pathbuf.file_name()
+                    .and_then(|osstr| osstr.to_str())
+                    .unwrap_or_default()
+            )
+        , &pattern.to_lowercase())
     }
 
     pub fn get_selected_path(&self) -> Option<&PathBuf> {
