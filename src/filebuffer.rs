@@ -10,8 +10,10 @@ use console_engine::{pixel, Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModi
 
 use crate::config::{ColorTheme, Configs, Invert};
 use crate::themevar;
-use crate::{util, AppError, CONTROL_SHIFT};
+use crate::util::{self, TruncateBack};
+use crate::{AppError, CONTROL_SHIFT};
 use crate::search_str;
+
 
 /// Syntax:
 /// ```rust
@@ -72,6 +74,14 @@ impl FileBuffer {
         }
     }
 
+    pub fn calc_size_from_engine(engine: &ConsoleEngine) -> (u32, u32) {
+        (engine.get_width() - 2, engine.get_height() - 2)
+    }
+
+    pub fn resize(&mut self, new_width: u32, new_height: u32) {
+        self.screen.resize(new_width, new_height);
+    }
+
     pub fn get_state(&self) -> &StatusLineState {
         &self.status_line.state
     }
@@ -99,14 +109,15 @@ impl FileBuffer {
     }
 
     pub fn display_path(&mut self) {
-        self.status_line
-            .set_text(&self.path.display().to_string())
+        self.status_line.set_text(&self.path.display()
+                .to_string()
+                .trunc_back(self.screen.get_width() as usize))
             .set_color(themevar!(text_color));
     }
 
     /// Sets the path
     /// Don't confuse this with open_selected() lol
-    pub fn open_dir(&mut self, path: &Path) {
+    pub fn set_path(&mut self, path: &Path) {
         self.path = PathBuf::from(path);
         try_err!(self.load_entries() => self; else {
             self.status_line.normal();
@@ -716,15 +727,18 @@ impl StatusLine {
             }
         };
 
+        let width: usize = engine.get_width() as usize;
+
         // Draw prompt line
         engine.print_fbg(
             0,
             engine.get_height() as i32 - 1,
-            &text,
+            &text.trunc_back(width),
             self.color,
             themevar!(bg_color),
         );
 
+        // Draw caret
         let i: i32 = prompt_line.cursor_pos as i32;
         let ch: &str = prompt_line.get(i as usize..i as usize + 1).unwrap_or(" ");
         let text_col = Configs::theme().text_color;

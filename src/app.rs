@@ -36,10 +36,8 @@ impl App {
         let engine: ConsoleEngine = ConsoleEngine::init_fill(cfg.update_rate)?;
 
         // Initialize file buffer
-        let mut file_buffer = FileBuffer::new(
-            at_path,
-            Screen::new(engine.get_width() - 2, engine.get_height() - 2),
-        );
+        let (w, h) = FileBuffer::calc_size_from_engine(&engine);
+        let mut file_buffer = FileBuffer::new(at_path, Screen::new(w, h));
 
         try_err!( file_buffer.load_entries() => file_buffer );
 
@@ -94,6 +92,9 @@ impl App {
 
             Event::Resize(w, h) => {
                 self.engine.resize(w as u32, h as u32);
+                let (w, h) = FileBuffer::calc_size_from_engine(&self.engine);
+                self.file_buffer.resize(w, h);
+                self.file_buffer.display_path();
             }
 
             Event::Mouse(mouse_event) => {
@@ -338,12 +339,12 @@ impl App {
 
                 self.add_current_to_recent();
                 if path.is_dir() {
-                    self.file_buffer.open_dir(&path);
+                    self.file_buffer.set_path(&path);
                 } else if path.is_file() {
                     let file_name = path.file_name() .ok_or("Invalid file name")?;
                     let path: &Path = path.parent() .ok_or("Parent directory not foud")?;
 
-                    self.file_buffer.open_dir(path);
+                    self.file_buffer.set_path(path);
                     self.file_buffer.select(file_name);
                 }
 

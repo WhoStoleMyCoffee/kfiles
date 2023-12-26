@@ -250,9 +250,7 @@ impl SearchPanel {
     }
 
     fn display_results(&mut self) {
-        if self.get_results().is_empty() {
-            return;
-        }
+        if self.get_results().is_empty() { return; }
 
         let offset: (i32, i32) = (2, 4);
         let theme: &ColorTheme = Configs::theme();
@@ -266,7 +264,15 @@ impl SearchPanel {
             pixel::pxl_bg(' ', theme.comment_color.into()),
         );
 
+        // Entries
+        let width: usize = self.screen.get_width() as usize - 3;
+        let strip_root: Option<&Path> = match &self.query.mode {
+            SearchQueryMode::Files(root) | SearchQueryMode::Folders(root) => Some(root),
+            _ => None,
+            
+        };
         for (i, entry) in self.query.results.iter().enumerate() {
+            // Reached the bottom
             if i as u32 + offset.1 as u32 >= self.screen.get_height() - 1 {
                 break;
             }
@@ -277,15 +283,15 @@ impl SearchPanel {
                 bg_color
             };
 
-            let path: &Path = if let SearchQueryMode::Files(root_path)
-            | SearchQueryMode::Folders(root_path) = &self.query.mode
-            {
-                entry.strip_prefix(root_path).unwrap_or(entry)
+            let path: &Path = if let Some(root) = strip_root {
+                entry.strip_prefix(root).unwrap_or(entry)
             } else {
                 entry
             };
 
-            let mut path_string: String = path2string(path).replace('\\', "/");
+            let mut path_string: String = path2string(path)
+                .replace('\\', "/")
+                .trunc_back(width);
 
             if let Some(prefix) = &entry.prefix {
                 path_string = format!("{prefix} {path_string}");
@@ -427,8 +433,8 @@ impl SearchQuery {
         let max: usize = self.max_result_count;
 
         for received in rx.try_iter() {
-            for entry in received.iter().take(max - self.results.len()) {
-                self.results.push(entry.clone());
+            for entry in received.into_iter().take(max - self.results.len()) {
+                self.results.push(entry);
             }
         }
 
@@ -609,7 +615,6 @@ fn query_search_folders(
 
     let folders: Vec<FileEntry> = folders.into_iter()
         .filter(|pathbuf| {
-            // path2string(pathbuf).to_lowercase().contains(&query)
             pathbuf.display().to_string().to_lowercase().contains(&query)
         })
         .map(FileEntry::from)

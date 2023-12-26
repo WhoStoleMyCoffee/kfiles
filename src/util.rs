@@ -116,3 +116,24 @@ where
 }
 
 
+
+
+
+pub trait TruncateBack {
+    type Output;
+    fn trunc_back(self, new_len: usize) -> Self::Output;
+}
+
+
+impl TruncateBack for String {
+    type Output = String;
+
+    fn trunc_back(self, new_len: usize) -> Self::Output {
+        let t: usize = self.len().saturating_sub(new_len);
+        self.chars()
+            .skip(t)
+            .collect::<String>()
+    }
+}
+
+
