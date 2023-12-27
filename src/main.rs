@@ -293,7 +293,7 @@ mod help {
     /// Artificial delay when printing help message
     /// The aim is to have the user subconsciously know that there is more than one screen worth of
     /// help text
-    const DELAY: u64 = 2;
+    const DELAY: u64 = 5;
 
     pub fn open_config_file() {
         let Ok(cfg_path) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) else {
@@ -333,7 +333,7 @@ mod help {
     }
 
 
-    macro_rules! printhelp {
+    macro_rules! printtabbed {
         ($al:expr; $name:expr, $desc:expr) => {
             println!("    {}{}{}", $name, " ".repeat($al - $name.len() - 4), $desc);
         };
@@ -369,7 +369,7 @@ mod help {
     pub fn print_help() {
         println!("Thank you for using {APPNAME} v{VERSION}\n\nUSAGE:");
         pause!(DELAY);
-        printhelp!{ALIGN;
+        printtabbed!{ALIGN;
             "kfiles", "Run the program at the default directory";
             "kfiles <path>", "Run the program at the specified directory";
             "kfiles [options ..]", "";
@@ -377,21 +377,25 @@ mod help {
 
         pause!(DELAY);
         println!("\n\nOPTIONS:");
-        printhelp!{ALIGN;
+        printtabbed!{ALIGN;
             "--help, -h", "Show this message";
             "--favorites, -f <query>", "Opens the program with the first result that matches <query> in your favorites";
         };
         println!("{TAB}--config, --configs, -c, -cfg, --cfg");
-        printhelp!(ALIGN; "", "Opens the configuration file");
+        printtabbed!(ALIGN; "", "Opens the configuration file");
 
         pause!(DELAY);
         print_config_help();
 
-	// Show keybinds at the bottom so it's the first thing the user sees
-	// when they summon the almighty help message
+        // Show keybinds at the bottom so it's the first thing the user sees
+        // when they summon the almighty help message
         pause!(DELAY);
+        print_keybind_help();
+    }
+
+    pub fn print_keybind_help() {
         println!("\n\nKEYBINDS:\n{TAB}NAVIGATION:");
-        printhelp!{ALIGN;
+        printtabbed!{ALIGN;
             "j or down arrow", "Move cursor down";
             "k or up arrow", "Move cursor up";
             "Ctrl-c or Alt-F4", "Exit the program";
@@ -399,13 +403,16 @@ mod help {
             "` or Tab", "Search favorites (Esc or ` to cancel)";
             "/ or ;", "Quick search";
             "g and G", "Jump to the start and end of the list";
-            "- or Backspace", "Go back";
             "u and d", "Jump up or down half a page";
         };
+        println!("{TAB}- or Backspace or Alt-up arrow");
+        printtabbed!(ALIGN; "", "Go back");
 
         pause!(DELAY);
         println!("\n{TAB}OTHER:");
-        printhelp!{ALIGN;
+        printtabbed!{ALIGN;
+            "F1", "Show help message";
+            "F5", "Refresh view";
             "Ctrl-o", "Search recent directories";
             "Ctrl-p", "Search files (Esc to cancel)";
             "Ctrl-Shift-p", "Search folders (Esc to cancel)";
@@ -420,7 +427,7 @@ mod help {
 
         pause!(DELAY);
         println!("\n{TAB}WHEN IN SEARCH PANEL:");
-        printhelp!{ALIGN;
+        printtabbed!{ALIGN;
             "up and down arrows", "Move cursor";
             "Enter", "Open selected file/folder";
         };
@@ -433,7 +440,7 @@ mod help {
         };
         println!("\n\nCONFIGS:\nYou can find your config file at: {}", p.display());
         println!("or run with --config to open it");
-        printhelp!{ALIGN;
+        printtabbed!{ALIGN;
             "scroll_margin", "Minimum spacing between cursor and edge of the window";
             "max_recent_count", "How many directories to keep track of in the recent list";
             "default_path", "Default directory when the program is run";
@@ -445,7 +452,7 @@ mod help {
             "search_thread_count", "How many threads to use while searching";
         };
         println!("\n{TAB}THEME (all in RGB color values):");
-        printhelp!{ALIGN;
+        printtabbed!{ALIGN;
             "folder_color", "Color for displaying folders";
             "file_color", "Color for displaying files";
             "special_color", "Color for special text";
@@ -463,8 +470,7 @@ mod help {
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
-    use std::fs::File;
-    use std::{io::Write, path::PathBuf};
+    use std::path::PathBuf;
 
     use dialoguer::Input;
 

@@ -449,7 +449,11 @@ impl FileBuffer {
                 code: KeyCode::Char('-') | KeyCode::Backspace,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => {
+            } | KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::ALT,
+                ..
+            }=> {
                 let folder_name: Option<OsString> = self.path.file_name().map(|s| s.to_os_string());
                 let went_back: bool = self.path.pop();
                 self.display_path();
