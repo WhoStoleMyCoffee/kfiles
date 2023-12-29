@@ -8,9 +8,9 @@ use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use console_engine::screen::Screen;
 use console_engine::{pixel, Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::config::{ColorTheme, Configs, Invert};
+use crate::config::{ColorTheme, Configs};
 use crate::themevar;
-use crate::util::{self, TruncateBack};
+use crate::util::{self, TruncateBack, Invert};
 use crate::{AppError, CONTROL_SHIFT};
 use crate::search_str;
 

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::fmt::Display;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Sender, Receiver, self};
@@ -15,107 +16,143 @@ use console_engine::forms::{Form, FormField, FormOptions, FormStyle, FormValue, 
 
 use threads_pool::ThreadPool;
 
-use crate::config::{ColorTheme, Configs, Invert};
+use crate::config::{ColorTheme, Configs};
 use crate::{themevar, util::*};
 
 #[derive(Debug, Clone)]
-pub struct FileEntry {
+pub struct SearchEntry {
     pub prefix: Option<String>,
-    pub path: PathBuf,
+    pub string: String,
 }
 
-impl FileEntry {
+impl SearchEntry {
+    pub fn new(string: &str) -> Self {
+        Self {
+            prefix: None,
+            string: string.to_string(),
+        }
+    }
+
     pub fn prefix(mut self, prefix: &str) -> Self {
         self.prefix = Some(prefix.to_string());
         self
     }
 
     pub fn prefix_idx(mut self, index: usize) -> Self {
-        self.prefix = Some(format!("{index}:"));
+        self.prefix = Some(format!("{index}: "));
         self
     }
 }
 
-impl AsRef<PathBuf> for FileEntry {
-    fn as_ref(&self) -> &PathBuf {
-        &self.path
+impl AsRef<String> for SearchEntry {
+    fn as_ref(&self) -> &String {
+        &self.string
     }
 }
 
-impl Deref for FileEntry {
-    type Target = PathBuf;
+impl AsMut<String> for SearchEntry {
+    fn as_mut(&mut self) -> &mut String {
+        &mut self.string
+    }
+}
+
+impl Deref for SearchEntry {
+    type Target = String;
 
     fn deref(&self) -> &Self::Target {
-        &self.path
+        &self.string
     }
 }
 
-impl From<&Path> for FileEntry {
+impl From<&Path> for SearchEntry {
     fn from(value: &Path) -> Self {
         Self {
             prefix: None,
-            path: value.to_path_buf(),
+            string: value.display().to_string(),
         }
     }
 }
 
-impl From<PathBuf> for FileEntry {
-    fn from(value: PathBuf) -> Self {
+impl From<&PathBuf> for SearchEntry {
+    fn from(value: &PathBuf) -> Self {
         Self {
             prefix: None,
-            path: value,
+            string: value.display().to_string(),
         }
     }
 }
 
-impl ToString for FileEntry {
-    fn to_string(&self) -> String {
+impl Display for SearchEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(prefix) = &self.prefix {
-            format!("{}{}", prefix, self.to_string_lossy())
+            write!(f, "{}{}", prefix, self.string)
         } else {
-            format!("{}", self.to_string_lossy())
+            write!(f, "{}", self.string)
         }
     }
 }
+
+// impl ToString for SearchEntry {
+//     fn to_string(&self) -> String {
+//         if let Some(prefix) = &self.prefix {
+//             format!("{}{}", prefix, self.to_string_lossy())
+//         } else {
+//             format!("{}", self.to_string_lossy())
+//         }
+//     }
+// }
+
+
 
 #[derive(Debug, PartialEq)]
-pub enum SearchPanelState {
+pub enum SelectPanelState {
     Running,
-    Exit(Option<PathBuf>),
+    Exit(Option<String>),
 }
+
+// pub enum SelectPanelMode {
+//     List( Vec<Box<dyn ListItem>> ),
+//     SearchFiles(PathBuf),
+//     SearchFolders(PathBuf),
+// }
 
 // Used for quick-searching files, folders, and favorites
 // The actual searching happens in SearchQuery
-pub struct SearchPanel {
+pub struct SelectPanel {
     screen: Screen,
     form: Form, // Input box
     title: String,
     color: Color,
     selected_index: usize,
-    query: SearchQuery,
-    pub state: SearchPanelState,
+    query: Box<dyn SearchQuery>,
+    pub state: SelectPanelState,
 }
 
-impl SearchPanel {
-    pub fn new(width: u32, height: u32, mode: SearchQueryMode) -> Self {
+impl SelectPanel {
+    pub fn new(
+        width: u32,
+        height: u32,
+        query: Box<dyn SearchQuery>
+    ) -> Self {
         let cfg: &Configs = Configs::global();
 
         let max_result_count: usize = (height - 5) as usize;
 
         Self {
             screen: Screen::new(width, height),
-            form: SearchPanel::build_form(width - 2, cfg.theme.bg_color.into()),
+            form: SelectPanel::build_form(width - 2, cfg.theme.bg_color.into()),
             title: "Search".to_string(),
             color: cfg.theme.file_color.into(),
             selected_index: 0,
-            query: SearchQuery::new(
-                mode,
-                max_result_count,
-                cfg.max_search_queue_len,
-                cfg.search_thread_count,
-                cfg.search_ignore_types.clone(),
-            ),
-            state: SearchPanelState::Running,
+            query,
+            // query: SearchQuery::new(
+            //     mode,
+            //     max_result_count,
+            //     cfg.max_search_queue_len,
+            //     cfg.search_thread_count,
+            //     cfg.search_ignore_types.clone(),
+            // ),
+            state: SelectPanelState::Running,
         }
     }
 
@@ -157,20 +194,13 @@ impl SearchPanel {
     }
 
     pub fn update(&mut self) {
-        self.query.update();
-        self.selected_index = self.selected_index.min(self.get_results().len().max(1) - 1);
+        // self.query.update();
+        let count: usize = self.query.get_result_count();
+        self.selected_index = self.selected_index.min(count.max(1) - 1);
     }
 
     pub fn is_running(&self) -> bool {
-        self.state == SearchPanelState::Running
-    }
-
-    pub fn get_query_mode(&self) -> &SearchQueryMode {
-        &self.query.mode
-    }
-
-    pub fn get_results(&self) -> &Vec<FileEntry> {
-        &self.query.results
+        self.state == SelectPanelState::Running
     }
 
     pub fn handle_mouse_event(&mut self, event: MouseEvent, y_offset: u16) {
@@ -182,7 +212,8 @@ impl SearchPanel {
         {
             let offset: u16 = y_offset + 4;
             let urow: u16 = row.max(offset) - offset;
-            self.selected_index = (urow as usize).min(self.get_results().len().max(1) - 1);
+            let count: usize = self.query.get_result_count();
+            self.selected_index = (urow as usize).min(count.max(1) - 1);
         }
     }
 
@@ -197,10 +228,10 @@ impl SearchPanel {
             KeyEvent {
                 code: KeyCode::Up, ..
             } => {
-                self.selected_index = self
-                    .selected_index
+                let count: usize = self.query.get_result_count();
+                self.selected_index = self.selected_index
                     .checked_sub(1)
-                    .or_else(|| self.get_results().len().checked_sub(1))
+                    .or_else(|| count.checked_sub(1))
                     .unwrap_or_default();
                 return;
             }
@@ -210,10 +241,8 @@ impl SearchPanel {
                 code: KeyCode::Down,
                 ..
             } => {
-                let len: usize = self.get_results().len();
-                if len == 0 {
-                    return;
-                }
+                let len: usize = self.query.get_result_count();
+                if len == 0 { return; }
                 self.selected_index = (self.selected_index + 1) % len;
                 return;
             }
@@ -222,7 +251,7 @@ impl SearchPanel {
             KeyEvent {
                 code: KeyCode::Esc, ..
             } => {
-                self.state = SearchPanelState::Exit(None);
+                self.state = SelectPanelState::Exit(None);
                 return;
             }
 
@@ -231,10 +260,10 @@ impl SearchPanel {
                 self.form.handle_event(Event::Key(key_event));
 
                 if self.form.is_finished() {
-                    let Some(selected) = self.get_results().get(self.selected_index) else {
+                    let Some(selected) = self.query.get_results().get(self.selected_index) else {
                         return;
                     };
-                    self.state = SearchPanelState::Exit(Some(selected.as_ref().clone()));
+                    self.state = SelectPanelState::Exit(Some( selected.as_ref().clone() ));
                     return;
                 }
             }
@@ -246,11 +275,11 @@ impl SearchPanel {
             _ => return,
         };
 
-        self.query.search(value);
+        self.query.search(&value);
     }
 
     fn display_results(&mut self) {
-        if self.get_results().is_empty() { return; }
+        if self.query.get_results().is_empty() { return; }
 
         let offset: (i32, i32) = (2, 4);
         let theme: &ColorTheme = Configs::theme();
@@ -266,10 +295,29 @@ impl SearchPanel {
 
         // Entries
         let width: usize = self.screen.get_width() as usize - 3;
+        for (i, entry) in self.query.get_results().iter().enumerate() {
+            // Reached the bottom
+            if i as u32 + offset.1 as u32 >= self.screen.get_height() - 1 {
+                break;
+            }
+
+            let bg: Color = if i == self.selected_index {
+                theme.comment_color.into()
+            } else {
+                bg_color
+            };
+
+            let s: String = entry.as_ref()
+                .replace('\\', "/")
+                .trunc_back(width);
+            self.screen.print_fbg(offset.0, i as i32 + offset.1, &s, self.color, bg);
+
+        }
+
+        /*
         let strip_root: Option<&Path> = match &self.query.mode {
             SearchQueryMode::Files(root) | SearchQueryMode::Folders(root) => Some(root),
             _ => None,
-            
         };
         for (i, entry) in self.query.results.iter().enumerate() {
             // Reached the bottom
@@ -300,6 +348,8 @@ impl SearchPanel {
             self.screen
                 .print_fbg(offset.0, i as i32 + offset.1, &path_string, self.color, bg);
         }
+        */
+
     }
 
     // TODO optimize maybe
@@ -329,16 +379,115 @@ impl SearchPanel {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum SearchQueryMode {
-    Files(PathBuf),
-    Folders(PathBuf),
-    List(Vec<PathBuf>),
+
+
+
+pub trait SearchQuery {
+    fn list(&self) -> Vec<SearchEntry>;
+
+    fn search(&mut self, query: &str);
+
+    fn get_results(&self) -> &Vec<SearchEntry>;
+
+    fn get_result_count(&self) -> usize {
+        self.get_results().len()
+    }
 }
+
+
+
+pub struct SearchPathList {
+    pub items: Vec<PathBuf>,
+    pub results: Vec<SearchEntry>,
+}
+
+impl SearchPathList {
+    pub fn new(items: &[PathBuf]) -> Self {
+        let mut l = Self {
+            items: items.to_vec(),
+            results: Vec::new(),
+        };
+
+        l.results = l.list();
+        l
+    }
+}
+
+impl SearchQuery for SearchPathList {
+    fn list(&self) -> Vec<SearchEntry> {
+        self.items.iter().enumerate()
+            .map(|(i, s)| SearchEntry::from(s).prefix_idx(i) )
+            .collect()
+    }
+
+    fn search(&mut self, query: &str) {
+        if query.is_empty() {
+            self.results = self.list();
+            return;
+        }
+
+        let q: String = query.to_lowercase();
+        self.results = self.items.iter().enumerate()
+            .map(|(i, s)| SearchEntry::from(s).prefix_idx(i) )
+            .filter(|s| s.to_lowercase().contains(&q))
+            .collect();
+    }
+
+    fn get_results(&self) -> &Vec<SearchEntry> {
+        &self.results
+    }
+}
+
+
+
+
+
+pub struct SearchList {
+    pub items: Vec<String>,
+    pub results: Vec<SearchEntry>,
+}
+
+impl SearchList {
+    pub fn new(items: &[&str]) -> Self {
+        let mut l = Self {
+            items: items.iter()
+                .map(|s| s.to_string())
+                .collect(),
+            results: Vec::new(),
+        };
+
+        l.results = l.list();
+        l
+    }
+}
+
+impl SearchQuery for SearchList {
+    fn list(&self) -> Vec<SearchEntry> {
+        self.items.iter().enumerate()
+            .map(|(i, s)| SearchEntry::new(s).prefix_idx(i) )
+            .collect()
+    }
+
+    fn search(&mut self, query: &str) {
+        let q: String = query.to_lowercase();
+        self.results = self.items.iter().enumerate()
+            .map(|(i, s)| SearchEntry::new(s).prefix_idx(i) )
+            .filter(|s| s.to_lowercase().contains(&q))
+            .collect();
+    }
+
+    fn get_results(&self) -> &Vec<SearchEntry> {
+        &self.results
+    }
+}
+
+
+
+
+/*
 
 struct SearchQuery {
     query: String,
-    mode: SearchQueryMode,
     results: Vec<FileEntry>,
     receiver: Option<Receiver<Vec<FileEntry>>>,
     max_result_count: usize,
@@ -623,3 +772,4 @@ fn query_search_folders(
     let _ = sender.send(folders);
 
 }
+*/

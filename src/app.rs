@@ -7,7 +7,7 @@ use console_engine::{Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::config::{ColorTheme, Configs, FavoritesList, RecentList};
 use crate::filebuffer::FileBuffer;
-use crate::search::{SearchPanel, SearchPanelState, SearchQueryMode};
+use crate::search::{self, SelectPanel, SelectPanelState, SearchQuery};
 use crate::try_err;
 use crate::{
     get_favorites_list_path, get_recent_dirs_path, themevar, APPNAME, CONFIG_PATH,
@@ -25,7 +25,7 @@ pub enum AppState {
 pub struct App {
     engine: ConsoleEngine,
     file_buffer: FileBuffer,
-    search_panel: Option<SearchPanel>,
+    search_panel: Option<SelectPanel>,
     recent_dirs: RecentList,
     favorites: FavoritesList,
 }
@@ -165,6 +165,7 @@ impl App {
                 self.add_current_to_recent();
             }
 
+            /*
             // Search folders with Ctrl-Shift-p
             KeyEvent {
                 code: KeyCode::Char('P'),
@@ -176,7 +177,7 @@ impl App {
                     return AppState::Running;
                 }
 
-                let panel: SearchPanel = self
+                let panel: SelectPanel = self
                     .create_search_panel(SearchQueryMode::Folders(self.file_buffer.path.clone()))
                     .set_title("Search Folders")
                     .set_color(themevar!(folder_color));
@@ -194,7 +195,7 @@ impl App {
                     return AppState::Running;
                 }
 
-                let panel: SearchPanel = self
+                let panel: SelectPanel = self
                     .create_search_panel(SearchQueryMode::Files(self.file_buffer.path.clone()))
                     .set_title("Search Files");
                 self.search_panel = Some(panel);
@@ -215,12 +216,13 @@ impl App {
                     return AppState::Running;
                 }
 
-                let panel: SearchPanel = self
+                let panel: SelectPanel = self
                     .create_search_panel(SearchQueryMode::List(self.recent_dirs.clone()))
                     .set_title("Recent")
                     .set_color(themevar!(folder_color));
                 self.search_panel = Some(panel);
             }
+            */
 
             // Add to favorites with Ctrl-f
             KeyEvent {
@@ -259,15 +261,16 @@ impl App {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                // If already open in favorites mode, close
-                if let Some(panel) = &self.search_panel {
-                    if let SearchQueryMode::List(_) = panel.get_query_mode() {
-                        self.search_panel = None;
-                    }
+                // If already open, close
+                if self.search_panel.is_some() {
+                    self.search_panel = None;
                     return AppState::Running;
                 }
 
-                let panel: SearchPanel = self.create_search_panel(SearchQueryMode::List(self.favorites.clone()))
+                // let panel: SelectPanel = self.create_search_panel(SearchQueryMode::List(self.favorites.clone()))
+                let panel: SelectPanel = self.create_search_panel(
+                    Box::new( search::SearchPathList::new(&self.favorites) )
+                    )
                     .set_title("Favorites")
                     .set_color(themevar!(special_color));
                 self.search_panel = Some(panel);
@@ -280,7 +283,25 @@ impl App {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                return AppState::Help;
+                // If already open, close
+                if self.search_panel.is_some() {
+                    self.search_panel = None;
+                    return AppState::Running;
+                }
+
+                let panel: SelectPanel = self.create_search_panel(
+                    Box::new( search::SearchList::new(&[
+                            "Help",
+                            "Toggle favorite",
+                            "Open configuration file",
+                            "Open configuration folder",
+                        ]) )
+                    )
+                    .set_title("Help")
+                    .set_color(themevar!(special_color));
+                self.search_panel = Some(panel);
+
+                // return AppState::Help;
             }
 
             // Reload with F5
@@ -323,30 +344,31 @@ impl App {
 
     // I put this stuff in its own function because that would've been a disgusting amount of indentation
     fn searchpanel_handle_key_event(&mut self, event: KeyEvent) -> Result<(), String> {
-        let search_panel: &mut SearchPanel = self.search_panel.as_mut()
+        let search_panel: &mut SelectPanel = self.search_panel.as_mut()
             .expect("SearchPanel not set");
 
         search_panel.handle_key_event(event);
 
         match &search_panel.state {
-            SearchPanelState::Running => {}
+            SelectPanelState::Running => {}
 
-            SearchPanelState::Exit(path_maybe) => {
-                let Some(path) = path_maybe.clone() else {
+            SelectPanelState::Exit(string_maybe) => {
+                let Some(string) = string_maybe.clone() else {
                     self.search_panel = None;
                     return Ok(());
                 };
 
                 self.add_current_to_recent();
-                if path.is_dir() {
-                    self.file_buffer.set_path(&path);
-                } else if path.is_file() {
-                    let file_name = path.file_name() .ok_or("Invalid file name")?;
-                    let path: &Path = path.parent() .ok_or("Parent directory not foud")?;
 
-                    self.file_buffer.set_path(path);
-                    self.file_buffer.select(file_name);
-                }
+                // if path.is_dir() {
+                //     self.file_buffer.set_path(&path);
+                // } else if path.is_file() {
+                //     let file_name = path.file_name() .ok_or("Invalid file name")?;
+                //     let path: &Path = path.parent() .ok_or("Parent directory not foud")?;
+
+                //     self.file_buffer.set_path(path);
+                //     self.file_buffer.select(file_name);
+                // }
 
                 self.set_title_to_current();
                 self.search_panel = None;
@@ -356,11 +378,11 @@ impl App {
         Ok(())
     }
 
-    fn create_search_panel(&self, mode: SearchQueryMode) -> SearchPanel {
-        SearchPanel::new(
+    fn create_search_panel(&self, query: Box<dyn SearchQuery>) -> SelectPanel {
+        SelectPanel::new(
             self.engine.get_width() - SEARCH_PANEL_MARGIN.0 * 2,
             self.engine.get_height() - SEARCH_PANEL_MARGIN.1 * 2,
-            mode,
+            query,
         )
     }
 

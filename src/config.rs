@@ -224,23 +224,4 @@ impl Default for ColorTheme {
     }
 }
 
-/// Literally `std::ops::Neg`
-pub trait Invert {
-    type Output;
-    fn inv(self) -> Self::Output;
-}
 
-impl Invert for (u8, u8, u8) {
-    type Output = Self;
-    fn inv(self) -> Self::Output {
-        (255 - self.0, 255 - self.1, 255 - self.2)
-    }
-}
-
-// Nah maybe someday
-// impl Invert for Color {
-//     type Output = Self;
-//     fn inv(self) -> Self::Output {
-//         todo!()
-//     }
-// }
