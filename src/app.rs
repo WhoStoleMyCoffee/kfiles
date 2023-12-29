@@ -165,7 +165,6 @@ impl App {
                 self.add_current_to_recent();
             }
 
-            /*
             // Search folders with Ctrl-Shift-p
             KeyEvent {
                 code: KeyCode::Char('P'),
@@ -173,15 +172,16 @@ impl App {
                 modifiers,
                 ..
             } if modifiers.bits() == CONTROL_SHIFT => {
-                if self.search_panel.is_some() {
-                    return AppState::Running;
-                }
+                todo!()
+                // if self.search_panel.is_some() {
+                //     return AppState::Running;
+                // }
 
-                let panel: SelectPanel = self
-                    .create_search_panel(SearchQueryMode::Folders(self.file_buffer.path.clone()))
-                    .set_title("Search Folders")
-                    .set_color(themevar!(folder_color));
-                self.search_panel = Some(panel);
+                // let panel: SelectPanel = self
+                //     .create_search_panel(SearchQueryMode::Folders(self.file_buffer.path.clone()))
+                //     .set_title("Search Folders")
+                //     .set_color(themevar!(folder_color));
+                // self.search_panel = Some(panel);
             }
 
             // Search files with Ctrl-p
@@ -191,14 +191,15 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                if self.search_panel.is_some() {
-                    return AppState::Running;
-                }
+                todo!()
+                // if self.search_panel.is_some() {
+                //     return AppState::Running;
+                // }
 
-                let panel: SelectPanel = self
-                    .create_search_panel(SearchQueryMode::Files(self.file_buffer.path.clone()))
-                    .set_title("Search Files");
-                self.search_panel = Some(panel);
+                // let panel: SelectPanel = self
+                //     .create_search_panel(SearchQueryMode::Files(self.file_buffer.path.clone()))
+                //     .set_title("Search Files");
+                // self.search_panel = Some(panel);
             }
 
             // Recent files with Ctrl-o
@@ -208,21 +209,21 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                // If already open in favorites mode, close
-                if let Some(panel) = &self.search_panel {
-                    if let SearchQueryMode::List(_) = panel.get_query_mode() {
-                        self.search_panel = None;
-                    }
-                    return AppState::Running;
-                }
+                todo!()
+                // // If already open in favorites mode, close
+                // if let Some(panel) = &self.search_panel {
+                //     if let SearchQueryMode::List(_) = panel.get_query_mode() {
+                //         self.search_panel = None;
+                //     }
+                //     return AppState::Running;
+                // }
 
-                let panel: SelectPanel = self
-                    .create_search_panel(SearchQueryMode::List(self.recent_dirs.clone()))
-                    .set_title("Recent")
-                    .set_color(themevar!(folder_color));
-                self.search_panel = Some(panel);
+                // let panel: SelectPanel = self
+                //     .create_search_panel(SearchQueryMode::List(self.recent_dirs.clone()))
+                //     .set_title("Recent")
+                //     .set_color(themevar!(folder_color));
+                // self.search_panel = Some(panel);
             }
-            */
 
             // Add to favorites with Ctrl-f
             KeyEvent {
@@ -268,11 +269,18 @@ impl App {
                 }
 
                 // let panel: SelectPanel = self.create_search_panel(SearchQueryMode::List(self.favorites.clone()))
-                let panel: SelectPanel = self.create_search_panel(
+                let mut panel: SelectPanel = self.create_search_panel(
                     Box::new( search::SearchPathList::new(&self.favorites) )
                     )
                     .set_title("Favorites")
                     .set_color(themevar!(special_color));
+                
+                // panel = panel.on_selected(Box::new(|| {
+                // }));
+
+                // panel = panel.on_selected(Box::new(|s: &str| {
+                //         self.file_buffer.set_path(&Path::new(r"C:/Users/ddxte/Documents/Projects/kfiles"));
+                //     }));
                 self.search_panel = Some(panel);
             }
 

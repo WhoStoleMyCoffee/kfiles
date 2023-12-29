@@ -594,5 +594,56 @@ mod tests {
             println!("No match found!");
         }
     }
+    
+
+    struct Bar<'a> {
+        callback: Option<Box< dyn FnMut() + 'a >>,
+    }
+
+    impl<'a> Bar<'a> {
+        fn set_callback<F>(&mut self, f: F)
+        where F: FnMut() + 'a {
+            self.callback = Some(Box::new(f));
+        }
+
+        fn call_callback(&mut self) {
+            if let Some(cb) = &mut self.callback {
+                cb();
+            }
+        }
+    }
+
+    struct Foo<'a> {
+        name: String,
+        bar: Bar<'a>,
+    }
+
+    impl Foo<'_> {
+        fn doshit(&mut self) {
+            let me = self as *mut Foo;
+            self.bar.set_callback(move || {
+
+                unsafe {
+                    (*me).name = "doe".to_string();
+                }
+
+            });
+        }
+    }
+
+    #[test]
+    fn test_callbacks() {
+        let mut foo: Foo = Foo {
+            name: "john".to_string(),
+            bar: Bar {
+                callback: None
+            },
+        };
+
+        dbg!(&foo.name);
+        foo.doshit();
+        foo.bar.call_callback();
+        dbg!(&foo.name);
+    }
 
 }
