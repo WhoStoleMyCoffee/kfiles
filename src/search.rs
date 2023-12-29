@@ -20,17 +20,46 @@ use crate::config::{ColorTheme, Configs};
 use crate::{themevar, util::*};
 
 
+pub struct IndexedString (usize, String);
+
+impl AsRef<String> for IndexedString {
+    fn as_ref(&self) -> &String {
+        &self.1
+    }
+}
+
+impl AsMut<String> for IndexedString {
+    fn as_mut(&mut self) -> &mut String {
+        &mut self.1
+    }
+}
+
+impl From<(usize, &PathBuf)> for IndexedString {
+    fn from(value: (usize, &PathBuf)) -> Self {
+        Self (value.0, value.1.display().to_string())
+    }
+}
+
+impl From<(usize, &String)> for IndexedString {
+    fn from(value: (usize, &String)) -> Self {
+        Self (value.0,value.1.to_string())
+    }
+}
+
+impl ToString for IndexedString {
+    fn to_string(&self) -> String {
+        format!("{}: {}", self.0, self.1)
+    }
+}
+
+
 #[derive(Debug, PartialEq)]
 pub enum SelectPanelState {
     Running,
-    Exit(Option<String>),
+    Exit,
 }
 
-// pub enum SelectPanelMode {
-//     List( Vec<Box<dyn ListItem>> ),
-//     SearchFiles(PathBuf),
-//     SearchFolders(PathBuf),
-// }
+type Callback = Box< dyn FnMut(&IndexedString) >;
 
 // Used for quick-searching files, folders, and favorites
 // The actual searching happens in SearchQuery
@@ -41,7 +70,7 @@ pub struct SelectPanel {
     color: Color,
     selected_index: usize,
     query: Box<dyn SearchQuery>,
-    callback: Option<Box< dyn FnMut(&str) >>,
+    callback: Option<Callback>,
     pub state: SelectPanelState,
 }
 
@@ -169,7 +198,7 @@ impl SelectPanel {
             KeyEvent {
                 code: KeyCode::Esc, ..
             } => {
-                self.state = SelectPanelState::Exit(None);
+                self.state = SelectPanelState::Exit;
                 return;
             }
 
@@ -182,12 +211,11 @@ impl SelectPanel {
                         return;
                     };
 
-                    let s: &str = selected.as_ref();
                     if let Some(cb) = &mut self.callback {
-                        cb(s);
+                        cb(selected);
                     }
 
-                    self.state = SelectPanelState::Exit(Some( s.to_string() ));
+                    self.state = SelectPanelState::Exit;
                     return;
                 }
             }
@@ -231,7 +259,8 @@ impl SelectPanel {
                 bg_color
             };
 
-            let s: String = entry.replace('\\', "/")
+            let s: String = entry.to_string()
+                .replace('\\', "/")
                 .trunc_back(width);
             self.screen.print_fbg(offset.0, i as i32 + offset.1, &s, self.color, bg);
         }
@@ -301,7 +330,7 @@ impl SelectPanel {
     }
 
     pub fn on_selected<F>(mut self, f: F) -> Self
-    where F: FnMut(&str) + 'static {
+    where F: FnMut(&IndexedString) + 'static {
         self.callback = Some(Box::new(f));
         self
     }
@@ -311,11 +340,11 @@ impl SelectPanel {
 
 
 pub trait SearchQuery {
-    fn list(&self) -> Vec<String>;
+    fn list(&self) -> Vec<IndexedString>;
 
     fn search(&mut self, query: &str);
 
-    fn get_results(&self) -> &Vec<String>;
+    fn get_results(&self) -> &Vec<IndexedString>;
 
     fn get_result_count(&self) -> usize {
         self.get_results().len()
@@ -326,7 +355,7 @@ pub trait SearchQuery {
 
 pub struct SearchPathList {
     pub items: Vec<PathBuf>,
-    pub results: Vec<String>,
+    pub results: Vec<IndexedString>,
 }
 
 impl SearchPathList {
@@ -342,9 +371,9 @@ impl SearchPathList {
 }
 
 impl SearchQuery for SearchPathList {
-    fn list(&self) -> Vec<String> {
-        self.items.iter()
-            .map(|p| p.display().to_string())
+    fn list(&self) -> Vec<IndexedString> {
+        self.items.iter().enumerate()
+            .map(IndexedString::from)
             .collect()
     }
 
@@ -355,13 +384,13 @@ impl SearchQuery for SearchPathList {
         }
 
         let q: String = query.to_lowercase();
-        self.results = self.items.iter()
-            .map(|p| p.display().to_string() )
-            .filter(|s| s.to_lowercase().contains(&q))
+        self.results = self.items.iter().enumerate()
+            .map(IndexedString::from)
+            .filter(|s| s.to_string().to_lowercase().contains(&q))
             .collect();
     }
 
-    fn get_results(&self) -> &Vec<String> {
+    fn get_results(&self) -> &Vec<IndexedString> {
         &self.results
     }
 }
@@ -372,7 +401,7 @@ impl SearchQuery for SearchPathList {
 
 pub struct SearchList {
     pub items: Vec<String>,
-    pub results: Vec<String>,
+    pub results: Vec<IndexedString>,
 }
 
 impl SearchList {
@@ -390,19 +419,21 @@ impl SearchList {
 }
 
 impl SearchQuery for SearchList {
-    fn list(&self) -> Vec<String> {
-        self.items.iter().cloned().collect()
+    fn list(&self) -> Vec<IndexedString> {
+        self.items.iter().enumerate()
+            .map(IndexedString::from)
+            .collect()
     }
 
     fn search(&mut self, query: &str) {
         let q: String = query.to_lowercase();
-        self.results = self.items.iter()
-            .filter(|s| s.to_lowercase().contains(&q))
-            .cloned()
+        self.results = self.items.iter().enumerate()
+            .map(IndexedString::from)
+            .filter(|s| s.to_string().to_lowercase().contains(&q))
             .collect();
     }
 
-    fn get_results(&self) -> &Vec<String> {
+    fn get_results(&self) -> &Vec<IndexedString> {
         &self.results
     }
 }

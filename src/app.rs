@@ -235,7 +235,7 @@ impl App {
                     .set_title("Recent")
                     .set_color(themevar!(folder_color))
                     .on_selected(move |s| {
-                        let path: &Path = Path::new(s);
+                        let path: &Path = Path::new(s.as_ref());
                         let app = unsafe { &mut *app };
                         app.add_current_to_recent();
                         app.file_buffer.set_path(path);
@@ -296,7 +296,7 @@ impl App {
                     .set_title("Favorites")
                     .set_color(themevar!(special_color))
                     .on_selected(move |s| {
-                        let path: &Path = Path::new(s);
+                        let path: &Path = Path::new(s.as_ref());
                         let app = unsafe { &mut *app };
                         app.add_current_to_recent();
                         app.file_buffer.set_path(path);
@@ -380,14 +380,8 @@ impl App {
         match &search_panel.state {
             SelectPanelState::Running => {}
 
-            SelectPanelState::Exit(string_maybe) => {
-                let Some(string) = string_maybe.clone() else {
-                    self.search_panel = None;
-                    return Ok(());
-                };
-
-                // self.add_current_to_recent();
-
+            SelectPanelState::Exit => {
+                // IMPORTANT
                 // if path.is_dir() {
                 //     self.file_buffer.set_path(&path);
                 // } else if path.is_file() {
