@@ -16,6 +16,19 @@ use crate::{
 
 use crate::{AppError, CONTROL_SHIFT};
 
+
+macro_rules! select_panel {
+    ($app:expr, $q:expr) => {
+        SelectPanel::new(
+            $app.engine.get_width() - SEARCH_PANEL_MARGIN.0 * 2,
+            $app.engine.get_height() - SEARCH_PANEL_MARGIN.1 * 2,
+            Box::new($q),
+        )
+    };
+}
+
+
+
 pub enum AppState {
     Running,
     Exit(Option<PathBuf>),
@@ -209,20 +222,26 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                todo!()
-                // // If already open in favorites mode, close
-                // if let Some(panel) = &self.search_panel {
-                //     if let SearchQueryMode::List(_) = panel.get_query_mode() {
-                //         self.search_panel = None;
-                //     }
-                //     return AppState::Running;
-                // }
+                // If already open, close
+                if self.search_panel.is_some() {
+                    self.search_panel = None;
+                    return AppState::Running;
+                }
 
-                // let panel: SelectPanel = self
-                //     .create_search_panel(SearchQueryMode::List(self.recent_dirs.clone()))
-                //     .set_title("Recent")
-                //     .set_color(themevar!(folder_color));
-                // self.search_panel = Some(panel);
+                let app = self as *mut App;
+                let panel: SelectPanel = select_panel!(self,
+                    search::SearchPathList::new(&self.recent_dirs)
+                    )
+                    .set_title("Recent")
+                    .set_color(themevar!(folder_color))
+                    .on_selected(move |s| {
+                        let path: &Path = Path::new(s);
+                        let app = unsafe { &mut *app };
+                        app.add_current_to_recent();
+                        app.file_buffer.set_path(path);
+                    });
+
+                self.search_panel = Some(panel);
             }
 
             // Add to favorites with Ctrl-f
@@ -232,27 +251,29 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                if self.search_panel.is_some() {
-                    return AppState::Running;
-                }
+                unimplemented!("Deprecated");
 
-                self.file_buffer.status_line.normal();
-                let added: bool = self.favorites.toggle(self.file_buffer.path.clone());
+                // if self.search_panel.is_some() {
+                //     return AppState::Running;
+                // }
 
-                if let Err(err) = confy::store(APPNAME, Some(CONFIG_PATH), Configs::global()) {
-                    self.file_buffer
-                        .status_line
-                        .error(err.into(), Some("Error saving configs: \n "));
-                } else {
-                    self.file_buffer
-                        .status_line
-                        .set_text(if added {
-                            "Added path to favorites"
-                        } else {
-                            "Removed path from favorites"
-                        })
-                        .set_color(themevar!(special_color));
-                }
+                // self.file_buffer.status_line.normal();
+                // let added: bool = self.favorites.toggle(self.file_buffer.path.clone());
+
+                // if let Err(err) = confy::store(APPNAME, Some(CONFIG_PATH), Configs::global()) {
+                //     self.file_buffer
+                //         .status_line
+                //         .error(err.into(), Some("Error saving configs: \n "));
+                // } else {
+                //     self.file_buffer
+                //         .status_line
+                //         .set_text(if added {
+                //             "Added path to favorites"
+                //         } else {
+                //             "Removed path from favorites"
+                //         })
+                //         .set_color(themevar!(special_color));
+                // }
             }
 
             // Open / close favorites with ` or Tab
@@ -268,19 +289,18 @@ impl App {
                     return AppState::Running;
                 }
 
-                // let panel: SelectPanel = self.create_search_panel(SearchQueryMode::List(self.favorites.clone()))
-                let mut panel: SelectPanel = self.create_search_panel(
-                    Box::new( search::SearchPathList::new(&self.favorites) )
-                    )
+                let app = self as *mut App;
+                let panel: SelectPanel = select_panel!(self,
+                     search::SearchPathList::new(&self.favorites)
+                     )
                     .set_title("Favorites")
-                    .set_color(themevar!(special_color));
-                
-                // panel = panel.on_selected(Box::new(|| {
-                // }));
-
-                // panel = panel.on_selected(Box::new(|s: &str| {
-                //         self.file_buffer.set_path(&Path::new(r"C:/Users/ddxte/Documents/Projects/kfiles"));
-                //     }));
+                    .set_color(themevar!(special_color))
+                    .on_selected(move |s| {
+                        let path: &Path = Path::new(s);
+                        let app = unsafe { &mut *app };
+                        app.add_current_to_recent();
+                        app.file_buffer.set_path(path);
+                    });
                 self.search_panel = Some(panel);
             }
 
@@ -297,13 +317,13 @@ impl App {
                     return AppState::Running;
                 }
 
-                let panel: SelectPanel = self.create_search_panel(
-                    Box::new( search::SearchList::new(&[
+                let panel: SelectPanel = select_panel!(self,
+                    search::SearchList::new(&[
                             "Help",
                             "Toggle favorite",
                             "Open configuration file",
                             "Open configuration folder",
-                        ]) )
+                        ])
                     )
                     .set_title("Help")
                     .set_color(themevar!(special_color));
@@ -366,7 +386,7 @@ impl App {
                     return Ok(());
                 };
 
-                self.add_current_to_recent();
+                // self.add_current_to_recent();
 
                 // if path.is_dir() {
                 //     self.file_buffer.set_path(&path);
@@ -384,14 +404,6 @@ impl App {
         }
 
         Ok(())
-    }
-
-    fn create_search_panel(&self, query: Box<dyn SearchQuery>) -> SelectPanel {
-        SelectPanel::new(
-            self.engine.get_width() - SEARCH_PANEL_MARGIN.0 * 2,
-            self.engine.get_height() - SEARCH_PANEL_MARGIN.1 * 2,
-            query,
-        )
     }
 
     pub fn get_path(&self) -> &PathBuf {

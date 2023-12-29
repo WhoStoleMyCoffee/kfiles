@@ -24,7 +24,8 @@ pub fn path2string<P>(path: P) -> String
 where
     P: AsRef<Path>,
 {
-    String::from(path.as_ref().to_string_lossy())
+    path.as_ref().display().to_string()
+    // String::from(path.as_ref().to_string_lossy())
 }
 
 pub fn file_name(pathbuf: &Path) -> String {

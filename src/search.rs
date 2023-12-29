@@ -19,90 +19,6 @@ use threads_pool::ThreadPool;
 use crate::config::{ColorTheme, Configs};
 use crate::{themevar, util::*};
 
-#[derive(Debug, Clone)]
-pub struct SearchEntry {
-    pub prefix: Option<String>,
-    pub string: String,
-}
-
-impl SearchEntry {
-    pub fn new(string: &str) -> Self {
-        Self {
-            prefix: None,
-            string: string.to_string(),
-        }
-    }
-
-    pub fn prefix(mut self, prefix: &str) -> Self {
-        self.prefix = Some(prefix.to_string());
-        self
-    }
-
-    pub fn prefix_idx(mut self, index: usize) -> Self {
-        self.prefix = Some(format!("{index}: "));
-        self
-    }
-}
-
-impl AsRef<String> for SearchEntry {
-    fn as_ref(&self) -> &String {
-        &self.string
-    }
-}
-
-impl AsMut<String> for SearchEntry {
-    fn as_mut(&mut self) -> &mut String {
-        &mut self.string
-    }
-}
-
-impl Deref for SearchEntry {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.string
-    }
-}
-
-impl From<&Path> for SearchEntry {
-    fn from(value: &Path) -> Self {
-        Self {
-            prefix: None,
-            string: value.display().to_string(),
-        }
-    }
-}
-
-impl From<&PathBuf> for SearchEntry {
-    fn from(value: &PathBuf) -> Self {
-        Self {
-            prefix: None,
-            string: value.display().to_string(),
-        }
-    }
-}
-
-impl Display for SearchEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(prefix) = &self.prefix {
-            write!(f, "{}{}", prefix, self.string)
-        } else {
-            write!(f, "{}", self.string)
-        }
-    }
-}
-
-// impl ToString for SearchEntry {
-//     fn to_string(&self) -> String {
-//         if let Some(prefix) = &self.prefix {
-//             format!("{}{}", prefix, self.to_string_lossy())
-//         } else {
-//             format!("{}", self.to_string_lossy())
-//         }
-//     }
-// }
-
-
 
 #[derive(Debug, PartialEq)]
 pub enum SelectPanelState {
@@ -125,6 +41,7 @@ pub struct SelectPanel {
     color: Color,
     selected_index: usize,
     query: Box<dyn SearchQuery>,
+    callback: Option<Box< dyn FnMut(&str) >>,
     pub state: SelectPanelState,
 }
 
@@ -145,6 +62,7 @@ impl SelectPanel {
             color: cfg.theme.file_color.into(),
             selected_index: 0,
             query,
+            callback: None,
             // query: SearchQuery::new(
             //     mode,
             //     max_result_count,
@@ -263,7 +181,13 @@ impl SelectPanel {
                     let Some(selected) = self.query.get_results().get(self.selected_index) else {
                         return;
                     };
-                    self.state = SelectPanelState::Exit(Some( selected.as_ref().clone() ));
+
+                    let s: &str = selected.as_ref();
+                    if let Some(cb) = &mut self.callback {
+                        cb(s);
+                    }
+
+                    self.state = SelectPanelState::Exit(Some( s.to_string() ));
                     return;
                 }
             }
@@ -307,11 +231,9 @@ impl SelectPanel {
                 bg_color
             };
 
-            let s: String = entry.as_ref()
-                .replace('\\', "/")
+            let s: String = entry.replace('\\', "/")
                 .trunc_back(width);
             self.screen.print_fbg(offset.0, i as i32 + offset.1, &s, self.color, bg);
-
         }
 
         /*
@@ -377,17 +299,23 @@ impl SelectPanel {
 
         &self.screen
     }
+
+    pub fn on_selected<F>(mut self, f: F) -> Self
+    where F: FnMut(&str) + 'static {
+        self.callback = Some(Box::new(f));
+        self
+    }
 }
 
 
 
 
 pub trait SearchQuery {
-    fn list(&self) -> Vec<SearchEntry>;
+    fn list(&self) -> Vec<String>;
 
     fn search(&mut self, query: &str);
 
-    fn get_results(&self) -> &Vec<SearchEntry>;
+    fn get_results(&self) -> &Vec<String>;
 
     fn get_result_count(&self) -> usize {
         self.get_results().len()
@@ -398,7 +326,7 @@ pub trait SearchQuery {
 
 pub struct SearchPathList {
     pub items: Vec<PathBuf>,
-    pub results: Vec<SearchEntry>,
+    pub results: Vec<String>,
 }
 
 impl SearchPathList {
@@ -414,9 +342,9 @@ impl SearchPathList {
 }
 
 impl SearchQuery for SearchPathList {
-    fn list(&self) -> Vec<SearchEntry> {
-        self.items.iter().enumerate()
-            .map(|(i, s)| SearchEntry::from(s).prefix_idx(i) )
+    fn list(&self) -> Vec<String> {
+        self.items.iter()
+            .map(|p| p.display().to_string())
             .collect()
     }
 
@@ -427,13 +355,13 @@ impl SearchQuery for SearchPathList {
         }
 
         let q: String = query.to_lowercase();
-        self.results = self.items.iter().enumerate()
-            .map(|(i, s)| SearchEntry::from(s).prefix_idx(i) )
+        self.results = self.items.iter()
+            .map(|p| p.display().to_string() )
             .filter(|s| s.to_lowercase().contains(&q))
             .collect();
     }
 
-    fn get_results(&self) -> &Vec<SearchEntry> {
+    fn get_results(&self) -> &Vec<String> {
         &self.results
     }
 }
@@ -444,7 +372,7 @@ impl SearchQuery for SearchPathList {
 
 pub struct SearchList {
     pub items: Vec<String>,
-    pub results: Vec<SearchEntry>,
+    pub results: Vec<String>,
 }
 
 impl SearchList {
@@ -462,21 +390,19 @@ impl SearchList {
 }
 
 impl SearchQuery for SearchList {
-    fn list(&self) -> Vec<SearchEntry> {
-        self.items.iter().enumerate()
-            .map(|(i, s)| SearchEntry::new(s).prefix_idx(i) )
-            .collect()
+    fn list(&self) -> Vec<String> {
+        self.items.iter().cloned().collect()
     }
 
     fn search(&mut self, query: &str) {
         let q: String = query.to_lowercase();
-        self.results = self.items.iter().enumerate()
-            .map(|(i, s)| SearchEntry::new(s).prefix_idx(i) )
+        self.results = self.items.iter()
             .filter(|s| s.to_lowercase().contains(&q))
+            .cloned()
             .collect();
     }
 
-    fn get_results(&self) -> &Vec<SearchEntry> {
+    fn get_results(&self) -> &Vec<String> {
         &self.results
     }
 }
