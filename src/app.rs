@@ -185,16 +185,35 @@ impl App {
                 modifiers,
                 ..
             } if modifiers.bits() == CONTROL_SHIFT => {
-                todo!()
-                // if self.search_panel.is_some() {
-                //     return AppState::Running;
-                // }
+                // If already open, close
+                if self.search_panel.is_some() {
+                    self.search_panel = None;
+                    return AppState::Running;
+                }
 
-                // let panel: SelectPanel = self
-                //     .create_search_panel(SearchQueryMode::Folders(self.file_buffer.path.clone()))
-                //     .set_title("Search Folders")
-                //     .set_color(themevar!(folder_color));
-                // self.search_panel = Some(panel);
+                let cfg: &Configs = Configs::global();
+                let app = self as *mut App;
+                let sf = search::SearchFolders::new( &self.file_buffer.path)
+                        .with_queue_size(cfg.max_search_queue_len)
+                        .with_threads(cfg.search_thread_count);
+
+                let mut panel: SelectPanel = select_panel!(self,
+                        search::EmptySearchList::new()
+                    )
+                    .with_title("Search Folders")
+                    .with_color(themevar!(folder_color))
+                    .on_selected(move |s| {
+                        let path: &Path = Path::new(s.as_ref());
+                        let app = unsafe { &mut *app };
+                        app.add_current_to_recent();
+                        app.file_buffer.set_path(path);
+                    });
+                let max_result_count: usize = panel.get_list_height();
+
+                panel.set_query(Box::new(
+                    sf.with_max_result(max_result_count) .list()
+                ));
+                self.search_panel = Some(panel);
             }
 
             // Search files with Ctrl-p
@@ -232,8 +251,8 @@ impl App {
                 let panel: SelectPanel = select_panel!(self,
                     search::SearchPathList::new(&self.recent_dirs)
                     )
-                    .set_title("Recent")
-                    .set_color(themevar!(folder_color))
+                    .with_title("Recent")
+                    .with_color(themevar!(folder_color))
                     .on_selected(move |s| {
                         let path: &Path = Path::new(s.as_ref());
                         let app = unsafe { &mut *app };
@@ -253,27 +272,29 @@ impl App {
             } => {
                 unimplemented!("Deprecated");
 
-                // if self.search_panel.is_some() {
-                //     return AppState::Running;
-                // }
+                /*
+                if self.search_panel.is_some() {
+                    return AppState::Running;
+                }
 
-                // self.file_buffer.status_line.normal();
-                // let added: bool = self.favorites.toggle(self.file_buffer.path.clone());
+                self.file_buffer.status_line.normal();
+                let added: bool = self.favorites.toggle(self.file_buffer.path.clone());
 
-                // if let Err(err) = confy::store(APPNAME, Some(CONFIG_PATH), Configs::global()) {
-                //     self.file_buffer
-                //         .status_line
-                //         .error(err.into(), Some("Error saving configs: \n "));
-                // } else {
-                //     self.file_buffer
-                //         .status_line
-                //         .set_text(if added {
-                //             "Added path to favorites"
-                //         } else {
-                //             "Removed path from favorites"
-                //         })
-                //         .set_color(themevar!(special_color));
-                // }
+                if let Err(err) = confy::store(APPNAME, Some(CONFIG_PATH), Configs::global()) {
+                    self.file_buffer
+                        .status_line
+                        .error(err.into(), Some("Error saving configs: \n "));
+                } else {
+                    self.file_buffer
+                        .status_line
+                        .set_text(if added {
+                            "Added path to favorites"
+                        } else {
+                            "Removed path from favorites"
+                        })
+                        .set_color(themevar!(special_color));
+                }
+                */
             }
 
             // Open / close favorites with ` or Tab
@@ -293,8 +314,8 @@ impl App {
                 let panel: SelectPanel = select_panel!(self,
                      search::SearchPathList::new(&self.favorites)
                      )
-                    .set_title("Favorites")
-                    .set_color(themevar!(special_color))
+                    .with_title("Favorites")
+                    .with_color(themevar!(special_color))
                     .on_selected(move |s| {
                         let path: &Path = Path::new(s.as_ref());
                         let app = unsafe { &mut *app };
@@ -325,8 +346,8 @@ impl App {
                             "Open configuration folder",
                         ])
                     )
-                    .set_title("Help")
-                    .set_color(themevar!(special_color));
+                    .with_title("Help")
+                    .with_color(themevar!(special_color));
                 self.search_panel = Some(panel);
 
                 // return AppState::Help;
