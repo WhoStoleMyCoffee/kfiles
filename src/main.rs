@@ -466,13 +466,20 @@ mod help {
 
 
 
-
+/*
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::mpsc;
+    use std::sync::mpsc::Sender;
+    use std::thread;
+    use std::time::Duration;
 
     use dialoguer::Input;
+    use threads_pool::ThreadPool;
 
     use crate::util::*;
     use crate::APPNAME;
@@ -594,56 +601,78 @@ mod tests {
             println!("No match found!");
         }
     }
-    
 
-    struct Bar<'a> {
-        callback: Option<Box< dyn FnMut() + 'a >>,
-    }
 
-    impl<'a> Bar<'a> {
-        fn set_callback<F>(&mut self, f: F)
-        where F: FnMut() + 'a {
-            self.callback = Some(Box::new(f));
+    fn idfk(tx: Sender<usize>, queue: Arc<Mutex<VecDeque<usize>>>) {
+        // Check connection
+        if tx.send(0).is_err() {
+            println!("Thread: receiver disconnected!");
+            // thread::sleep(Duration::from_millis( 2000 ));
+            return;
         }
 
-        fn call_callback(&mut self) {
-            if let Some(cb) = &mut self.callback {
-                cb();
+        let Ok(mut q) = queue.lock() else { return; };
+        let Some(num) = q.pop_front() else {
+            println!("Thread: queue is empty!");
+            return;
+        };
+        drop(q); // unblock mutex
+
+        if num % 10 == 0 {
+            thread::sleep(Duration::from_millis( 2000 ));
+            tx.send(num + 1);
+            tx.send(num + 3);
+            tx.send(num + 5);
+        } else {
+            thread::sleep(Duration::from_millis( 100 ));
+            tx.send(num + 2);
+            tx.send(num + 4);
+        }
+    }
+    
+    #[test]
+    fn test_pool() {
+        let mut pool = ThreadPool::new(4);
+        let queue = Arc::new(Mutex::new(
+            VecDeque::from( [ 1usize ] )
+        ));
+        let (tx, rx) = mpsc::channel::<usize>();
+
+        {
+            let queue = Arc::clone(&queue);
+            let tx = tx.clone();
+            pool.execute(move || {
+                idfk(tx, queue);
+            }).unwrap();
+        }
+
+        for i in rx.iter() {
+            if i == 0 { continue; } // connection checks
+
+            println!("Received {i}!");
+            {
+                queue.lock().unwrap()
+                    .push_back(i);
+            }
+
+            if i >= 100 {
+                println!("Receiver hanging up...");
+                drop(rx);
+                break;
+            } else if i >= 20 && i < 50 {
+                println!("Aight");
+                let mut q = queue.lock().unwrap();
+                q.clear();
+                q.push_back(60);
+            } else {
+                let queue = Arc::clone(&queue);
+                let tx = tx.clone();
+                pool.execute(move || {
+                    idfk(tx, queue);
+                }).unwrap();
             }
         }
     }
 
-    struct Foo<'a> {
-        name: String,
-        bar: Bar<'a>,
-    }
-
-    impl Foo<'_> {
-        fn doshit(&mut self) {
-            let me = self as *mut Foo;
-            self.bar.set_callback(move || {
-
-                unsafe {
-                    (*me).name = "doe".to_string();
-                }
-
-            });
-        }
-    }
-
-    #[test]
-    fn test_callbacks() {
-        let mut foo: Foo = Foo {
-            name: "john".to_string(),
-            bar: Bar {
-                callback: None
-            },
-        };
-
-        dbg!(&foo.name);
-        foo.doshit();
-        foo.bar.call_callback();
-        dbg!(&foo.name);
-    }
-
 }
+*/

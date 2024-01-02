@@ -20,6 +20,7 @@ macro_rules! search_str {
 
 
 // Idk if there's any builtin methods for this
+#[inline]
 pub fn path2string<P>(path: P) -> String
 where
     P: AsRef<Path>,
@@ -28,6 +29,7 @@ where
     // String::from(path.as_ref().to_string_lossy())
 }
 
+#[inline]
 pub fn file_name(pathbuf: &Path) -> String {
     path2string(pathbuf.file_name().unwrap_or_default())
 }
@@ -146,6 +148,7 @@ pub trait Invert {
 
 impl Invert for (u8, u8, u8) {
     type Output = Self;
+    #[inline]
     fn inv(self) -> Self::Output {
         (255 - self.0, 255 - self.1, 255 - self.2)
     }

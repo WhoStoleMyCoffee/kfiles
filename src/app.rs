@@ -193,12 +193,12 @@ impl App {
 
                 let cfg: &Configs = Configs::global();
                 let app = self as *mut App;
-                let sf = search::SearchFolders::new( &self.file_buffer.path)
-                        .with_queue_size(cfg.max_search_queue_len)
-                        .with_threads(cfg.search_thread_count);
-
-                let mut panel: SelectPanel = select_panel!(self,
-                        search::EmptySearchList::new()
+                let panel: SelectPanel = select_panel!(self,
+                        search::SearchFolders::new( &self.file_buffer.path)
+                            .with_queue_len(cfg.max_search_queue_len)
+                            .with_threads(cfg.search_thread_count)
+                            .with_max_result(20) // TODO max result count
+                            .list()
                     )
                     .with_title("Search Folders")
                     .with_color(themevar!(folder_color))
@@ -208,11 +208,6 @@ impl App {
                         app.add_current_to_recent();
                         app.file_buffer.set_path(path);
                     });
-                let max_result_count: usize = panel.get_list_height();
-
-                panel.set_query(Box::new(
-                    sf.with_max_result(max_result_count) .list()
-                ));
                 self.search_panel = Some(panel);
             }
 
