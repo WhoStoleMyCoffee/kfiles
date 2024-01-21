@@ -1,10 +1,9 @@
 use std::collections::VecDeque;
-use std::fmt::Display;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Sender, Receiver, self};
+use std::sync::mpsc::{Receiver, self};
 use std::sync::{ Arc, Mutex };
-use std::thread::{self, JoinHandle};
+use std::thread;
+use std::time::Duration;
 
 use console_engine::{
     pixel, rect_style::BorderStyle, screen::Screen, Color, KeyCode, KeyEventKind,
@@ -14,14 +13,18 @@ use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use console_engine::events::Event;
 use console_engine::forms::{Form, FormField, FormOptions, FormStyle, FormValue, Text};
 
-use threads_pool::ThreadPool;
-
 use crate::config::{ColorTheme, Configs};
 use crate::{themevar, util::*};
 
 
 #[derive(Debug, Clone)]
 pub struct IndexedString (usize, String);
+
+impl IndexedString {
+    pub fn index(&self) -> usize {
+        self.0
+    }
+}
 
 impl AsRef<String> for IndexedString {
     fn as_ref(&self) -> &String {
@@ -35,19 +38,29 @@ impl AsMut<String> for IndexedString {
     }
 }
 
+impl From<(usize, &Path)> for IndexedString {
+    #[inline]
+    fn from(value: (usize, &Path)) -> Self {
+        Self (value.0, value.1.display().to_string())
+    }
+}
+
 impl From<(usize, &PathBuf)> for IndexedString {
+    #[inline]
     fn from(value: (usize, &PathBuf)) -> Self {
         Self (value.0, value.1.display().to_string())
     }
 }
 
 impl From<(usize, &String)> for IndexedString {
+    #[inline]
     fn from(value: (usize, &String)) -> Self {
         Self (value.0,value.1.to_string())
     }
 }
 
 impl ToString for IndexedString {
+    #[inline]
     fn to_string(&self) -> String {
         format!("{}: {}", self.0, self.1)
     }
@@ -144,7 +157,7 @@ impl SelectPanel {
     }
 
     pub fn update(&mut self) {
-        // self.query.update();
+        self.query.update();
         let count: usize = self.query.get_results().len();
         self.selected_index = self.selected_index.min(count.max(1) - 1);
     }
@@ -250,7 +263,7 @@ impl SelectPanel {
 
         // Entries
         let width: usize = self.screen.get_width() as usize - 3;
-        for (i, entry) in self.query.get_results().iter().enumerate() {
+        for (i, entry) in self.query.get_results() .iter().enumerate() {
             // Reached the bottom
             if i as u32 + offset.1 as u32 >= self.screen.get_height() - 1 {
                 break;
@@ -267,42 +280,6 @@ impl SelectPanel {
                 .trunc_back(width);
             self.screen.print_fbg(offset.0, i as i32 + offset.1, &s, self.color, bg);
         }
-
-        /*
-        let strip_root: Option<&Path> = match &self.query.mode {
-            SearchQueryMode::Files(root) | SearchQueryMode::Folders(root) => Some(root),
-            _ => None,
-        };
-        for (i, entry) in self.query.results.iter().enumerate() {
-            // Reached the bottom
-            if i as u32 + offset.1 as u32 >= self.screen.get_height() - 1 {
-                break;
-            }
-
-            let bg: Color = if i == self.selected_index {
-                theme.comment_color.into()
-            } else {
-                bg_color
-            };
-
-            let path: &Path = if let Some(root) = strip_root {
-                entry.strip_prefix(root).unwrap_or(entry)
-            } else {
-                entry
-            };
-
-            let mut path_string: String = path2string(path)
-                .replace('\\', "/")
-                .trunc_back(width);
-
-            if let Some(prefix) = &entry.prefix {
-                path_string = format!("{prefix} {path_string}");
-            }
-
-            self.screen
-                .print_fbg(offset.0, i as i32 + offset.1, &path_string, self.color, bg);
-        }
-        */
 
     }
 
@@ -352,34 +329,10 @@ pub trait SearchQuery {
 
     fn search(&mut self, query: &str);
 
-    fn get_results(&mut self) -> &Vec<IndexedString>;
+    fn update(&mut self) {}
+
+    fn get_results(&self) -> &Vec<IndexedString>;
 }
-
-
-/// TODO remove
-pub struct EmptySearchList ( Vec<IndexedString> );
-
-impl EmptySearchList {
-    pub fn new() -> Self {
-        Self ( Vec::new() )
-    }
-}
-
-impl SearchQuery for EmptySearchList {
-    fn get_list(&self) -> Vec<IndexedString> {
-        self.0.iter()
-            .cloned()
-            .collect()
-    }
-
-    fn get_results(&mut self) -> &Vec<IndexedString> {
-        &self.0
-    }
-
-    fn search(&mut self, _query: &str) {}
-}
-
-
 
 
 
@@ -419,7 +372,7 @@ impl SearchQuery for SearchPathList {
             .collect();
     }
 
-    fn get_results(&mut self) -> &Vec<IndexedString> {
+    fn get_results(&self) -> &Vec<IndexedString> {
         &self.results
     }
 }
@@ -428,17 +381,15 @@ impl SearchQuery for SearchPathList {
 
 
 
-pub struct SearchList {
-    pub items: Vec<String>,
+pub struct SearchList<S: ToString> {
+    pub items: Vec<S>,
     pub results: Vec<IndexedString>,
 }
 
-impl SearchList {
-    pub fn new(items: &[&str]) -> Self {
+impl<S: ToString + Clone> SearchList<S> {
+    pub fn new(items: &[S]) -> Self {
         let mut l = Self {
-            items: items.iter()
-                .map(|s| s.to_string())
-                .collect(),
+            items: items.to_vec(),
             results: Vec::new(),
         };
         l.results = l.get_list();
@@ -446,10 +397,10 @@ impl SearchList {
     }
 }
 
-impl SearchQuery for SearchList {
+impl<S: ToString + Clone> SearchQuery for SearchList<S> {
     fn get_list(&self) -> Vec<IndexedString> {
         self.items.iter().enumerate()
-            .map(IndexedString::from)
+            .map( |(i, s)| IndexedString(i, s.to_string()) )
             .collect()
     }
 
@@ -460,39 +411,31 @@ impl SearchQuery for SearchList {
         }
         let q: String = query.to_lowercase();
         self.results = self.items.iter().enumerate()
-            .map(IndexedString::from)
-            .filter(|s| s.to_string().to_lowercase().contains(&q))
+            .map( |(i, s)| IndexedString(i, s.to_string()) )
+            .filter(|s| s.as_ref().to_lowercase() .contains(&q))
             .collect();
     }
 
-    fn get_results(&mut self) -> &Vec<IndexedString> {
+    fn get_results(&self) -> &Vec<IndexedString> {
         &self.results
     }
 }
 
 
 
-struct QueryResults {
-    results: Vec<PathBuf>,
-    new_queue: Vec<PathBuf>,
-}
-
-impl QueryResults {
-    fn empty() -> Self {
-        Self {
-            results: Vec::new(),
-            new_queue: Vec::new(),
-        }
+enum QueryResults {
+    ConnectionCheck,
+    Results {
+        results: Vec<PathBuf>,
+        new_queue: Vec<PathBuf>,
     }
 }
-
 
 
 pub struct SearchFolders {
     root: PathBuf,
     results: Vec<IndexedString>,
     thread_count: u8,
-    threads: Vec<JoinHandle<()>>,
     queue: Arc<Mutex< VecDeque<PathBuf> >>,
     receiver: Option<Receiver< QueryResults >>,
     max_result_count: usize,
@@ -505,7 +448,6 @@ impl SearchFolders {
             root: root.to_path_buf(),
             results: Vec::new(),
             thread_count: 1,
-            threads: Vec::new(),
             queue: Arc::new(Mutex::new( VecDeque::new() )),
             receiver: None,
             max_result_count: usize::MAX,
@@ -553,8 +495,10 @@ impl SearchQuery for SearchFolders {
             idx += 1;
         }
 
-        results.iter().enumerate()
-            .take(max)
+        results.truncate(max);
+        results.iter()
+            .filter_map(|pb| pb.strip_prefix(&self.root).ok())
+            .enumerate()
             .map(IndexedString::from)
             .collect()
     }
@@ -569,11 +513,6 @@ impl SearchQuery for SearchFolders {
         let (tx, rx) = mpsc::channel::<QueryResults>();
         self.receiver = Some(rx);
 
-        // TODO make optional?
-        for handle in self.threads.drain(..) {
-            let _ = handle.join();
-        }
-
         self.results.clear();
 
         if let Ok(mut q) = self.queue.lock() {
@@ -581,6 +520,11 @@ impl SearchQuery for SearchFolders {
         } else {
             return;
         }
+;
+        let (fast_loop_ms, slow_loop_ms) = {
+            let perf = Configs::performance();
+            (perf.thread_fast_ms, perf.thread_slow_ms)
+        };
 
         for _ in 0..self.thread_count {
             let queue = Arc::clone(&self.queue);
@@ -588,65 +532,73 @@ impl SearchQuery for SearchFolders {
             let query: String = query.to_lowercase();
             let root = self.root.clone();
 
-            let handle = thread::spawn(move || loop {
-                // Check connection
-                if tx.send( QueryResults::empty() ).is_err() { break; }
+            thread::spawn(move || {
+                let mut wait_ms: u64 = ( (fast_loop_ms + slow_loop_ms) / 2 ) as u64; // Time between loops to prevent spam
+                loop {
+                    thread::sleep(Duration::from_millis(wait_ms));
 
-                let Ok(mut q) = queue.lock() else { break; };
-                let Some(search_path) = q.pop_front() else {
-                    continue;
-                };
-                drop(q); // Unlock mutex
+                    // Check connection
+                    if tx.send( QueryResults::ConnectionCheck ).is_err() { break; }
 
-                let Ok(folders) = get_all_folders_at(search_path) else { continue; };
+                    let Ok(mut q) = queue.lock() else { break; };
+                    let Some(search_path) = q.pop_front() else {
+                        wait_ms = (wait_ms + slow_loop_ms as u64) / 2; // Slow down
+                        continue;
+                    };
+                    drop(q); // Unlock mutex
 
-                let results: Vec<PathBuf> = folders.iter()
-                    .filter(|pb|
-                        path2string( pb.strip_prefix(&root).unwrap_or(pb) ) .to_lowercase() .contains(&query)
-                    )
-                    .cloned()
-                    .collect();
+                    let Ok(folders) = get_all_folders_at(search_path) else { continue; };
 
-                let new_queue: Vec<PathBuf> = folders.into_iter()
-                     .filter(|pb| !path2string(pb.file_name().unwrap_or_default()) .starts_with('.') )
-                     .collect();
+                    let results: Vec<PathBuf> = folders.iter()
+                        .filter_map(|pb| pb.strip_prefix(&root).ok() .map(PathBuf::from) )
+                        .filter(|pb| path2string(pb).to_lowercase() .contains(&query))
+                        .collect();
 
-                if tx.send(QueryResults { results, new_queue, })
-                    .is_err() {
-                    break;
+                    let new_queue: Vec<PathBuf> = folders.into_iter()
+                         .filter(|pb| !path2string(pb.file_name().unwrap_or_default()) .starts_with('.') )
+                         .collect();
+
+                    if tx.send(QueryResults::Results { results, new_queue, })
+                        .is_err() {
+                        break;
+                    }
+
+                    // wait_ms = fast_loop_ms as u64; // Speed up
+                    wait_ms = (wait_ms + fast_loop_ms as u64) / 2; // Speed up
                 }
             });
-
-            self.threads.push(handle);
         }
 
     }
 
-    fn get_results(&mut self) -> &Vec<IndexedString> {
-        let Some(rx) = &mut self.receiver else {
-            return &self.results;
-        };
+    fn update(&mut self) {
+        let Some(rx) = &mut self.receiver else { return; };
 
         let max: usize = self.max_result_count;
-        for QueryResults { results, mut new_queue } in rx.try_iter() {
+        for res in rx.try_iter() {
+            match res {
+                QueryResults::ConnectionCheck => {},
+                QueryResults::Results { results, new_queue } => {
+                    // Append results
+                    if !results.is_empty() {
+                        let l: usize = self.results.len();
+                        for (i, pathbuf) in results.iter().enumerate() .take(max - l) {
+                            let is: IndexedString = IndexedString::from( (l + i, pathbuf) );
+                            self.results.push(is);
+                        }
+                    }
 
-            if !results.is_empty() {
-                let l: usize = self.results.len();
-                for (i, pathbuf) in results.iter().enumerate() .take(max - l) {
-                    let is: IndexedString = IndexedString::from( (l + i, pathbuf) );
-                    self.results.push(is);
-                }
+                    // Append queue
+                    if new_queue.is_empty() { continue; }
+                    let Ok(mut q) = self.queue.lock() else { continue; };
+
+                    q.append(&mut VecDeque::from(new_queue));
+                    if let Some(max_queue_len) = self.max_queue_len {
+                        q.truncate(max_queue_len);
+                    }
+
+                },
             }
-
-            if !new_queue.is_empty() {
-                if let Some(max_queue_len) = self.max_queue_len {
-                    new_queue.truncate(max_queue_len);
-                }
-
-                self.queue.lock().unwrap()
-                    .append(&mut VecDeque::from(new_queue));
-            }
-
         }
 
         if self.results.len() >= max {
@@ -654,10 +606,12 @@ impl SearchQuery for SearchFolders {
             self.queue.lock().unwrap()
                 .clear();
         }
-
-        &self.results
-
     }
+
+    fn get_results(&self) -> &Vec<IndexedString> {
+        &self.results
+    }
+
 }
 
 

@@ -9,7 +9,7 @@ edition = "2021"
 console_engine = { version = "2.6.0", features = ["form", "event"] }
 opener =  { version = "0.6.1", features = ["reveal"] }
 confy = "0.5.1"
-serde = { version = "1.0.183", features = ["derive"] }
+serde = { version = "1.0.195", features = ["derive"] }
 directories = "5.0.1"
 clean-path = "0.2.1"
 threads_pool = "^0.2.0"

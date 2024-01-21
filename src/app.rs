@@ -5,12 +5,12 @@ use console_engine::screen::Screen;
 use console_engine::{crossterm::event::KeyEvent, events::Event};
 use console_engine::{Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::config::{ColorTheme, Configs, FavoritesList, RecentList};
+use crate::config::{ColorTheme, Configs, FavoritesList, RecentList, PerformanceConfigs};
 use crate::filebuffer::FileBuffer;
-use crate::search::{self, SelectPanel, SelectPanelState, SearchQuery};
+use crate::search::{self, SelectPanel, SelectPanelState};
 use crate::try_err;
 use crate::{
-    get_favorites_list_path, get_recent_dirs_path, themevar, APPNAME, CONFIG_PATH,
+    get_favorites_list_path, get_recent_dirs_path, themevar,
     SEARCH_PANEL_MARGIN,
 };
 
@@ -26,6 +26,38 @@ macro_rules! select_panel {
         )
     };
 }
+
+#[derive(Clone, Copy)]
+enum Action {
+    Help,
+    ToggleFavorite,
+    OpenConfigFile,
+    OpenConfigFolder,
+}
+
+impl Action {
+    const fn list() -> &'static [Self] {
+        &[
+            Self::Help,
+            Self::ToggleFavorite,
+            Self::OpenConfigFile,
+            Self::OpenConfigFolder,
+        ]
+    }
+}
+
+impl ToString for Action {
+    fn to_string(&self) -> String {
+        use Action::*;
+        match self {
+            Help => "Help",
+            ToggleFavorite => "Toggle favorites",
+            OpenConfigFile => "Open configuration file",
+            OpenConfigFolder => "Open configuration folder",
+        }.to_string()
+    }
+}
+
 
 
 
@@ -46,7 +78,7 @@ pub struct App {
 impl App {
     pub fn new(at_path: &Path) -> Result<Self, AppError> {
         let cfg: &Configs = Configs::global();
-        let engine: ConsoleEngine = ConsoleEngine::init_fill(cfg.update_rate)?;
+        let engine: ConsoleEngine = ConsoleEngine::init_fill(cfg.performance.update_rate)?;
 
         // Initialize file buffer
         let (w, h) = FileBuffer::calc_size_from_engine(&engine);
@@ -191,22 +223,23 @@ impl App {
                     return AppState::Running;
                 }
 
-                let cfg: &Configs = Configs::global();
+                let perf: &PerformanceConfigs = Configs::performance();
                 let app = self as *mut App;
+                let root_path = self.file_buffer.path .clone();
                 let panel: SelectPanel = select_panel!(self,
-                        search::SearchFolders::new( &self.file_buffer.path)
-                            .with_queue_len(cfg.max_search_queue_len)
-                            .with_threads(cfg.search_thread_count)
+                        search::SearchFolders::new(&self.file_buffer.path)
+                            .with_queue_len(perf.max_search_queue_len)
+                            .with_threads(perf.search_thread_count)
                             .with_max_result(20) // TODO max result count
                             .list()
                     )
                     .with_title("Search Folders")
                     .with_color(themevar!(folder_color))
                     .on_selected(move |s| {
-                        let path: &Path = Path::new(s.as_ref());
+                        let path: PathBuf = root_path.join( Path::new(s.as_ref()) );
                         let app = unsafe { &mut *app };
                         app.add_current_to_recent();
-                        app.file_buffer.set_path(path);
+                        app.file_buffer.set_path(&path);
                     });
                 self.search_panel = Some(panel);
             }
@@ -334,18 +367,14 @@ impl App {
                 }
 
                 let panel: SelectPanel = select_panel!(self,
-                    search::SearchList::new(&[
-                            "Help",
-                            "Toggle favorite",
-                            "Open configuration file",
-                            "Open configuration folder",
-                        ])
+                    search::SearchList::new( Action::list() )
                     )
                     .with_title("Help")
-                    .with_color(themevar!(special_color));
+                    .with_color(themevar!(special_color))
+                    .on_selected(|is| {
+                        dbg!(is);
+                    });
                 self.search_panel = Some(panel);
-
-                // return AppState::Help;
             }
 
             // Reload with F5

@@ -16,25 +16,29 @@ macro_rules! themevar {
     };
 }
 
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Configs {
     pub scroll_margin: u8,
-    pub max_search_queue_len: Option<usize>,
-    pub search_thread_count: u8,
     pub default_path: PathBuf,
-    pub update_rate: u32,
     pub search_ignore_types: String,
     pub max_recent_count: usize,
     pub theme: ColorTheme,
+    pub performance: PerformanceConfigs,
 }
 
 impl Configs {
+    #[inline]
     pub fn global() -> &'static Self {
         CONFIGS.get().expect("Configs not initialized")
     }
 
     pub fn theme() -> &'static ColorTheme {
-        &CONFIGS.get().expect("Configs not initialized").theme
+        &Self::global().theme
+    }
+
+    pub fn performance() -> &'static PerformanceConfigs {
+        &Self::global().performance
     }
 }
 
@@ -45,13 +49,11 @@ impl Default for Configs {
 
         Self {
             scroll_margin: 4,
-            max_search_queue_len: Some(1024),
-            search_thread_count: 4,
             default_path: PathBuf::from(home_dir),
-            update_rate: 12,
             search_ignore_types: String::new(),
             max_recent_count: 64,
             theme: ColorTheme::default(),
+            performance: PerformanceConfigs::default(),
         }
     }
 }
@@ -223,5 +225,29 @@ impl Default for ColorTheme {
         }
     }
 }
+
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceConfigs {
+    pub update_rate: u32,
+    pub max_search_queue_len: Option<usize>,
+    pub search_thread_count: u8,
+    pub thread_fast_ms: u16,
+    pub thread_slow_ms: u16,
+}
+
+impl Default for PerformanceConfigs {
+    fn default() -> Self {
+        Self {
+            max_search_queue_len: Some(1024),
+            search_thread_count: 4,
+            update_rate: 12,
+            thread_fast_ms: 1,
+            thread_slow_ms: 500,
+        }
+    }
+}
+
 
 
