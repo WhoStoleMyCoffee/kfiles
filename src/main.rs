@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, error::Error};
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -18,6 +18,8 @@ pub mod util;
 use app::{ App, AppState };
 use help::print_help;
 
+use crate::help::print_help_tip;
+
 // Search panel offset from the edges of the screen
 const SEARCH_PANEL_MARGIN: (u32, u32) = (4, 2);
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -30,11 +32,26 @@ const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits(
 
 static CONFIGS: OnceLock<Configs> = OnceLock::new();
 
+
+macro_rules! cmdline {
+    ($app:expr, $b:block) => {
+        $app.engine = None;
+        $b
+        $app.engine = Some( App::init_engine()? );
+    };
+}
+
+
+
+
 #[derive(Debug)]
 pub enum AppError {
     ConfigError(confy::ConfyError),
     IO(std::io::Error),
-    OpenError(opener::OpenError),
+    OpenError {
+        source: opener::OpenError,
+        path: PathBuf,
+    },
     Other(String),
 }
 
@@ -56,9 +73,9 @@ impl From<&str> for AppError {
     }
 }
 
-impl From<opener::OpenError> for AppError {
-    fn from(value: opener::OpenError) -> Self {
-        Self::OpenError(value)
+impl From<String> for AppError {
+    fn from(value: String) -> Self {
+        Self::Other(value)
     }
 }
 
@@ -67,13 +84,24 @@ impl Display for AppError {
         match self {
             Self::ConfigError(err) => err.fmt(f),
             Self::IO(err) => err.fmt(f),
-            Self::OpenError(err) => err.fmt(f),
+            Self::OpenError{ source, path } => {
+                write!(f, "{:?}\n while opening {}", source, path.display())
+            },
             Self::Other(str) => write!(f, "{}", str),
         }
     }
 }
 
-impl std::error::Error for AppError {}
+impl std::error::Error for AppError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::ConfigError(err) => Some(err),
+            Self::IO(err) => Some(err),
+            Self::OpenError { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
 
 pub enum RunOption {
     AtPath(PathBuf),
@@ -83,9 +111,52 @@ pub enum RunOption {
     Config,
 }
 
+
+#[derive(Debug, Clone, Copy)]
+pub enum Action {
+    Exit,
+    Help,
+    ToggleFavorite,
+    OpenConfigFile,
+    OpenConfigFolder,
+    ClearRecent,
+}
+
+impl Action {
+    const fn display_list() -> &'static [Self] {
+        &[
+            Self::Exit,
+            Self::Help,
+            Self::ToggleFavorite,
+            Self::OpenConfigFile,
+            Self::OpenConfigFolder,
+            Self::ClearRecent,
+        ]
+    }
+}
+
+impl ToString for Action {
+    fn to_string(&self) -> String {
+        use Action as A;
+        match self {
+            A::Exit => "Exit KFiles",
+            A::Help => "Help",
+            A::ToggleFavorite => "Toggle favorites",
+            A::OpenConfigFile => "Open configuration file",
+            A::OpenConfigFolder => "Open configuration folder",
+            A::ClearRecent => "Clear recent list",
+        }.to_string()
+    }
+}
+
+
+
+
+
+
+
 fn main() {
-    let cfg: Result<Configs, AppError> =
-        confy::load(APPNAME, Some(CONFIG_PATH)).map_err(AppError::from);
+    let cfg: Result<Configs, AppError> = confy::load(APPNAME, Some(CONFIG_PATH)).map_err(AppError::from);
 
     // Process command line arguments
     let (run_path, cfg): (PathBuf, Configs) = match (parse_cli(env::args()), cfg) {
@@ -97,7 +168,16 @@ fn main() {
         }
 
         (Ok(RunOption::Config), _) => {
-            help::open_config_file();
+            match help::open_config_file() {
+                Ok(_) => { return; },
+                Err(AppError::ConfigError(err)) => {
+                    println!("Failed to get configuration file path: {}", err);
+                    print_help_tip();
+                },
+                Err(err @ AppError::OpenError { .. }) => println!("Failed to open configuration file: {}", err),
+                Err(err) => println!("Error: {}", err),
+            }
+            pause!();
             return;
         }
 
@@ -152,40 +232,96 @@ fn main() {
 
     // MAIN LOOP ----------------------------------------------------------------------------
     loop {
-        let state: AppState = app.run();
-
+        let state: &AppState = app.run();
         match state {
             AppState::Running => {},
-
             AppState::Exit(_exit_path) => {
-                // TODO why no work. eh?
-                // if let Some(path) = exit_path {
-                // 	let _ = env::set_current_dir(path);
-                // }
                 break;
             },
 
-            AppState::Help => {
-                let path: PathBuf = app.get_path().clone();
-                drop(app);
-
-                print_help();
-                pause!();
-
-                // Rebuild app
-                app = match App::new(&path) {
-                    Ok(app) => app,
-
+            AppState::Action(action) => {
+                match handle_action(*action, &mut app) {
+                    Ok(_) => { },
                     Err(err) => {
                         handle_app_err(err);
                         return;
                     }
-                };
-
+                }
             },
+
         }
     }
 }
+
+
+
+fn handle_action(action: Action, app: &mut App) -> Result<(), AppError> {
+    match action {
+        Action::Exit => {
+            app.exit();
+            return Ok(());
+        },
+
+        Action::Help => {
+            cmdline!(app, {
+                print_help();
+                pause!();
+            });
+        },
+
+        Action::OpenConfigFile => {
+            cmdline!(app, {
+                match help::open_config_file() {
+                    Ok(_) => help::print_config_help(),
+                    Err(AppError::ConfigError(err)) => {
+                        println!("Failed to get configuration file path:\n {}", err);
+                        print_help_tip();
+                    },
+                    Err(err @ AppError::OpenError { .. }) => println!("Failed to open configuration file:\n {}", err),
+                    Err(err) => println!("Error:\n {}", err),
+                }
+                pause!();
+            });
+        },
+
+        Action::OpenConfigFolder => {
+            if let Err(err) = help::reveal_config_folder() {
+                cmdline!(app, {
+                    match err {
+                        AppError::ConfigError(err) => {
+                            println!("Failed to get configuration file path:\n {}", err);
+                            print_help_tip();
+                        },
+                        err @ AppError::OpenError { .. } => {
+                            println!("Failed to reveal configuration folder:\n {}", err);
+                        },
+                        err => println!("Error:\n {}", err),
+                    }
+                    pause!();
+                });
+            }
+        },
+
+        Action::ToggleFavorite => {
+            app.toggle_current_as_favorite();
+        },
+
+        Action::ClearRecent => {
+            app.clear_recent_list();
+        },
+
+        _ => {
+            app.status_line_mut()
+                .error(format!("Unimplemented action: {:?}", action).into(), None);
+        },
+    }
+
+    app.state = AppState::Running;
+    Ok(())
+}
+
+
+
 
 fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
     if let Some(a) = args.nth(1) {
@@ -251,8 +387,10 @@ fn handle_app_err(err: AppError) {
 
             match do_open_cfg {
                 Ok(true) => {
-                    open_config_file();
-                    help::print_config_help();
+                    match open_config_file() {
+                        Ok(_) => help::print_config_help(),
+                        Err(err) => println!("Error: {}", err),
+                    }
                 },
                 Ok(false) => print_help_tip(),
                 Err(err) => println!("Error: {}", err),
@@ -261,7 +399,7 @@ fn handle_app_err(err: AppError) {
 
         // General config error
         AppError::ConfigError(err) => {
-            println!("Error while loading configs:\n	{}", err);
+            println!("Config error:\n	{}", err);
         }
 
         // Engine init error
@@ -269,7 +407,7 @@ fn handle_app_err(err: AppError) {
             println!("IO error: {}", err);
         }
 
-        AppError::OpenError(err) => {
+        err @ AppError::OpenError { .. } => {
             println!("Error opening: {}", err);
         }
 
@@ -285,7 +423,7 @@ fn handle_app_err(err: AppError) {
 
 #[macro_use]
 mod help {
-    use crate::{ CONFIG_PATH, APPNAME, VERSION };
+    use crate::{ CONFIG_PATH, APPNAME, VERSION, AppError };
     use crate::pause;
 
     const ALIGN: usize = 32;
@@ -293,27 +431,29 @@ mod help {
     /// Artificial delay when printing help message
     /// The aim is to have the user subconsciously know that there is more than one screen worth of
     /// help text
-    const DELAY: u64 = 5;
+    const DELAY: u64 = 100;
 
-    pub fn open_config_file() {
-        let Ok(cfg_path) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) else {
-            println!("Error: Failed to get configuration file path.");
-            print_help_tip();
-            pause!();
-            return;
-        };
+    pub fn open_config_file() -> Result<(), AppError> {
+        let cfg_path = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH))?;
 
-        if let Err(err) = opener::open(&cfg_path) {
-            println!("Error: Failed to open configuration file:\n\t{}.\nRevealing in file explorer instead...", err);
-            if let Err(err) = opener::reveal(&cfg_path) {
-                println!("Error: Failed to reveal configuration file in file explorer:\n\t{}", err);
-                pause!();
-            }
+        if opener::open(&cfg_path).is_err() {
+            opener::reveal(&cfg_path)
+                .map_err(|source| AppError::OpenError { source, path: cfg_path })?;
         }
+
+        Ok(())
+    }
+
+    pub fn reveal_config_folder() -> Result<(), AppError> {
+        let cfg_path = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH))?;
+        opener::reveal(&cfg_path)
+            .map_err(|source| AppError::OpenError { source, path: cfg_path })?;
+        Ok(())
     }
 
 
 
+    #[inline]
     pub fn print_help_tip() {
         println!("Tip: You can run KFiles with `kfiles --help` for more info");
     }

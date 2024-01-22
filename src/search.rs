@@ -5,6 +5,7 @@ use std::sync::{ Arc, Mutex };
 use std::thread;
 use std::time::Duration;
 
+use console_engine::KeyModifiers;
 use console_engine::{
     pixel, rect_style::BorderStyle, screen::Screen, Color, KeyCode, KeyEventKind,
 };
@@ -15,6 +16,10 @@ use console_engine::forms::{Form, FormField, FormOptions, FormStyle, FormValue, 
 
 use crate::config::{ColorTheme, Configs};
 use crate::{themevar, util::*};
+
+
+
+const SEARCH_LIST_OFFSET: (u8, u8) = (2, 4);
 
 
 #[derive(Debug, Clone)]
@@ -104,15 +109,12 @@ impl SelectPanel {
             selected_index: 0,
             query,
             callback: None,
-            // query: SearchQuery::new(
-            //     mode,
-            //     max_result_count,
-            //     cfg.max_search_queue_len,
-            //     cfg.search_thread_count,
-            //     cfg.search_ignore_types.clone(),
-            // ),
             state: SelectPanelState::Running,
         }
+    }
+
+    pub fn calc_list_height(panel_height: u32) -> u32 {
+        panel_height - SEARCH_LIST_OFFSET.1 as u32 - 1
     }
 
     pub fn with_title(mut self, title: &str) -> Self {
@@ -212,11 +214,20 @@ impl SelectPanel {
 
             // Esc to exit
             KeyEvent {
-                code: KeyCode::Esc, ..
+                code: KeyCode::Esc,
+                ..
             } => {
                 self.state = SelectPanelState::Exit;
                 return;
             }
+
+            KeyEvent {
+                code: KeyCode::Backspace,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                self.form.reset();
+            },
 
             // Form input
             _ => {
@@ -249,14 +260,13 @@ impl SelectPanel {
     fn display_results(&mut self) {
         if self.query.get_results().is_empty() { return; }
 
-        let offset: (i32, i32) = (2, 4);
         let theme: &ColorTheme = Configs::theme();
         let bg_color = Color::from(theme.bg_color);
 
         // Highlight selected line
         self.screen.h_line(
-            offset.0,
-            self.selected_index as i32 + offset.1,
+            SEARCH_LIST_OFFSET.0 as i32,
+            self.selected_index as i32 + SEARCH_LIST_OFFSET.1 as i32,
             self.screen.get_width() as i32 - 2,
             pixel::pxl_bg(' ', theme.comment_color.into()),
         );
@@ -265,7 +275,7 @@ impl SelectPanel {
         let width: usize = self.screen.get_width() as usize - 3;
         for (i, entry) in self.query.get_results() .iter().enumerate() {
             // Reached the bottom
-            if i as u32 + offset.1 as u32 >= self.screen.get_height() - 1 {
+            if i as u32 + SEARCH_LIST_OFFSET.1 as u32 >= self.screen.get_height() - 1 {
                 break;
             }
 
@@ -278,7 +288,11 @@ impl SelectPanel {
             let s: String = entry.to_string()
                 .replace('\\', "/")
                 .trunc_back(width);
-            self.screen.print_fbg(offset.0, i as i32 + offset.1, &s, self.color, bg);
+            self.screen.print_fbg(
+                SEARCH_LIST_OFFSET.0 as i32,
+                i as i32 + SEARCH_LIST_OFFSET.1 as i32,
+                &s, self.color, bg
+            );
         }
 
     }
@@ -465,7 +479,7 @@ impl SearchFolders {
         self
     }
 
-    pub fn with_max_result(mut self, max_result_count: usize) -> Self {
+    pub fn with_max_results(mut self, max_result_count: usize) -> Self {
         self.max_result_count = max_result_count;
         self
     }

@@ -6,79 +6,56 @@ use console_engine::{crossterm::event::KeyEvent, events::Event};
 use console_engine::{Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::config::{ColorTheme, Configs, FavoritesList, RecentList, PerformanceConfigs};
-use crate::filebuffer::FileBuffer;
+use crate::filebuffer::{FileBuffer, StatusLine};
 use crate::search::{self, SelectPanel, SelectPanelState};
 use crate::try_err;
 use crate::{
     get_favorites_list_path, get_recent_dirs_path, themevar,
     SEARCH_PANEL_MARGIN,
+    Action,
 };
 
 use crate::{AppError, CONTROL_SHIFT};
 
 
+macro_rules! screen_size {
+    ($engine:expr) => {
+        ($engine.get_width(), $engine.get_height())
+    };
+}
+
+
 macro_rules! select_panel {
-    ($app:expr, $q:expr) => {
+    ($sw:expr, $sh:expr, $q:expr) => {
         SelectPanel::new(
-            $app.engine.get_width() - SEARCH_PANEL_MARGIN.0 * 2,
-            $app.engine.get_height() - SEARCH_PANEL_MARGIN.1 * 2,
+            $sw - SEARCH_PANEL_MARGIN.0 * 2,
+            $sh - SEARCH_PANEL_MARGIN.1 * 2,
             Box::new($q),
         )
     };
 }
-
-#[derive(Clone, Copy)]
-enum Action {
-    Help,
-    ToggleFavorite,
-    OpenConfigFile,
-    OpenConfigFolder,
-}
-
-impl Action {
-    const fn list() -> &'static [Self] {
-        &[
-            Self::Help,
-            Self::ToggleFavorite,
-            Self::OpenConfigFile,
-            Self::OpenConfigFolder,
-        ]
-    }
-}
-
-impl ToString for Action {
-    fn to_string(&self) -> String {
-        use Action::*;
-        match self {
-            Help => "Help",
-            ToggleFavorite => "Toggle favorites",
-            OpenConfigFile => "Open configuration file",
-            OpenConfigFolder => "Open configuration folder",
-        }.to_string()
-    }
-}
-
 
 
 
 pub enum AppState {
     Running,
     Exit(Option<PathBuf>),
-    Help,
+    Action(Action),
 }
 
 pub struct App {
-    engine: ConsoleEngine,
+    pub engine: Option<ConsoleEngine>,
     file_buffer: FileBuffer,
     search_panel: Option<SelectPanel>,
     recent_dirs: RecentList,
     favorites: FavoritesList,
+    pub state: AppState,
 }
 
 impl App {
     pub fn new(at_path: &Path) -> Result<Self, AppError> {
         let cfg: &Configs = Configs::global();
-        let engine: ConsoleEngine = ConsoleEngine::init_fill(cfg.performance.update_rate)?;
+        let engine: ConsoleEngine = App::init_engine()?;
 
         // Initialize file buffer
         let (w, h) = FileBuffer::calc_size_from_engine(&engine);
@@ -88,56 +65,64 @@ impl App {
 
         let max_recent_count: usize = cfg.max_recent_count;
         let mut app = Self {
-            engine,
+            engine: Some(engine),
             file_buffer,
             search_panel: None,
             recent_dirs: RecentList::load(&get_recent_dirs_path()?, max_recent_count)
                 .unwrap_or_else(|_| RecentList::new(max_recent_count)),
             favorites: FavoritesList::load(&get_favorites_list_path()?)
                 .unwrap_or_default(),
+            state: AppState::Running,
         };
 
         app.set_title_to_current();
         Ok(app)
     }
 
-    pub fn run(&mut self) -> AppState {
+    pub fn init_engine() -> std::io::Result<ConsoleEngine> {
+        ConsoleEngine::init_fill(Configs::performance().update_rate)
+    }
+
+    pub fn run(&mut self) -> &AppState {
         if let Some(panel) = &mut self.search_panel {
             if panel.is_running() {
                 panel.update();
             }
         }
 
+        let Some(engine) = &mut self.engine else {
+            return &self.state;
+        };
         let bg_color: Color = themevar!(bg_color);
 
-        match self.engine.poll() {
+        match engine.poll() {
             Event::Frame => {
                 if let Some(panel) = &mut self.search_panel {
-                    self.engine.print_screen(
+                    engine.print_screen(
                         SEARCH_PANEL_MARGIN.0 as i32,
                         SEARCH_PANEL_MARGIN.1 as i32,
-                        panel.draw((self.engine.frame_count % 8 > 3) as usize),
+                        panel.draw((engine.frame_count % 8 > 3) as usize),
                     );
                 } else {
-                    self.engine.fill(pixel::pxl_bg(' ', bg_color));
-                    self.engine.print_screen(1, 1, self.file_buffer.draw());
+                    engine.fill(pixel::pxl_bg(' ', bg_color));
+                    engine.print_screen(1, 1, self.file_buffer.draw());
                 }
 
-                self.engine.print_fbg(
+                engine.print_fbg(
                     0,
                     0,
                     "Press F1 to show help message, Ctrl-c or Alt-F4 to exit",
                     themevar!(comment_color),
                     bg_color,
                 );
-                self.file_buffer.status_line.draw(&mut self.engine);
+                self.file_buffer.status_line.draw(engine);
 
-                self.engine.draw();
+                engine.draw();
             }
 
             Event::Resize(w, h) => {
-                self.engine.resize(w as u32, h as u32);
-                let (w, h) = FileBuffer::calc_size_from_engine(&self.engine);
+                engine.resize(w as u32, h as u32);
+                let (w, h) = FileBuffer::calc_size_from_engine(engine);
                 self.file_buffer.resize(w, h);
                 self.file_buffer.display_path();
             }
@@ -151,15 +136,23 @@ impl App {
             }
 
             Event::Key(key_event) => {
-                return self.handle_key_event(key_event);
+                self.handle_key_event(key_event);
+                return &self.state;
             }
 
         }
 
-        AppState::Running
+        self.state = AppState::Running;
+        &self.state
     }
 
-    fn handle_key_event(&mut self, event: KeyEvent) -> AppState {
+    pub fn exit(&mut self) {
+        self.state = AppState::Exit( Some(self.file_buffer.path.clone()) );
+    }
+
+    fn handle_key_event(&mut self, event: KeyEvent) {
+        if self.engine.is_none() { return; }
+
         match event {
             // Exit with Alt-F4
             KeyEvent {
@@ -168,7 +161,7 @@ impl App {
                 modifiers: KeyModifiers::ALT,
                 ..
             } => {
-                return AppState::Exit(Some(self.file_buffer.path.clone()));
+                self.exit();
             }
 
             // Exit with Ctrl-c
@@ -179,7 +172,7 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                return AppState::Exit(Some(self.file_buffer.path.clone()));
+                self.exit();
             }
 
             // Reveal in file explorer and close with Ctrl-Shift-e
@@ -192,9 +185,9 @@ impl App {
                 self.file_buffer
                     .reveal()
                     .expect("Failed to reveal current directory");
-                // Gets called in drop() anyways (See impl Drop for App)
-                // self.add_current_to_recent();
-                return AppState::Exit(None);
+                
+                // self.add_current_to_recent(); // Gets called in drop() anyways (See impl Drop for App)
+                self.state = AppState::Exit(None);
             }
 
             // Reveal in file explorer with Ctrl-e
@@ -220,17 +213,19 @@ impl App {
                 // If already open, close
                 if self.search_panel.is_some() {
                     self.search_panel = None;
-                    return AppState::Running;
+                    self.state = AppState::Running;
+                    return;
                 }
 
+                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
                 let perf: &PerformanceConfigs = Configs::performance();
                 let app = self as *mut App;
                 let root_path = self.file_buffer.path .clone();
-                let panel: SelectPanel = select_panel!(self,
+                let panel: SelectPanel = select_panel!(sw, sh,
                         search::SearchFolders::new(&self.file_buffer.path)
                             .with_queue_len(perf.max_search_queue_len)
                             .with_threads(perf.search_thread_count)
-                            .with_max_result(20) // TODO max result count
+                            .with_max_results( SelectPanel::calc_list_height(sh) as usize )
                             .list()
                     )
                     .with_title("Search Folders")
@@ -272,11 +267,13 @@ impl App {
                 // If already open, close
                 if self.search_panel.is_some() {
                     self.search_panel = None;
-                    return AppState::Running;
+                    self.state = AppState::Running;
+                    return;
                 }
 
+                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
                 let app = self as *mut App;
-                let panel: SelectPanel = select_panel!(self,
+                let panel: SelectPanel = select_panel!(sw, sh,
                     search::SearchPathList::new(&self.recent_dirs)
                     )
                     .with_title("Recent")
@@ -300,29 +297,6 @@ impl App {
             } => {
                 unimplemented!("Deprecated");
 
-                /*
-                if self.search_panel.is_some() {
-                    return AppState::Running;
-                }
-
-                self.file_buffer.status_line.normal();
-                let added: bool = self.favorites.toggle(self.file_buffer.path.clone());
-
-                if let Err(err) = confy::store(APPNAME, Some(CONFIG_PATH), Configs::global()) {
-                    self.file_buffer
-                        .status_line
-                        .error(err.into(), Some("Error saving configs: \n "));
-                } else {
-                    self.file_buffer
-                        .status_line
-                        .set_text(if added {
-                            "Added path to favorites"
-                        } else {
-                            "Removed path from favorites"
-                        })
-                        .set_color(themevar!(special_color));
-                }
-                */
             }
 
             // Open / close favorites with ` or Tab
@@ -335,11 +309,13 @@ impl App {
                 // If already open, close
                 if self.search_panel.is_some() {
                     self.search_panel = None;
-                    return AppState::Running;
+                    self.state = AppState::Running;
+                    return;
                 }
 
+                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
                 let app = self as *mut App;
-                let panel: SelectPanel = select_panel!(self,
+                let panel: SelectPanel = select_panel!(sw, sh,
                      search::SearchPathList::new(&self.favorites)
                      )
                     .with_title("Favorites")
@@ -353,7 +329,7 @@ impl App {
                 self.search_panel = Some(panel);
             }
 
-            // Print help with F1
+            // Open help list with F1
             KeyEvent {
                 code: KeyCode::F(1),
                 kind: KeyEventKind::Press,
@@ -363,16 +339,25 @@ impl App {
                 // If already open, close
                 if self.search_panel.is_some() {
                     self.search_panel = None;
-                    return AppState::Running;
+                    self.state = AppState::Running;
+                    return;
                 }
 
-                let panel: SelectPanel = select_panel!(self,
-                    search::SearchList::new( Action::list() )
+                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
+                let app = self as *mut App;
+                let panel: SelectPanel = select_panel!(sw, sh,
+                    search::SearchList::new( Action::display_list() )
                     )
                     .with_title("Help")
                     .with_color(themevar!(special_color))
-                    .on_selected(|is| {
-                        dbg!(is);
+                    .on_selected(move |is| {
+                        let app = unsafe { &mut *app };
+                        let Some(action) = Action::display_list().get( is.index() ) else {
+                            app.file_buffer.status_line.error("Could not find specified action".into(), None);
+                            return;
+                        };
+
+                        app.state = AppState::Action(*action);
                     });
                 self.search_panel = Some(panel);
             }
@@ -392,11 +377,11 @@ impl App {
 
             key_event => {
                 // Try to update search panel first
-                if self.search_panel.is_some() {
-                    if let Err(err) = self.searchpanel_handle_key_event(key_event) {
-                        self.file_buffer
-                            .status_line
-                            .error(err.as_str().into(), Some("Error opening: \n"));
+                if let Some(search_panel) = &mut self.search_panel {
+                    search_panel.handle_key_event(event);
+                    if search_panel.state == SelectPanelState::Exit {
+                        self.set_title_to_current();
+                        self.search_panel = None;
                     }
 
                 // File buffer
@@ -411,47 +396,21 @@ impl App {
                 }
             }
         }
-
-        AppState::Running
-    }
-
-    // I put this stuff in its own function because that would've been a disgusting amount of indentation
-    fn searchpanel_handle_key_event(&mut self, event: KeyEvent) -> Result<(), String> {
-        let search_panel: &mut SelectPanel = self.search_panel.as_mut()
-            .expect("SearchPanel not set");
-
-        search_panel.handle_key_event(event);
-
-        match &search_panel.state {
-            SelectPanelState::Running => {}
-
-            SelectPanelState::Exit => {
-                // IMPORTANT
-                // if path.is_dir() {
-                //     self.file_buffer.set_path(&path);
-                // } else if path.is_file() {
-                //     let file_name = path.file_name() .ok_or("Invalid file name")?;
-                //     let path: &Path = path.parent() .ok_or("Parent directory not foud")?;
-
-                //     self.file_buffer.set_path(path);
-                //     self.file_buffer.select(file_name);
-                // }
-
-                self.set_title_to_current();
-                self.search_panel = None;
-            }
-        }
-
-        Ok(())
     }
 
     pub fn get_path(&self) -> &PathBuf {
         &self.file_buffer.path
     }
 
+    pub fn status_line_mut(&mut self) -> &mut StatusLine {
+        &mut self.file_buffer.status_line
+    }
+
     /// Sets the window's title to `title`
     pub fn set_title(&mut self, title: &str) {
-        self.engine.set_title( &format!("KFiles | {}", title) );
+        if let Some(engine) = &mut self.engine {
+            engine.set_title( &format!("KFiles | {}", title) );
+        }
     }
 
     /// Sets the window's title using the current dir
@@ -459,7 +418,10 @@ impl App {
         let Some(pathname) = self.file_buffer.path.file_name().and_then(|osstr| osstr.to_str()) else {
             return;
         };
-        self.engine.set_title( &format!("KFiles | {}", pathname) );
+        let Some(engine) = &mut self.engine else {
+            return;
+        };
+        engine.set_title( &format!("KFiles | {}", pathname) );
     }
 
     pub fn add_to_recent(&mut self, path: PathBuf) {
@@ -468,6 +430,23 @@ impl App {
 
     pub fn add_current_to_recent(&mut self) {
         self.add_to_recent(self.file_buffer.path.clone());
+    }
+
+    pub fn clear_recent_list(&mut self) {
+        self.recent_dirs.clear();
+    }
+
+    pub fn toggle_current_as_favorite(&mut self) {
+        let added: bool = self.favorites.toggle(&self.file_buffer.path);
+
+        if let Err(err) = get_favorites_list_path() .and_then(|path| self.favorites.save(&path) .map_err(AppError::from)) {
+            self.file_buffer.status_line.error(err, Some("Error saving configs: \n "));
+            return;
+        }
+
+        self.file_buffer.status_line.normal()
+            .set_text(if added { "Added path to favorites" } else { "Removed path from favorites" })
+            .set_color(themevar!(special_color));
     }
 }
 
@@ -486,14 +465,18 @@ impl Drop for App {
             return;
         }
 
+        let Some(engine) = &mut self.engine else {
+            return;
+        };
+
         let theme: &ColorTheme = Configs::theme();
         let bg_color: Color = theme.bg_color.into();
         let mut y: i32 = 0;
 
-        self.engine.fill(pixel::pxl_bg(' ', bg_color));
+        engine.fill(pixel::pxl_bg(' ', bg_color));
 
         if let Err(err) = recent_res {
-            self.engine.print_fbg(
+            engine.print_fbg(
                 0,
                 y,
                 &format!("Error while saving recent directories list:\n {err}"),
@@ -504,7 +487,7 @@ impl Drop for App {
         }
 
         if let Err(err) = favorites_res {
-            self.engine.print_fbg(
+            engine.print_fbg(
                 0,
                 y,
                 &format!("Error while saving favorites list:\n {err}"),
@@ -514,19 +497,19 @@ impl Drop for App {
             y += 3;
         }
 
-        self.engine.print_fbg(
+        engine.print_fbg(
             0,
             y,
             "Press Enter to continue...",
             theme.text_color.into(),
             bg_color,
         );
-        self.engine.draw();
+        engine.draw();
 
         let exit_codes: [KeyCode; 3] = [KeyCode::Enter, KeyCode::Esc, KeyCode::Char(' ')];
 
-        while !exit_codes.iter().any(|c| self.engine.is_key_pressed(*c)) {
-            self.engine.wait_frame();
+        while !exit_codes.iter().any(|c| engine.is_key_pressed(*c)) {
+            engine.wait_frame();
         }
     }
 }

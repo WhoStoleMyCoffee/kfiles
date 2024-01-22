@@ -79,21 +79,19 @@ impl FavoritesList {
             .find(|p| util::path2string(p).to_lowercase().contains(&query))
     }
 
-    // Returns true if path was added to favorites, false otherwise
-    pub fn toggle(&mut self, path: PathBuf) -> bool {
+    /// Returns true if path was added to favorites, false otherwise
+    pub fn toggle(&mut self, path: &PathBuf) -> bool {
         let list = &mut self.0;
-        if let Some(index) = list.iter().position(|p| p == &path) {
+        if let Some(index) = list.iter().position(|p| p == path) {
             list.remove(index);
             return false;
         }
-        list.push(path);
+        list.push(path.clone());
         true
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        let content: String = self
-            .0
-            .iter()
+        let content: String = self.0.iter()
             .filter_map(|p| p.as_path().to_str())
             .collect::<Vec<&str>>()
             .join("\n");

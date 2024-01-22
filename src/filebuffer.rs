@@ -17,7 +17,7 @@ use crate::search_str;
 
 /// Syntax:
 /// ```rust
-/// let_err!( some_result=> self );
+/// let_err!( some_result => self );
 /// let_err!( some_result => self, "context" );
 /// let_err!( some_result => self; else { ... } );
 /// let_err!( some_result => self, "context"; else { ... } );
@@ -166,9 +166,9 @@ impl FileBuffer {
             if opener::open(pathbuf).is_ok() {
                 return Ok(false);
             }
-            if let Err(err) = opener::reveal(pathbuf) {
-                return Err(err.into());
-            }
+            opener::reveal(pathbuf)
+                .map_err(|source| AppError::OpenError { source, path: pathbuf.clone() })?;
+
             return Err("Could not open file. Revealing in file explorer instead".into());
         } else if !pathbuf.is_dir() {
             return Ok(false);
@@ -719,13 +719,24 @@ impl StatusLine {
 
         let prompt_line: &PromptLine = match &self.state {
             StatusLineState::Prompt { prompt_line, .. } => prompt_line,
+            
+            // Draw text normally
             _ => {
-                engine.print_fbg(
-                    0,
-                    engine.get_height() as i32 - text.lines().count() as i32,
+                let h = engine.get_height() as i32 - text.lines().count() as i32;
+                let bg_color = themevar!(bg_color);
+
+                // Background
+                engine.fill_rect(0, h,
+                    engine.get_width() as i32,
+                    engine.get_height() as i32,
+                    pixel::pxl_bg(' ', bg_color),
+                );
+
+                // Text
+                engine.print_fbg(0, h,
                     &text,
                     self.color,
-                    themevar!(bg_color),
+                    bg_color,
                 );
                 return;
             }
@@ -790,7 +801,12 @@ impl PromptLine {
             KeyCode::Esc => return Some(PromptEvent::Cancel(self.input.clone())),
             KeyCode::Enter => return Some(PromptEvent::Enter(self.input.clone())),
             KeyCode::Backspace => {
-                self.remove_char(1);
+                if event.modifiers == KeyModifiers::CONTROL {
+                    self.input.clear();
+                    self.cursor_pos = 0;
+                } else {
+                    self.remove_char(1);
+                }
                 return Some(PromptEvent::Input(self.input.clone()));
             }
             KeyCode::Delete => {
