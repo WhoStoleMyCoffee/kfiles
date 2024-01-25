@@ -569,6 +569,7 @@ impl SearchQuery for SearchFolders {
                         .collect();
 
                     let new_queue: Vec<PathBuf> = folders.into_iter()
+                         // Don't search inside folders that start with "." (like .git/)
                          .filter(|pb| !path2string(pb.file_name().unwrap_or_default()) .starts_with('.') )
                          .collect();
 
@@ -627,5 +628,205 @@ impl SearchQuery for SearchFolders {
     }
 
 }
+
+
+
+
+pub struct SearchFiles {
+    root: PathBuf,
+    results: Vec<IndexedString>,
+    thread_count: u8,
+    queue: Arc<Mutex< VecDeque<PathBuf> >>,
+    receiver: Option<Receiver< QueryResults >>,
+    max_result_count: usize,
+    max_queue_len: Option<usize>,
+    /// File extension types to ignore
+    ignore_extensions: Vec<String>,
+}
+
+impl SearchFiles {
+    pub fn new(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            results: Vec::new(),
+            thread_count: 1,
+            queue: Arc::new(Mutex::new( VecDeque::new() )),
+            receiver: None,
+            max_result_count: usize::MAX,
+            max_queue_len: None,
+            ignore_extensions: Vec::new(),
+        }
+    }
+
+    pub fn with_queue_len(mut self, max_len: Option<usize>) -> Self {
+        self.max_queue_len = max_len;
+        self
+    }
+
+    pub fn with_threads(mut self, thread_count: u8) -> Self {
+        self.thread_count = thread_count;
+        self
+    }
+
+    pub fn with_max_results(mut self, max_result_count: usize) -> Self {
+        self.max_result_count = max_result_count;
+        self
+    }
+
+    pub fn ignore_extensions(mut self, extensions_to_ignore: &[String]) -> Self {
+        self.ignore_extensions = extensions_to_ignore.to_vec();
+        self
+    }
+
+    pub fn list(mut self) -> Self {
+        self.results = self.get_list();
+        self
+    }
+}
+
+impl SearchQuery for SearchFiles {
+    fn get_list(&self) -> Vec<IndexedString> {
+        let max: usize = self.max_result_count;
+        let mut results: Vec<PathBuf> = Vec::new();
+        let mut queue: VecDeque<PathBuf> = VecDeque::from([ self.root.clone() ]);
+
+        while results.len() < max {
+            let Some(search_path) = queue.pop_front() else { break; };
+            let Ok((mut files, folders)) = get_files_and_folders_at(search_path) else {
+                continue;
+            };
+
+            results.append(&mut files);
+            queue.append(&mut folders.into());
+            if let Some(max_queue_len) = self.max_queue_len {
+                queue.truncate(max_queue_len);
+            }
+        }
+
+        results.iter()
+            .take(max)
+            .enumerate()
+            .map(IndexedString::from)
+            .collect()
+    }
+
+    fn search(&mut self, query: &str) {
+        if query.is_empty() {
+            self.results = self.get_list();
+            self.receiver = None;
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel::<QueryResults>();
+        self.receiver = Some(rx);
+
+        self.results.clear();
+
+        if let Ok(mut q) = self.queue.lock() {
+            *q = VecDeque::from([ self.root.to_path_buf() ]);
+        } else {
+            return;
+        }
+
+        let (fast_loop_ms, slow_loop_ms) = {
+            let perf = Configs::performance();
+            (perf.thread_fast_ms, perf.thread_slow_ms)
+        };
+
+        for _ in  0..self.thread_count {
+            let queue = Arc::clone(&self.queue);
+            let tx = tx.clone();
+            let query: String = query.to_lowercase();
+            let root = self.root.clone();
+            let ignore_types: String = self.ignore_extensions.join(",");
+
+            thread::spawn(move || {
+                let mut wait_ms: u64 = ( (fast_loop_ms + slow_loop_ms) / 2 ) as u64; // Time between loops to prevent spam
+                loop {
+                    thread::sleep(Duration::from_millis(wait_ms));
+
+                    // Check connection
+                    if tx.send( QueryResults::ConnectionCheck ).is_err() { break; }
+
+                    let Ok(mut q) = queue.lock() else { break; };
+                    let Some(search_path) = q.pop_front() else {
+                        wait_ms = (wait_ms + slow_loop_ms as u64) / 2; // Slow down
+                        continue;
+                    };
+                    drop(q); // Unlock mutex
+                             
+                    let Ok((files, folders)) = get_files_and_folders_at(search_path) else {
+                        return;
+                    };
+
+                    let new_queue: Vec<PathBuf> = folders.into_iter()
+                         // Don't search inside folders that start with "." (like .git/)
+                         .filter(|pb| !path2string(pb.file_name().unwrap_or_default()) .starts_with('.') )
+                         .collect();
+
+                    let results: Vec<PathBuf> = files.into_iter()
+                        .filter_map(|pb| pb.strip_prefix(&root).ok() .map(PathBuf::from) )
+                        .filter(|pb| {
+                            !ignore_types.contains(&path2string(pb.extension().unwrap_or_default()))
+                            && path2string(pb).to_lowercase().contains(&query)
+                        })
+                        .collect();
+
+                    if tx.send(QueryResults::Results { results, new_queue })
+                        .is_err() {
+                        break;
+                    }
+
+                    // wait_ms = fast_loop_ms as u64; // Speed up
+                    wait_ms = (wait_ms + fast_loop_ms as u64) / 2; // Speed up
+                }
+            });
+        }
+    }
+
+    fn update(&mut self) {
+        let Some(rx) = &mut self.receiver else { return; };
+
+        let max: usize = self.max_result_count;
+        for res in rx.try_iter() {
+            match res {
+                QueryResults::ConnectionCheck => {},
+                QueryResults::Results { results, new_queue } => {
+                    // Append results
+                    if !results.is_empty() {
+                        let l: usize = self.results.len();
+                        for (i, pathbuf) in results.iter().enumerate() .take(max - l) {
+                            let is: IndexedString = IndexedString::from( (l + i, pathbuf) );
+                            self.results.push(is);
+                        }
+                    }
+
+                    // Append queue
+                    if new_queue.is_empty() { continue; }
+                    let Ok(mut q) = self.queue.lock() else { continue; };
+
+                    q.append(&mut VecDeque::from(new_queue));
+                    if let Some(max_queue_len) = self.max_queue_len {
+                        q.truncate(max_queue_len);
+                    }
+
+                },
+            }
+        }
+
+        if self.results.len() >= max {
+            self.receiver = None;
+            self.queue.lock().unwrap()
+                .clear();
+        }
+    }
+
+    fn get_results(&self) -> &Vec<IndexedString> {
+        &self.results
+    }
+}
+
+
+
 
 

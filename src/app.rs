@@ -84,6 +84,12 @@ impl App {
     }
 
     pub fn run(&mut self) -> &AppState {
+        if let AppState::Running = self.state {} else {
+            return &self.state;
+        }
+
+
+
         if let Some(panel) = &mut self.search_panel {
             if panel.is_running() {
                 panel.update();
@@ -246,15 +252,34 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                todo!()
-                // if self.search_panel.is_some() {
-                //     return AppState::Running;
-                // }
+                // If already open, close
+                if self.search_panel.is_some() {
+                    self.search_panel = None;
+                    self.state = AppState::Running;
+                    return;
+                }
 
-                // let panel: SelectPanel = self
-                //     .create_search_panel(SearchQueryMode::Files(self.file_buffer.path.clone()))
-                //     .set_title("Search Files");
-                // self.search_panel = Some(panel);
+                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
+                let cfg: &Configs = Configs::global();
+                let app = self as *mut App;
+                let root_path = self.file_buffer.path.clone();
+                let panel: SelectPanel = select_panel!(sw, sh,
+                        search::SearchFiles::new(&self.file_buffer.path)
+                            .with_queue_len(cfg.performance .max_search_queue_len)
+                            .with_threads(cfg.performance .search_thread_count)
+                            .with_max_results( SelectPanel::calc_list_height(sh) as usize )
+                            .ignore_extensions( &cfg.search_ignore_extensions )
+                            .list()
+                    )
+                    .with_title("Search Files")
+                    .with_color(themevar!(file_color))
+                    .on_selected(move |s| {
+                        let path: PathBuf = root_path.join( Path::new(s.as_ref()) );
+                        let app = unsafe { &mut *app };
+                        app.add_current_to_recent();
+                        app.file_buffer.set_path(&path);
+                    });
+                self.search_panel = Some(panel);
             }
 
             // Recent files with Ctrl-o
@@ -436,17 +461,11 @@ impl App {
         self.recent_dirs.clear();
     }
 
-    pub fn toggle_current_as_favorite(&mut self) {
+    pub fn toggle_current_as_favorite(&mut self) -> Result<bool, AppError> {
         let added: bool = self.favorites.toggle(&self.file_buffer.path);
+        self.favorites.save( &get_favorites_list_path()? )?;
 
-        if let Err(err) = get_favorites_list_path() .and_then(|path| self.favorites.save(&path) .map_err(AppError::from)) {
-            self.file_buffer.status_line.error(err, Some("Error saving configs: \n "));
-            return;
-        }
-
-        self.file_buffer.status_line.normal()
-            .set_text(if added { "Added path to favorites" } else { "Removed path from favorites" })
-            .set_color(themevar!(special_color));
+        Ok(added)
     }
 }
 

@@ -115,20 +115,40 @@ impl FileBuffer {
             .set_color(themevar!(text_color));
     }
 
+    // TODO refactor
     /// Sets the path
-    /// Don't confuse this with open_selected() lol
+    /// If `path` is a file, set the path to the file's directory and automatically select it
     pub fn set_path(&mut self, path: &Path) {
-        self.path = PathBuf::from(path);
-        try_err!(self.load_entries() => self; else {
-            self.status_line.normal();
-        });
-        self.display_path();
+        if path.is_dir() {
+            self.path = path.to_path_buf();
+            try_err!(self.load_entries() => self; else {
+                self.status_line.normal();
+                self.display_path();
+            });
+
+        } else if path.is_file() {
+            let Some(file_name) = path.file_name() else {
+                self.status_line.error("Could not get valid file name".into(), Some("Error opening at file:\n "));
+                return;
+            };
+            let Some(parent) = path.parent() else {
+                self.status_line.error("Could not get parent directory".into(), Some("Error opening at file:\n "));
+                return;
+            };
+
+            self.path = parent.to_path_buf();
+
+            try_err!(self.load_entries() => self; else {
+                self.status_line.normal();
+                self.display_path();
+                self.select(file_name);
+            });
+        }
+
     }
 
     pub fn select(&mut self, file_name: &OsStr) {
-        if let Some(idx) = self
-            .entries
-            .iter()
+        if let Some(idx) = self.entries.iter()
             .position(|path| path.file_name() == Some(file_name))
         {
             self.selected_index = idx;

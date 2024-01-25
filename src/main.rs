@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use clean_path::Clean;
 use config::{Configs, FavoritesList};
 use confy::ConfyError;
-use console_engine::KeyModifiers;
+use console_engine::{ KeyModifiers, Color };
 use dialoguer::{ Confirm, theme::ColorfulTheme };
 
 pub mod app;
@@ -20,13 +20,14 @@ use help::print_help;
 
 use crate::help::print_help_tip;
 
-// Search panel offset from the edges of the screen
-const SEARCH_PANEL_MARGIN: (u32, u32) = (4, 2);
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPNAME: &str = env!("CARGO_PKG_NAME");
 const CONFIG_PATH: &str = "configs";
 const RECENT_DIRS_FILE_NAME: &str = "recent.txt";
 const FAVORITES_LIST_FILE_NAME: &str = "favorites.txt";
+
+/// Search panel offset from the edges of the screen
+const SEARCH_PANEL_MARGIN: (u32, u32) = (4, 2);
 
 const CONTROL_SHIFT: u8 = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT).bits();
 
@@ -120,6 +121,7 @@ pub enum Action {
     OpenConfigFile,
     OpenConfigFolder,
     ClearRecent,
+    AddToRecent,
 }
 
 impl Action {
@@ -130,6 +132,7 @@ impl Action {
             Self::ToggleFavorite,
             Self::OpenConfigFile,
             Self::OpenConfigFolder,
+            Self::AddToRecent,
             Self::ClearRecent,
         ]
     }
@@ -145,6 +148,7 @@ impl ToString for Action {
             A::OpenConfigFile => "Open configuration file",
             A::OpenConfigFolder => "Open configuration folder",
             A::ClearRecent => "Clear recent list",
+            A::AddToRecent => "Add current directory to recent list",
         }.to_string()
     }
 }
@@ -255,6 +259,7 @@ fn main() {
 
 
 
+#[allow(unreachable_patterns)]
 fn handle_action(action: Action, app: &mut App) -> Result<(), AppError> {
     match action {
         Action::Exit => {
@@ -303,11 +308,38 @@ fn handle_action(action: Action, app: &mut App) -> Result<(), AppError> {
         },
 
         Action::ToggleFavorite => {
-            app.toggle_current_as_favorite();
+            match app.toggle_current_as_favorite() {
+                Err(err) => {
+                    app.status_line_mut()
+                        .error(err, Some("Error saving configs: \n"));
+                },
+                Ok(true) => {
+                    app.status_line_mut().normal()
+                        .set_text("Added path to favorites")
+                        .set_color(themevar!(special_color));
+                },
+                Ok(false) => {
+                    app.status_line_mut().normal()
+                        .set_text("Removed path from favorites")
+                        .set_color(themevar!(special_color));
+                },
+            }
         },
 
         Action::ClearRecent => {
             app.clear_recent_list();
+            app.status_line_mut()
+                .normal()
+                .set_text("Cleared recent list")
+                .set_color( themevar!(special_color) );
+        },
+
+        Action::AddToRecent => {
+            app.add_current_to_recent();
+            app.status_line_mut()
+                .normal()
+                .set_text("Added current directory to recent list (Ctrl-o)")
+                .set_color( themevar!(special_color) );
         },
 
         _ => {

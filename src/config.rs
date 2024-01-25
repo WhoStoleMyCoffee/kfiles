@@ -21,7 +21,7 @@ macro_rules! themevar {
 pub struct Configs {
     pub scroll_margin: u8,
     pub default_path: PathBuf,
-    pub search_ignore_types: String,
+    pub search_ignore_extensions: Vec<String>,
     pub max_recent_count: usize,
     pub theme: ColorTheme,
     pub performance: PerformanceConfigs,
@@ -50,7 +50,7 @@ impl Default for Configs {
         Self {
             scroll_margin: 4,
             default_path: PathBuf::from(home_dir),
-            search_ignore_types: String::new(),
+            search_ignore_extensions: Vec::new(),
             max_recent_count: 64,
             theme: ColorTheme::default(),
             performance: PerformanceConfigs::default(),
