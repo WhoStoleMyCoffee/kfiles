@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, self};
+use std::sync::mpsc::{Receiver, self, Sender, SendError};
 use std::sync::{ Arc, Mutex };
 use std::thread;
 use std::time::Duration;
@@ -13,6 +13,8 @@ use console_engine::{
 use console_engine::crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
 use console_engine::events::Event;
 use console_engine::forms::{Form, FormField, FormOptions, FormStyle, FormValue, Text};
+
+// use thread_broadcaster::{Broadcaster, BroadcastListener, Controller};
 
 use crate::config::{ColorTheme, Configs};
 use crate::{themevar, util::*};
@@ -70,6 +72,15 @@ impl ToString for IndexedString {
         format!("{}: {}", self.0, self.1)
     }
 }
+
+impl PartialEq for IndexedString {
+    fn eq(&self, other: &Self) -> bool {
+        self.1 == other.1
+    }
+}
+
+
+
 
 
 #[derive(Debug, PartialEq)]
@@ -423,10 +434,11 @@ impl<S: ToString + Clone> SearchQuery for SearchList<S> {
             self.results = self.get_list();
             return;
         }
+
         let q: String = query.to_lowercase();
         self.results = self.items.iter().enumerate()
             .map( |(i, s)| IndexedString(i, s.to_string()) )
-            .filter(|s| s.as_ref().to_lowercase() .contains(&q))
+            .filter(|s| s.to_string().to_lowercase() .contains(&q))
             .collect();
     }
 
@@ -442,16 +454,70 @@ enum QueryResults {
     Results {
         results: Vec<PathBuf>,
         new_queue: Vec<PathBuf>,
+        query_len: usize,
     }
 }
+
+
+
+
+// TODO crossbeam dat bish
+struct ThreadedSearchBundle {
+    receiver: Receiver<QueryResults>,
+    queue: Arc<Mutex< VecDeque<PathBuf> >>,
+    query: String,
+    query_change_notifiers: Vec< Sender<String> >
+}
+
+impl ThreadedSearchBundle {
+    fn new(query: &str, queue: &[PathBuf]) -> (Self, Sender<QueryResults>) {
+        let (tx, rx) = mpsc::channel::<QueryResults>();
+        let tsb = Self {
+            receiver: rx,
+            queue: Arc::new(Mutex::new( VecDeque::from(queue.to_vec()) )),
+            query: query.to_string(),
+            query_change_notifiers: Vec::new(),
+        };
+        (tsb, tx)
+    }
+
+    fn register_query_notifier(&mut self) -> Receiver<String> {
+        let (tx, rx) = mpsc::channel::<String>();
+        self.query_change_notifiers.push(tx);
+        rx
+    }
+
+    fn change_query(&mut self, new_query: &str) -> Result<(), SendError<String>> {
+        self.query = new_query.to_string();
+        // Broadcast query change
+        for sender in self.query_change_notifiers.iter() {
+            sender.send(new_query.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+
+enum TryUpdateQueryError {
+    /// No bundle
+    NoBundle,
+    /// New query is not a subset (extension) of the current query
+    QueryNotSubset,
+    /// Error while sending update query notification to threads
+    NotifyError( SendError<String> ),
+}
+
+
+
+
+
 
 
 pub struct SearchFolders {
     root: PathBuf,
     results: Vec<IndexedString>,
     thread_count: u8,
-    queue: Arc<Mutex< VecDeque<PathBuf> >>,
-    receiver: Option<Receiver< QueryResults >>,
+    bundle: Option<ThreadedSearchBundle>,
     max_result_count: usize,
     max_queue_len: Option<usize>,
 }
@@ -462,8 +528,7 @@ impl SearchFolders {
             root: root.to_path_buf(),
             results: Vec::new(),
             thread_count: 1,
-            queue: Arc::new(Mutex::new( VecDeque::new() )),
-            receiver: None,
+            bundle: None,
             max_result_count: usize::MAX,
             max_queue_len: None,
         }
@@ -487,6 +552,96 @@ impl SearchFolders {
     pub fn list(mut self) -> Self {
         self.results = self.get_list();
         self
+    }
+
+    fn new_query(&mut self, new_query: &str) {
+        let (mut bundle, result_sender) = ThreadedSearchBundle::new(
+            new_query,
+            &[ self.root.to_path_buf() ]
+        );
+
+        self.results.retain(|IndexedString(_, s)| s.to_lowercase() .contains(new_query));
+
+        // Spawn threads
+        let (fast_loop_ms, slow_loop_ms) = {
+            let perf = Configs::performance();
+            (perf.thread_fast_ms, perf.thread_slow_ms)
+        };
+
+        for _ in 0..self.thread_count {
+            let queue = Arc::clone(&bundle.queue);
+            let result_sender = result_sender.clone();
+            let query_receiver = bundle.register_query_notifier();
+            let mut query: String = new_query.to_lowercase();
+            let root = self.root.clone();
+
+            thread::spawn(move || {
+                let mut wait_ms: u64 = ( (fast_loop_ms + slow_loop_ms) / 2 ) as u64; // Time between loops to prevent spam
+                loop {
+                    thread::sleep(Duration::from_millis(wait_ms));
+
+                    // Check connection
+                    if result_sender.send( QueryResults::ConnectionCheck ).is_err() { break; }
+
+                    // Check for query changes
+                    if let Some(new_query) = query_receiver.try_iter().last() {
+                        // dbg!(&new_query);
+                        query = new_query;
+                    }
+
+                    // Get search path
+                    let Ok(mut q) = queue.lock() else { break; };
+                    let Some(search_path) = q.pop_front() else {
+                        wait_ms = (wait_ms + slow_loop_ms as u64) / 2; // Slow down
+                        continue;
+                    };
+                    drop(q); // Unlock mutex
+
+                    let Ok(folders) = get_all_folders_at(search_path) else { continue; };
+
+                    let results: Vec<PathBuf> = folders.iter()
+                        .filter_map(|pb| pb.strip_prefix(&root).ok() .map(PathBuf::from) )
+                        .filter(|pb| path2string(pb).to_lowercase() .contains(&query))
+                        .collect();
+
+                    let new_queue: Vec<PathBuf> = folders.into_iter()
+                         // Don't search inside folders that start with "." (like .git/)
+                         .filter(|pb| !path2string(pb.file_name().unwrap_or_default()) .starts_with('.') )
+                         .collect();
+
+                    if result_sender.send(QueryResults::Results { results, new_queue, query_len: query.len() })
+                        .is_err() {
+                        break;
+                    }
+
+                    // wait_ms = fast_loop_ms as u64; // Speed up
+                    wait_ms = (wait_ms + fast_loop_ms as u64) / 2; // Speed up
+                }
+            });
+        }
+
+        self.bundle = Some(bundle);
+    }
+
+    fn try_update_query(&mut self, new_query: &str) -> Result<(), TryUpdateQueryError> {
+        // No query
+        let Some(bundle) = &mut self.bundle else {
+            return Err(TryUpdateQueryError::NoBundle);
+        };
+        // new_query is not an extension of current query
+        if new_query.len() <= bundle.query.len() {
+            return Err(TryUpdateQueryError::QueryNotSubset);
+        }
+
+        // Notify threads of query change
+        if let Err(err) = bundle.change_query(new_query) {
+            return Err(TryUpdateQueryError::NotifyError( err ));
+        }
+
+        // Filter results
+        self.results.retain(|IndexedString(_, s)| s.to_lowercase() .contains(new_query));
+
+        Ok(())
     }
 }
 
@@ -520,106 +675,69 @@ impl SearchQuery for SearchFolders {
     fn search(&mut self, query: &str) {
         if query.is_empty() {
             self.results = self.get_list();
-            self.receiver = None;
+            self.bundle = None;
             return;
         }
 
-        let (tx, rx) = mpsc::channel::<QueryResults>();
-        self.receiver = Some(rx);
+        /* Epic plan for not wasting search results when the user makes a query that's just the current query but extended like "my search que" => "my search quer" which narrows the search results but also when they shorten the query e.g. "my search que" => "my search qu" that widens the search results thing so we wanna reset and restart the query because yes just trust me bro
+         * ... or "epic plan" for short.
+         * if new > old   => filter results & notify threads
+         * if new == old  => reset queue + results & new channel + threads?
+         * if new < old   => reset queue + results & new channel + threads
+         * if old == None => reset queue + results & new channel + threads
+         */
 
-        self.results.clear();
-
-        if let Ok(mut q) = self.queue.lock() {
-            *q = VecDeque::from( [self.root.to_path_buf()] );
-        } else {
-            return;
+        // Try to filter & notify, if that fails, reset & new
+        match self.try_update_query(query) {
+            Ok(()) => {},
+            Err(_) => self.new_query(query),
         }
-;
-        let (fast_loop_ms, slow_loop_ms) = {
-            let perf = Configs::performance();
-            (perf.thread_fast_ms, perf.thread_slow_ms)
-        };
-
-        for _ in 0..self.thread_count {
-            let queue = Arc::clone(&self.queue);
-            let tx = tx.clone();
-            let query: String = query.to_lowercase();
-            let root = self.root.clone();
-
-            thread::spawn(move || {
-                let mut wait_ms: u64 = ( (fast_loop_ms + slow_loop_ms) / 2 ) as u64; // Time between loops to prevent spam
-                loop {
-                    thread::sleep(Duration::from_millis(wait_ms));
-
-                    // Check connection
-                    if tx.send( QueryResults::ConnectionCheck ).is_err() { break; }
-
-                    let Ok(mut q) = queue.lock() else { break; };
-                    let Some(search_path) = q.pop_front() else {
-                        wait_ms = (wait_ms + slow_loop_ms as u64) / 2; // Slow down
-                        continue;
-                    };
-                    drop(q); // Unlock mutex
-
-                    let Ok(folders) = get_all_folders_at(search_path) else { continue; };
-
-                    let results: Vec<PathBuf> = folders.iter()
-                        .filter_map(|pb| pb.strip_prefix(&root).ok() .map(PathBuf::from) )
-                        .filter(|pb| path2string(pb).to_lowercase() .contains(&query))
-                        .collect();
-
-                    let new_queue: Vec<PathBuf> = folders.into_iter()
-                         // Don't search inside folders that start with "." (like .git/)
-                         .filter(|pb| !path2string(pb.file_name().unwrap_or_default()) .starts_with('.') )
-                         .collect();
-
-                    if tx.send(QueryResults::Results { results, new_queue, })
-                        .is_err() {
-                        break;
-                    }
-
-                    // wait_ms = fast_loop_ms as u64; // Speed up
-                    wait_ms = (wait_ms + fast_loop_ms as u64) / 2; // Speed up
-                }
-            });
-        }
-
     }
 
     fn update(&mut self) {
-        let Some(rx) = &mut self.receiver else { return; };
+        let Some(bundle) = &mut self.bundle else { return; };
+        let rx = &bundle.receiver;
+        let current_query_len: usize = bundle.query.len();
 
         let max: usize = self.max_result_count;
         for res in rx.try_iter() {
             match res {
                 QueryResults::ConnectionCheck => {},
-                QueryResults::Results { results, new_queue } => {
-                    // Append results
-                    if !results.is_empty() {
-                        let l: usize = self.results.len();
-                        for (i, pathbuf) in results.iter().enumerate() .take(max - l) {
-                            let is: IndexedString = IndexedString::from( (l + i, pathbuf) );
-                            self.results.push(is);
+                QueryResults::Results { results, new_queue, query_len } => {
+                    // Append queue
+                    if !new_queue.is_empty() {
+                        let Ok(mut q) = bundle.queue.lock() else { continue; };
+
+                        q.append(&mut VecDeque::from(new_queue));
+                        if let Some(max_queue_len) = self.max_queue_len {
+                            q.truncate(max_queue_len);
                         }
                     }
 
-                    // Append queue
-                    if new_queue.is_empty() { continue; }
-                    let Ok(mut q) = self.queue.lock() else { continue; };
+                    // Append results
+                    let l: usize = self.results.len();
+                    if results.is_empty() { continue; }
+                    let r = results.into_iter().enumerate()
+                        .map(|(i, pb)| IndexedString::from( (l + i, &pb) ));
 
-                    q.append(&mut VecDeque::from(new_queue));
-                    if let Some(max_queue_len) = self.max_queue_len {
-                        q.truncate(max_queue_len);
+                    // Same query
+                    if query_len == current_query_len {
+                        self.results.append(&mut r
+                            .filter(|is| !self.results.contains(is)) // Check for duplicates
+                            .collect())
+                    // Probably outdated
+                    } else {
+                        self.results.append(&mut r
+                            .filter(|is| !self.results.contains(is) && is.as_ref().contains(&bundle.query)) //  Also check for query
+                            .collect())
                     }
-
+                    self.results.truncate(max);
                 },
             }
         }
 
         if self.results.len() >= max {
-            self.receiver = None;
-            self.queue.lock().unwrap()
-                .clear();
+            self.bundle = None;
         }
     }
 
@@ -636,8 +754,7 @@ pub struct SearchFiles {
     root: PathBuf,
     results: Vec<IndexedString>,
     thread_count: u8,
-    queue: Arc<Mutex< VecDeque<PathBuf> >>,
-    receiver: Option<Receiver< QueryResults >>,
+    bundle: Option<ThreadedSearchBundle>,
     max_result_count: usize,
     max_queue_len: Option<usize>,
     /// File extension types to ignore
@@ -650,8 +767,7 @@ impl SearchFiles {
             root: root.to_path_buf(),
             results: Vec::new(),
             thread_count: 1,
-            queue: Arc::new(Mutex::new( VecDeque::new() )),
-            receiver: None,
+            bundle: None,
             max_result_count: usize::MAX,
             max_queue_len: None,
             ignore_extensions: Vec::new(),
@@ -681,6 +797,102 @@ impl SearchFiles {
     pub fn list(mut self) -> Self {
         self.results = self.get_list();
         self
+    }
+
+    fn new_query(&mut self, new_query: &str) {
+        let (mut bundle, result_sender) = ThreadedSearchBundle::new(
+            new_query,
+            &[ self.root.to_path_buf() ]
+        );
+
+        self.results.retain(|IndexedString(_, s)| s.to_lowercase() .contains(new_query));
+
+        // Spawn threads
+        let (fast_loop_ms, slow_loop_ms) = {
+            let perf = Configs::performance();
+            (perf.thread_fast_ms, perf.thread_slow_ms)
+        };
+
+        for _ in  0..self.thread_count {
+            let queue = Arc::clone(&bundle.queue);
+            let result_sender = result_sender.clone();
+            let query_receiver = bundle.register_query_notifier();
+            let mut query: String = new_query.to_lowercase();
+            let root = self.root.clone();
+            let ignore_types: String = self.ignore_extensions.join(",");
+
+            thread::spawn(move || {
+                let mut wait_ms: u64 = ( (fast_loop_ms + slow_loop_ms) / 2 ) as u64; // Time between loops to prevent spam
+                loop {
+                    thread::sleep(Duration::from_millis(wait_ms));
+
+                    // Check connection
+                    if result_sender.send( QueryResults::ConnectionCheck ).is_err() { break; }
+
+                    // Check for query changes
+                    if let Some(new_query) = query_receiver.try_iter().last() {
+                        // dbg!(&new_query);
+                        query = new_query;
+                    }
+
+                    // Get search path
+                    let Ok(mut q) = queue.lock() else { break; };
+                    let Some(search_path) = q.pop_front() else {
+                        wait_ms = (wait_ms + slow_loop_ms as u64) / 2; // Slow down
+                        continue;
+                    };
+                    drop(q); // Unlock mutex
+                             
+                    let Ok((files, folders)) = get_files_and_folders_at(search_path) else {
+                        return;
+                    };
+
+                    let new_queue: Vec<PathBuf> = folders.into_iter()
+                         // Don't search inside folders that start with "." (like .git/)
+                         .filter(|pb| !path2string(pb.file_name().unwrap_or_default()) .starts_with('.') )
+                         .collect();
+
+                    let results: Vec<PathBuf> = files.into_iter()
+                        .filter_map(|pb| pb.strip_prefix(&root).ok() .map(PathBuf::from) )
+                        .filter(|pb| {
+                            !ignore_types.contains(&path2string(pb.extension().unwrap_or_default()))
+                            && path2string(pb).to_lowercase().contains(&query)
+                        })
+                        .collect();
+
+                    if result_sender.send(QueryResults::Results { results, new_queue, query_len: query.len() })
+                        .is_err() {
+                        break;
+                    }
+
+                    // wait_ms = fast_loop_ms as u64; // Speed up
+                    wait_ms = (wait_ms + fast_loop_ms as u64) / 2; // Speed up
+                }
+            });
+        }
+
+        self.bundle = Some(bundle);
+    }
+
+    fn try_update_query(&mut self, new_query: &str) -> Result<(), TryUpdateQueryError> {
+        // No query
+        let Some(bundle) = &mut self.bundle else {
+            return Err(TryUpdateQueryError::NoBundle);
+        };
+        // new_query is not an extension of current query
+        if new_query.len() <= bundle.query.len() {
+            return Err(TryUpdateQueryError::QueryNotSubset);
+        }
+
+        // Notify threads of query change
+        if let Err(err) = bundle.change_query(new_query) {
+            return Err(TryUpdateQueryError::NotifyError( err ));
+        }
+
+        // Filter results
+        self.results.retain(|IndexedString(_, s)| s.to_lowercase() .contains(new_query));
+
+        Ok(())
     }
 }
 
@@ -713,111 +925,62 @@ impl SearchQuery for SearchFiles {
     fn search(&mut self, query: &str) {
         if query.is_empty() {
             self.results = self.get_list();
-            self.receiver = None;
+            self.bundle = None;
             return;
         }
 
-        let (tx, rx) = mpsc::channel::<QueryResults>();
-        self.receiver = Some(rx);
+        // Epic plan, once again
 
-        self.results.clear();
-
-        if let Ok(mut q) = self.queue.lock() {
-            *q = VecDeque::from([ self.root.to_path_buf() ]);
-        } else {
-            return;
-        }
-
-        let (fast_loop_ms, slow_loop_ms) = {
-            let perf = Configs::performance();
-            (perf.thread_fast_ms, perf.thread_slow_ms)
-        };
-
-        for _ in  0..self.thread_count {
-            let queue = Arc::clone(&self.queue);
-            let tx = tx.clone();
-            let query: String = query.to_lowercase();
-            let root = self.root.clone();
-            let ignore_types: String = self.ignore_extensions.join(",");
-
-            thread::spawn(move || {
-                let mut wait_ms: u64 = ( (fast_loop_ms + slow_loop_ms) / 2 ) as u64; // Time between loops to prevent spam
-                loop {
-                    thread::sleep(Duration::from_millis(wait_ms));
-
-                    // Check connection
-                    if tx.send( QueryResults::ConnectionCheck ).is_err() { break; }
-
-                    let Ok(mut q) = queue.lock() else { break; };
-                    let Some(search_path) = q.pop_front() else {
-                        wait_ms = (wait_ms + slow_loop_ms as u64) / 2; // Slow down
-                        continue;
-                    };
-                    drop(q); // Unlock mutex
-                             
-                    let Ok((files, folders)) = get_files_and_folders_at(search_path) else {
-                        return;
-                    };
-
-                    let new_queue: Vec<PathBuf> = folders.into_iter()
-                         // Don't search inside folders that start with "." (like .git/)
-                         .filter(|pb| !path2string(pb.file_name().unwrap_or_default()) .starts_with('.') )
-                         .collect();
-
-                    let results: Vec<PathBuf> = files.into_iter()
-                        .filter_map(|pb| pb.strip_prefix(&root).ok() .map(PathBuf::from) )
-                        .filter(|pb| {
-                            !ignore_types.contains(&path2string(pb.extension().unwrap_or_default()))
-                            && path2string(pb).to_lowercase().contains(&query)
-                        })
-                        .collect();
-
-                    if tx.send(QueryResults::Results { results, new_queue })
-                        .is_err() {
-                        break;
-                    }
-
-                    // wait_ms = fast_loop_ms as u64; // Speed up
-                    wait_ms = (wait_ms + fast_loop_ms as u64) / 2; // Speed up
-                }
-            });
+        // Try to filter & notify, if that fails, reset & new
+        match self.try_update_query(query) {
+            Ok(()) => {},
+            Err(_) => self.new_query(query),
         }
     }
 
     fn update(&mut self) {
-        let Some(rx) = &mut self.receiver else { return; };
+        let Some(bundle) = &mut self.bundle else { return; };
+        let rx = &bundle.receiver;
+        let current_query_len: usize = bundle.query.len();
 
         let max: usize = self.max_result_count;
         for res in rx.try_iter() {
             match res {
                 QueryResults::ConnectionCheck => {},
-                QueryResults::Results { results, new_queue } => {
-                    // Append results
-                    if !results.is_empty() {
-                        let l: usize = self.results.len();
-                        for (i, pathbuf) in results.iter().enumerate() .take(max - l) {
-                            let is: IndexedString = IndexedString::from( (l + i, pathbuf) );
-                            self.results.push(is);
+                QueryResults::Results { results, new_queue, query_len } => {
+                    // Append queue
+                    if !new_queue.is_empty() {
+                        let Ok(mut q) = bundle.queue.lock() else { continue; };
+
+                        q.append(&mut VecDeque::from(new_queue));
+                        if let Some(max_queue_len) = self.max_queue_len {
+                            q.truncate(max_queue_len);
                         }
                     }
 
-                    // Append queue
-                    if new_queue.is_empty() { continue; }
-                    let Ok(mut q) = self.queue.lock() else { continue; };
-
-                    q.append(&mut VecDeque::from(new_queue));
-                    if let Some(max_queue_len) = self.max_queue_len {
-                        q.truncate(max_queue_len);
+                    // Append results
+                    let l: usize = self.results.len();
+                    if results.is_empty() || l >= max { continue; }
+                    let r = results.into_iter().enumerate()
+                        .map(|(i, pb)| IndexedString::from( (l + i, &pb) ));
+                    // Same query
+                    if query_len == current_query_len {
+                        self.results.append(&mut r
+                            .filter(|is| !self.results.contains(is)) // Check for duplicates
+                            .collect())
+                    // Probably outdated
+                    } else {
+                        self.results.append(&mut r
+                            .filter(|is| !self.results.contains(is) && is.as_ref().contains(&bundle.query)) //  Also check for query
+                            .collect())
                     }
-
+                    self.results.truncate(max);
                 },
             }
         }
 
         if self.results.len() >= max {
-            self.receiver = None;
-            self.queue.lock().unwrap()
-                .clear();
+            self.bundle = None;
         }
     }
 
@@ -825,6 +988,8 @@ impl SearchQuery for SearchFiles {
         &self.results
     }
 }
+
+
 
 
 
