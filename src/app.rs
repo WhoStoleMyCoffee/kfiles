@@ -36,6 +36,16 @@ macro_rules! select_panel {
 }
 
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum SelectPanelMode {
+    Help,
+    Recent,
+    Favorites,
+    SearchFiles,
+    SearchFolders,
+}
+
+
 
 pub enum AppState {
     Running,
@@ -46,7 +56,7 @@ pub enum AppState {
 pub struct App {
     pub engine: Option<ConsoleEngine>,
     file_buffer: FileBuffer,
-    search_panel: Option<SelectPanel>,
+    select_panel: Option<(SelectPanelMode, SelectPanel)>,
     recent_dirs: RecentList,
     favorites: FavoritesList,
     pub state: AppState,
@@ -67,7 +77,7 @@ impl App {
         let mut app = Self {
             engine: Some(engine),
             file_buffer,
-            search_panel: None,
+            select_panel: None,
             recent_dirs: RecentList::load(&get_recent_dirs_path()?, max_recent_count)
                 .unwrap_or_else(|_| RecentList::new(max_recent_count)),
             favorites: FavoritesList::load(&get_favorites_list_path()?)
@@ -90,7 +100,7 @@ impl App {
 
 
 
-        if let Some(panel) = &mut self.search_panel {
+        if let Some((_, panel)) = &mut self.select_panel {
             if panel.is_running() {
                 panel.update();
             }
@@ -103,7 +113,7 @@ impl App {
 
         match engine.poll() {
             Event::Frame => {
-                if let Some(panel) = &mut self.search_panel {
+                if let Some((_, panel)) = &mut self.select_panel {
                     engine.print_screen(
                         SEARCH_PANEL_MARGIN.0 as i32,
                         SEARCH_PANEL_MARGIN.1 as i32,
@@ -134,7 +144,7 @@ impl App {
             }
 
             Event::Mouse(mouse_event) => {
-                if let Some(panel) = &mut self.search_panel {
+                if let Some((_, panel)) = &mut self.select_panel {
                     panel.handle_mouse_event(mouse_event, SEARCH_PANEL_MARGIN.1 as u16);
                 } else {
                     self.file_buffer.handle_mouse_event(mouse_event);
@@ -217,10 +227,13 @@ impl App {
                 ..
             } if modifiers.bits() == CONTROL_SHIFT => {
                 // If already open, close
-                if self.search_panel.is_some() {
-                    self.search_panel = None;
-                    self.state = AppState::Running;
-                    return;
+                match &self.select_panel {
+                    Some((SelectPanelMode::SearchFolders, _)) => {
+                        self.select_panel = None;
+                        self.state = AppState::Running;
+                        return;
+                    },
+                    _ => {},
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
@@ -242,7 +255,7 @@ impl App {
                         app.add_current_to_recent();
                         app.file_buffer.set_path(&path);
                     });
-                self.search_panel = Some(panel);
+                self.select_panel = Some((SelectPanelMode::SearchFolders, panel));
             }
 
             // Search files with Ctrl-p
@@ -253,10 +266,13 @@ impl App {
                 ..
             } => {
                 // If already open, close
-                if self.search_panel.is_some() {
-                    self.search_panel = None;
-                    self.state = AppState::Running;
-                    return;
+                match &self.select_panel {
+                    Some((SelectPanelMode::SearchFiles, _)) => {
+                        self.select_panel = None;
+                        self.state = AppState::Running;
+                        return;
+                    },
+                    _ => {},
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
@@ -279,7 +295,7 @@ impl App {
                         app.add_current_to_recent();
                         app.file_buffer.set_path(&path);
                     });
-                self.search_panel = Some(panel);
+                self.select_panel = Some((SelectPanelMode::SearchFiles, panel));
             }
 
             // Recent files with Ctrl-o
@@ -290,10 +306,13 @@ impl App {
                 ..
             } => {
                 // If already open, close
-                if self.search_panel.is_some() {
-                    self.search_panel = None;
-                    self.state = AppState::Running;
-                    return;
+                match &self.select_panel {
+                    Some((SelectPanelMode::Recent, _)) => {
+                        self.select_panel = None;
+                        self.state = AppState::Running;
+                        return;
+                    },
+                    _ => {},
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
@@ -310,18 +329,7 @@ impl App {
                         app.file_buffer.set_path(path);
                     });
 
-                self.search_panel = Some(panel);
-            }
-
-            // Add to favorites with Ctrl-f
-            KeyEvent {
-                code: KeyCode::Char('f'),
-                kind: KeyEventKind::Press,
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            } => {
-                unimplemented!("Deprecated");
-
+                self.select_panel = Some((SelectPanelMode::Recent, panel));
             }
 
             // Open / close favorites with ` or Tab
@@ -332,10 +340,13 @@ impl App {
                 ..
             } => {
                 // If already open, close
-                if self.search_panel.is_some() {
-                    self.search_panel = None;
-                    self.state = AppState::Running;
-                    return;
+                match &self.select_panel {
+                    Some((SelectPanelMode::Favorites, _)) => {
+                        self.select_panel = None;
+                        self.state = AppState::Running;
+                        return;
+                    },
+                    _ => {},
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
@@ -351,7 +362,7 @@ impl App {
                         app.add_current_to_recent();
                         app.file_buffer.set_path(path);
                     });
-                self.search_panel = Some(panel);
+                self.select_panel = Some((SelectPanelMode::Favorites, panel));
             }
 
             // Open help list with F1
@@ -362,10 +373,13 @@ impl App {
                 ..
             } => {
                 // If already open, close
-                if self.search_panel.is_some() {
-                    self.search_panel = None;
-                    self.state = AppState::Running;
-                    return;
+                match &self.select_panel {
+                    Some((SelectPanelMode::Help, _)) => {
+                        self.select_panel = None;
+                        self.state = AppState::Running;
+                        return;
+                    },
+                    _ => {},
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
@@ -384,7 +398,7 @@ impl App {
 
                         app.state = AppState::Action(*action);
                     });
-                self.search_panel = Some(panel);
+                self.select_panel = Some((SelectPanelMode::Help, panel));
             }
 
             // Reload with F5
@@ -402,11 +416,11 @@ impl App {
 
             key_event => {
                 // Try to update search panel first
-                if let Some(search_panel) = &mut self.search_panel {
-                    search_panel.handle_key_event(event);
-                    if search_panel.state == SelectPanelState::Exit {
+                if let Some((_, panel)) = &mut self.select_panel {
+                    panel.handle_key_event(event);
+                    if panel.state == SelectPanelState::Exit {
                         self.set_title_to_current();
-                        self.search_panel = None;
+                        self.select_panel = None;
                     }
 
                 // File buffer

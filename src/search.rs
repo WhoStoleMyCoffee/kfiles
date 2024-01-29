@@ -246,6 +246,9 @@ impl SelectPanel {
 
                 if self.form.is_finished() {
                     let Some(selected) = self.query.get_results().get(self.selected_index) else {
+                        // Search unsuccessful
+                        self.form.reset();
+                        self.query.search("");
                         return;
                     };
 
