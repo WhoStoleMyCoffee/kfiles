@@ -115,7 +115,6 @@ impl FileBuffer {
             .set_color(themevar!(text_color));
     }
 
-    // TODO refactor
     /// Sets the path
     /// If `path` is a file, set the path to the file's directory and automatically select it
     pub fn set_path(&mut self, path: &Path) {

@@ -583,12 +583,11 @@ mod help {
         pause!(DELAY);
         println!("\n{TAB}OTHER:");
         printtabbed!{ALIGN;
-            "F1", "Show help message";
-            "F5", "Refresh view";
+            "F1", "Command palette";
+            "F5", "Refresh";
             "Ctrl-o", "Search recent directories";
-            "Ctrl-p", "Search files (Esc to cancel)";
-            "Ctrl-Shift-p", "Search folders (Esc to cancel)";
-            "Ctrl-f", "Toggle current directory as favorite";
+            "Ctrl-p", "Search files";
+            "Ctrl-Shift-p", "Search folders";
             "Ctrl-e", "Reveal current directory in default file explorer";
             "Ctrl-Shift-e", "Reveal current directory in default file explorer and exit KFiles";
             "Ctrl-n", "Create file";
@@ -602,27 +601,30 @@ mod help {
         printtabbed!{ALIGN;
             "up and down arrows", "Move cursor";
             "Enter", "Open selected file/folder";
+            "Ctrl-Backspace", "Clear prompt";
         };
     }
     
     /// Prints the CONFIGS chapter of the help message
     pub fn print_config_help() {
-        let Ok(p) = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) else {
-            return;
+        let p = match confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH)) {
+            Ok(p) => p,
+            Err(err) => {
+                println!("\n\nCONFIGS:");
+                println!("Error: Failed to get configuration file path: \n\t{}", err);
+                return;
+            },
         };
         println!("\n\nCONFIGS:\nYou can find your config file at: {}", p.display());
         println!("or run with --config to open it");
         printtabbed!{ALIGN;
             "scroll_margin", "Minimum spacing between cursor and edge of the window";
-            "max_recent_count", "How many directories to keep track of in the recent list";
             "default_path", "Default directory when the program is run";
             "search_ignore_types", "The types of files to ignore while searching";
-            "", "E.g. \"import,txt\" will ignore all .import and .txt files";
-            "PERFORMANCE OPTIONS:", "";
-            "update_rate", "The frames per second to run the program at";
-            "max_search_queue_len", "How \"deep\" to search in search panel";
-            "search_thread_count", "How many threads to use while searching";
+            "", "E.g. [\"import\" ,\"txt\"] will ignore all .import and .txt files";
+            "max_recent_count", "How many directories to keep track of in the recent list";
         };
+
         println!("\n{TAB}THEME (all in RGB color values):");
         printtabbed!{ALIGN;
             "folder_color", "Color for displaying folders";
@@ -633,6 +635,21 @@ mod help {
             "comment_color", "Color for dimmed text (comments)";
             "error_color", "Color for errors";
         };
+
+        println!("\n{TAB}PERFORMANCE OPTIONS:");
+        println!("{TAB}These settings mosly affect the behavior in the search panel");
+        printtabbed!(ALIGN;
+            "update_rate", "The FPS (frames per second) to run the program at";
+            "max_search_queue_len", "(Optional; default = unlimited) How long to allow the queue to be when searching";
+            "", "This setting may allow you to save memory, but if set *too* low, it may cause it to skip some directories when searching";
+            "search_thread_count", "How many threads to use while searching";
+            "thread_fast_ms", "How fast active search threads should be working";
+            "", "This option is to prevent \"hyperactive threads\" over-using CPU resources";
+            "thread_slow_ms", "How fast inactive search threads should be working";
+            "", "This option is to prevent \"hyperactive threads\" over-using CPU resources";
+        );
+
+        println!("Tip: you can delete your `configs.toml` file to reset all settings");
     }
 }
 

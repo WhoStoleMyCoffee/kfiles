@@ -7,7 +7,11 @@ use console_engine::{Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::config::{ColorTheme, Configs, FavoritesList, RecentList, PerformanceConfigs};
 use crate::filebuffer::{FileBuffer, StatusLine};
-use crate::search::{self, SelectPanel, SelectPanelState};
+use crate::search::{
+    SelectPanel,
+    SelectPanelState,
+    query,
+};
 use crate::try_err;
 use crate::{
     get_favorites_list_path, get_recent_dirs_path, themevar,
@@ -217,7 +221,7 @@ impl App {
                     .reveal()
                     .expect("Failed to reveal current directory");
                 self.add_current_to_recent();
-            }
+            },
 
             // Search folders with Ctrl-Shift-p
             KeyEvent {
@@ -227,13 +231,10 @@ impl App {
                 ..
             } if modifiers.bits() == CONTROL_SHIFT => {
                 // If already open, close
-                match &self.select_panel {
-                    Some((SelectPanelMode::SearchFolders, _)) => {
-                        self.select_panel = None;
-                        self.state = AppState::Running;
-                        return;
-                    },
-                    _ => {},
+                if let Some((SelectPanelMode::SearchFolders, _)) = &self.select_panel {
+                    self.select_panel = None;
+                    self.state = AppState::Running;
+                    return;
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
@@ -241,7 +242,7 @@ impl App {
                 let app = self as *mut App;
                 let root_path = self.file_buffer.path .clone();
                 let panel: SelectPanel = select_panel!(sw, sh,
-                        search::SearchFolders::new(&self.file_buffer.path)
+                        query::SearchFolders::new(&self.file_buffer.path)
                             .with_queue_len(perf.max_search_queue_len)
                             .with_threads(perf.search_thread_count)
                             .with_max_results( SelectPanel::calc_list_height(sh) as usize )
@@ -256,7 +257,7 @@ impl App {
                         app.file_buffer.set_path(&path);
                     });
                 self.select_panel = Some((SelectPanelMode::SearchFolders, panel));
-            }
+            },
 
             // Search files with Ctrl-p
             KeyEvent {
@@ -266,13 +267,10 @@ impl App {
                 ..
             } => {
                 // If already open, close
-                match &self.select_panel {
-                    Some((SelectPanelMode::SearchFiles, _)) => {
-                        self.select_panel = None;
-                        self.state = AppState::Running;
-                        return;
-                    },
-                    _ => {},
+                if let Some((SelectPanelMode::SearchFiles, _)) = &self.select_panel {
+                    self.select_panel = None;
+                    self.state = AppState::Running;
+                    return;
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
@@ -280,7 +278,7 @@ impl App {
                 let app = self as *mut App;
                 let root_path = self.file_buffer.path.clone();
                 let panel: SelectPanel = select_panel!(sw, sh,
-                        search::SearchFiles::new(&self.file_buffer.path)
+                        query::SearchFiles::new(&self.file_buffer.path)
                             .with_queue_len(cfg.performance .max_search_queue_len)
                             .with_threads(cfg.performance .search_thread_count)
                             .with_max_results( SelectPanel::calc_list_height(sh) as usize )
@@ -296,7 +294,7 @@ impl App {
                         app.file_buffer.set_path(&path);
                     });
                 self.select_panel = Some((SelectPanelMode::SearchFiles, panel));
-            }
+            },
 
             // Recent files with Ctrl-o
             KeyEvent {
@@ -306,19 +304,16 @@ impl App {
                 ..
             } => {
                 // If already open, close
-                match &self.select_panel {
-                    Some((SelectPanelMode::Recent, _)) => {
-                        self.select_panel = None;
-                        self.state = AppState::Running;
-                        return;
-                    },
-                    _ => {},
+                if let Some((SelectPanelMode::Recent, _)) = &self.select_panel {
+                    self.select_panel = None;
+                    self.state = AppState::Running;
+                    return;
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
                 let app = self as *mut App;
                 let panel: SelectPanel = select_panel!(sw, sh,
-                    search::SearchPathList::new(&self.recent_dirs)
+                    query::SearchPathList::new(&self.recent_dirs)
                     )
                     .with_title("Recent")
                     .with_color(themevar!(folder_color))
@@ -330,7 +325,7 @@ impl App {
                     });
 
                 self.select_panel = Some((SelectPanelMode::Recent, panel));
-            }
+            },
 
             // Open / close favorites with ` or Tab
             KeyEvent {
@@ -340,19 +335,16 @@ impl App {
                 ..
             } => {
                 // If already open, close
-                match &self.select_panel {
-                    Some((SelectPanelMode::Favorites, _)) => {
-                        self.select_panel = None;
-                        self.state = AppState::Running;
-                        return;
-                    },
-                    _ => {},
+                if let Some((SelectPanelMode::Favorites, _)) = &self.select_panel {
+                    self.select_panel = None;
+                    self.state = AppState::Running;
+                    return;
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
                 let app = self as *mut App;
                 let panel: SelectPanel = select_panel!(sw, sh,
-                     search::SearchPathList::new(&self.favorites)
+                     query::SearchPathList::new(&self.favorites)
                      )
                     .with_title("Favorites")
                     .with_color(themevar!(special_color))
@@ -363,7 +355,7 @@ impl App {
                         app.file_buffer.set_path(path);
                     });
                 self.select_panel = Some((SelectPanelMode::Favorites, panel));
-            }
+            },
 
             // Open help list with F1
             KeyEvent {
@@ -373,19 +365,16 @@ impl App {
                 ..
             } => {
                 // If already open, close
-                match &self.select_panel {
-                    Some((SelectPanelMode::Help, _)) => {
-                        self.select_panel = None;
-                        self.state = AppState::Running;
-                        return;
-                    },
-                    _ => {},
+                if let Some((SelectPanelMode::Help, _)) = &self.select_panel {
+                    self.select_panel = None;
+                    self.state = AppState::Running;
+                    return;
                 }
 
                 let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
                 let app = self as *mut App;
                 let panel: SelectPanel = select_panel!(sw, sh,
-                    search::SearchList::new( Action::display_list() )
+                    query::SearchList::new( Action::display_list() )
                     )
                     .with_title("Help")
                     .with_color(themevar!(special_color))
