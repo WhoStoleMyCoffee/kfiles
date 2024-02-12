@@ -3,7 +3,7 @@ use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 
-/// Search for a string in an `Iterator::<Item = &str (i think)>`
+/// Search for a string in an `Iterator::<Item = &str>`
 #[macro_export]
 macro_rules! search_str {
     ($iter:expr, $query:expr) => {
@@ -30,8 +30,8 @@ where
 }
 
 #[inline]
-pub fn file_name(pathbuf: &Path) -> String {
-    path2string(pathbuf.file_name().unwrap_or_default())
+pub fn file_name(path: &Path) -> String {
+    path2string(path.file_name().unwrap_or_default())
 }
 
 // Get files & folders and have folders come before files (ofc, alphabetically sorted)
@@ -116,6 +116,25 @@ where
 {
     let file = File::open(path)?;
     Ok(BufReader::new(file).lines())
+}
+
+
+
+pub fn str_match_cost(needle: &str, haystack: &str) -> Option<usize> {
+    let mut cost: usize = 0;
+    let mut h_chars = haystack.chars();
+    let mut is_first_char: bool = true;
+    // Find indices of `needle` chars inside haystack
+    for nch in needle.chars() {
+        let Some(i) = h_chars.position(|ch| ch.eq_ignore_ascii_case(&nch)) else {
+            return None;
+        };
+
+        // if is_first_char { is_first_char = false; } else { cost += i; }
+        cost += i * is_first_char as usize;
+        is_first_char = false;
+    }
+    Some(cost)
 }
 
 

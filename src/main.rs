@@ -655,26 +655,12 @@ mod help {
 
 
 
-/*
+
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use std::sync::Mutex;
-    use std::sync::mpsc;
-    use std::sync::mpsc::Sender;
-    use std::thread;
-    use std::time::Duration;
-
-    use dialoguer::Input;
-    use threads_pool::ThreadPool;
-
-    use crate::util::*;
-    use crate::APPNAME;
+    use crate::{util, APPNAME};
 
     #[test]
-    #[ignore]
     fn test_path() {
         let config_path = confy::get_configuration_file_path(APPNAME, None).unwrap();
         dbg!(&config_path);
@@ -685,183 +671,52 @@ mod tests {
         dbg!(&recent_path);
     }
 
-    #[test]
-    #[ignore]
-    fn test_search_seq() {
-        let path: PathBuf = PathBuf::from(r"C:/Users/ddxte");
-        let max_stack_size: usize = 1024;
-        let mut stack: VecDeque<PathBuf> = VecDeque::from([ path ]);
-
-        let query: &str = "sprites";
-
-        while let Some(search_path) = stack.pop_front() {
-            let Ok(folders) = get_all_folders_at(search_path) else { continue; };
-            stack.append(&mut folders.iter()
-                .filter(|pathbuf| !path2string(pathbuf.file_name().unwrap_or_default()) .starts_with('.') )
-                .take(max_stack_size - stack.len())
-                .cloned()
-                .collect()
-            );
-
-            let folders: Vec<PathBuf> = folders.into_iter()
-                .filter(|pathbuf| {
-                    path2string(pathbuf).to_lowercase().contains(query)
-                })
-                .collect();
-
-            if folders.is_empty() { continue; }
-            println!("{:#?}", folders);
-        }
-    }
 
     #[test]
-    #[ignore]
-    fn test_search_threaded() {
-        use threads_pool::*;
-        use std::sync::{ Arc, Mutex };
+    fn test_strmatch() {
+        let haystack = "It is always bup time";
+        let needle = "alwbu";
 
-        let pool = ThreadPool::new(4);
-        let path: PathBuf = PathBuf::from(r"C:/Users/ddxte");
-        let max_stack_size: usize = 1024;
-
-        let stack = Arc::new(Mutex::new( VecDeque::from([ path ]) ));
-        let query: &str = "sprites";
-
-        loop {
-            let Some(search_path) = stack.lock().unwrap() .pop_front().clone() else { // Stack is empty
-                if Arc::strong_count(&stack) == 1 { break; } // 1, not 0, because of the declaration up there ^
-                continue;
-            };
-
-            let stack = Arc::clone(&stack);
-            pool.execute(move || {
-                let Ok(folders) = get_all_folders_at(search_path) else { return; };
-
-                let mut s = stack.lock().unwrap();
-                let len: usize = s.len();
-                s.append(&mut folders.iter()
-                         .filter(|pathbuf| !path2string(pathbuf.file_name().unwrap_or_default()) .starts_with('.') )
-                         .take(max_stack_size - len)
-                         .cloned()
-                         .collect()
-                        );
-                drop(s); // Unlock mutex
-
-                let folders: Vec<PathBuf> = folders.into_iter()
-                    .filter(|pathbuf| {
-                        path2string(pathbuf).to_lowercase().contains(query)
-                    })
-                .collect();
-
-                if folders.is_empty() { return; }
-                println!("{:#?}", folders);
-            }).unwrap();
-
-        }
-    }
-
-    #[test]
-    fn test_strsearch4() {
-        let haystack = [
-            "C:/Users/ddxte/Documents/Projects/",
-            "Just as a gardener cultivates his plot, keeping it free from weeds, and growing the fruits and flowers which he requires, so may a man tend the garden of his mind, weeding all the wrong, useless, and impure thoughts, and cultivating towards perfection the flowers and fruits of of right, useful, and pure thoughts.",
-            "it is always bup time.txt",
-            "some_other_file.txt",
-            "lorem ipsum dolor sit amet",
-            "main.rs",
-        ];
-        
-        let input: String = Input::<String>::new()
-            .interact().unwrap()
-            .to_lowercase();
-
-        let match_index: Option<usize> = haystack.iter().enumerate()
-            .filter_map(|(i, s)| {
-                s.to_lowercase()
-                    .match_indices(&input).next()
-                    .map(|m| (i, m.0))
-            })
-            .min_by(|a, b| a.1.cmp(&b.1))
-            .map(|(i, _score)| i);
-
-        if let Some(index) = match_index {
-            println!("Found in \"{}\"", haystack[index]);
-        } else {
-            println!("No match found!");
-        }
-    }
-
-
-    fn idfk(tx: Sender<usize>, queue: Arc<Mutex<VecDeque<usize>>>) {
-        // Check connection
-        if tx.send(0).is_err() {
-            println!("Thread: receiver disconnected!");
-            // thread::sleep(Duration::from_millis( 2000 ));
-            return;
-        }
-
-        let Ok(mut q) = queue.lock() else { return; };
-        let Some(num) = q.pop_front() else {
-            println!("Thread: queue is empty!");
-            return;
-        };
-        drop(q); // unblock mutex
-
-        if num % 10 == 0 {
-            thread::sleep(Duration::from_millis( 2000 ));
-            tx.send(num + 1);
-            tx.send(num + 3);
-            tx.send(num + 5);
-        } else {
-            thread::sleep(Duration::from_millis( 100 ));
-            tx.send(num + 2);
-            tx.send(num + 4);
-        }
-    }
-    
-    #[test]
-    fn test_pool() {
-        let mut pool = ThreadPool::new(4);
-        let queue = Arc::new(Mutex::new(
-            VecDeque::from( [ 1usize ] )
-        ));
-        let (tx, rx) = mpsc::channel::<usize>();
-
-        {
-            let queue = Arc::clone(&queue);
-            let tx = tx.clone();
-            pool.execute(move || {
-                idfk(tx, queue);
-            }).unwrap();
-        }
-
-        for i in rx.iter() {
-            if i == 0 { continue; } // connection checks
-
-            println!("Received {i}!");
-            {
-                queue.lock().unwrap()
-                    .push_back(i);
-            }
-
-            if i >= 100 {
-                println!("Receiver hanging up...");
-                drop(rx);
+        // For every char nch in needle
+        let mut cost: usize = 0;
+        let mut h_chars = haystack.chars();
+        for nch in needle.chars() {
+            // Look for nch in haystack
+            let Some(i) = h_chars.position(|ch| ch == nch) else {
                 break;
-            } else if i >= 20 && i < 50 {
-                println!("Aight");
-                let mut q = queue.lock().unwrap();
-                q.clear();
-                q.push_back(60);
-            } else {
-                let queue = Arc::clone(&queue);
-                let tx = tx.clone();
-                pool.execute(move || {
-                    idfk(tx, queue);
-                }).unwrap();
-            }
+            };
+            cost += i;
         }
+
+        println!("Cost: {cost}");
+    }
+
+    #[test]
+    fn test_strmatch_multiple() {
+        let haystacks = [
+            "It is always bup time",
+            "Never gonna give you up",
+            "Never gonna let you down",
+            "Continuously crawling from the mouth of the abyss",
+        ];
+        let needle = "le";
+        let search_fn = util::str_match_cost;
+
+        println!("Searching needle = {needle}");
+
+        let res1: Vec<(usize, usize)> = haystacks.iter().enumerate()
+            .filter_map(|(i, str)| search_fn(needle, str) .map(|cost| (i, cost)) )
+            .collect();
+
+        for (i, cost) in res1.iter() {
+            println!("cost = {cost} \t str = {}", haystacks[*i]);
+        }
+
+        /* for haystack in haystacks.iter() {
+            let cost = search_fn(needle, haystack);
+            dbg!(cost);
+        } */
+
     }
 
 }
-*/

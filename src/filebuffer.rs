@@ -10,9 +10,8 @@ use console_engine::{pixel, Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModi
 
 use crate::config::{ColorTheme, Configs};
 use crate::themevar;
-use crate::util::{self, TruncateBack, Invert};
+use crate::util::{self, TruncateBack, Invert, file_name, str_match_cost};
 use crate::{AppError, CONTROL_SHIFT};
-use crate::search_str;
 
 
 /// Syntax:
@@ -161,13 +160,14 @@ impl FileBuffer {
             return None;
         }
 
-        search_str!(self.entries.iter()
-            .map(|pathbuf|
-                 pathbuf.file_name()
-                    .and_then(|osstr| osstr.to_str())
-                    .unwrap_or_default()
-            )
-        , &pattern.to_lowercase())
+        let bup: Option<(usize, usize)> = self.entries.iter().enumerate()
+            // (index, pathbuf) -> (index, cost)
+            .filter_map(|(i, pathbuf)| {
+                let file_name = file_name(&pathbuf);
+                str_match_cost(pattern, &file_name) .map(|cost| (i, cost))
+            })
+            .min_by_key(|(_i, cost)| *cost);
+        bup.map(|(i, _cost)| i)
     }
 
     pub fn get_selected_path(&self) -> Option<&PathBuf> {
@@ -319,7 +319,7 @@ impl FileBuffer {
                 }
 
                 PromptMode::Delete(pathbuf) => {
-                    if text.to_lowercase() != "y" {
+                    if !text.eq_ignore_ascii_case("y") {
                         self.status_line.normal();
                         self.display_path();
                         return;

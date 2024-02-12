@@ -354,7 +354,7 @@ pub mod query {
     use std::thread;
     use std::time::Duration;
 
-    use super::IndexedString;
+    use super::{IndexedString, str_match_cost};
     use crate::util::{
         get_folders_at,
         get_files_and_folders_at,
@@ -411,10 +411,16 @@ pub mod query {
                 return;
             }
 
-            let q: String = query.to_lowercase();
-            self.results = self.items.iter().enumerate()
-                .map(IndexedString::from)
-                .filter(|s| s.to_string().to_lowercase().contains(&q))
+            let mut matches: Vec<(usize, usize)> = self.items.iter().enumerate()
+                .filter_map(|(i, p)| {
+                    str_match_cost(query, &path2string(p))
+                        .map(|cost| (i, cost))
+                })
+                .collect();
+            matches.sort_by_key(|(_i, cost)| *cost);
+
+            self.results = matches.iter()
+                .map(|(i, _cost)| IndexedString(*i, path2string(&self.items[*i]) ))
                 .collect();
         }
 
@@ -462,10 +468,16 @@ pub mod query {
                 return;
             }
 
-            let q: String = query.to_lowercase();
-            self.results = self.items.iter().enumerate()
-                .map( |(i, s)| IndexedString(i, s.to_string()) )
-                .filter(|s| s.to_string().to_lowercase() .contains(&q))
+            let mut matches: Vec<(usize, usize)> = self.items.iter().enumerate()
+                .filter_map(|(i, s)| {
+                    str_match_cost(query, &s.to_string())
+                        .map(|cost| (i, cost))
+                })
+                .collect();
+            matches.sort_by_key(|(_i, cost)| *cost);
+
+            self.results = matches.iter()
+                .map(|(i, _cost)| IndexedString(*i, self.items[*i].to_string()) )
                 .collect();
         }
 
@@ -951,8 +963,9 @@ pub mod query {
                 }
             }
 
+            results.truncate(max);
             results.iter()
-                .take(max)
+                .filter_map(|pb| pb.strip_prefix(&self.root).ok())
                 .enumerate()
                 .map(IndexedString::from)
                 .collect()
