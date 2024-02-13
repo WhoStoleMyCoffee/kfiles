@@ -1,3 +1,4 @@
+use std::fs;
 use std::{env, error::Error};
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -23,8 +24,9 @@ use crate::help::print_help_tip;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPNAME: &str = env!("CARGO_PKG_NAME");
 const CONFIG_PATH: &str = "configs";
-const RECENT_DIRS_FILE_NAME: &str = "recent.txt";
-const FAVORITES_LIST_FILE_NAME: &str = "favorites.txt";
+const RECENT_DIRS_PATH: &str = "recent.txt";
+const FAVORITES_LIST_PATH: &str = "favorites.txt";
+const SCRIPTS_PATH: &str = "scripts/";
 
 /// Search panel offset from the edges of the screen
 const SEARCH_PANEL_MARGIN: (u32, u32) = (4, 2);
@@ -120,6 +122,7 @@ pub enum Action {
     ToggleFavorite,
     OpenConfigFile,
     OpenConfigFolder,
+    OpenScriptsFolder,
     ClearRecent,
     AddToRecent,
 }
@@ -132,6 +135,7 @@ impl Action {
             Self::ToggleFavorite,
             Self::OpenConfigFile,
             Self::OpenConfigFolder,
+            Self::OpenScriptsFolder,
             Self::AddToRecent,
             Self::ClearRecent,
         ]
@@ -147,6 +151,7 @@ impl ToString for Action {
             A::ToggleFavorite => "Toggle favorites",
             A::OpenConfigFile => "Open configuration file",
             A::OpenConfigFolder => "Open configuration folder",
+            A::OpenScriptsFolder => "Open scripts folder",
             A::ClearRecent => "Clear recent list",
             A::AddToRecent => "Add current directory to recent list",
         }.to_string()
@@ -291,28 +296,30 @@ fn handle_action(action: Action, app: &mut App) -> Result<(), AppError> {
         },
 
         Action::OpenConfigFolder => {
-            if let Err(err) = help::reveal_config_folder() {
-                cmdline!(app, {
-                    match err {
-                        AppError::ConfigError(err) => {
-                            println!("Failed to get configuration file path:\n {}", err);
-                            print_help_tip();
-                        },
-                        err @ AppError::OpenError { .. } => {
-                            println!("Failed to reveal configuration folder:\n {}", err);
-                        },
-                        err => println!("Error:\n {}", err),
-                    }
-                    pause!();
-                });
+            let path = confy::get_configuration_file_path(APPNAME, Some(CONFIG_PATH))
+                .expect("Failed to get configs folder"); // Shouldn't fail
+            app.file_buffer.set_path(&path);
+        },
+
+        Action::OpenScriptsFolder => {
+            let path = get_scripts_path() .unwrap();
+            if !path.exists() {
+                if let Err(err) = fs::create_dir(&path) {
+                    app.status_line_mut()
+                        .error(err.into(), Some("Error creating scripts folder:\n "));
+                    app.state = AppState::Running;
+                    return Ok(());
+                }
             }
+
+            app.file_buffer.set_path(&path);
         },
 
         Action::ToggleFavorite => {
             match app.toggle_current_as_favorite() {
                 Err(err) => {
                     app.status_line_mut()
-                        .error(err, Some("Error saving configs: \n"));
+                        .error(err, Some("Error saving configs:\n "));
                 },
                 Ok(true) => {
                     app.status_line_mut().normal()
@@ -386,18 +393,26 @@ fn parse_cli(mut args: env::Args) -> Result<RunOption, AppError> {
 
 
 fn get_recent_dirs_path() -> Result<PathBuf, AppError> {
-    confy::get_configuration_file_path(APPNAME, None)
-        .map_err(AppError::from)?
+    confy::get_configuration_file_path(APPNAME, None)?
         .parent()
-        .map(|path| path.with_file_name(RECENT_DIRS_FILE_NAME))
+        .map(|path| path.with_file_name(RECENT_DIRS_PATH))
         .ok_or("Failed to load recent directories".into())
 }
 
 fn get_favorites_list_path() -> Result<PathBuf, AppError> {
-    confy::get_configuration_file_path(APPNAME, None)
-        .map_err(AppError::from)
-        .map(|path| path.with_file_name(FAVORITES_LIST_FILE_NAME))
+    Ok(confy::get_configuration_file_path(APPNAME, None)?
+        .with_file_name(FAVORITES_LIST_PATH)
+    )
 }
+
+fn get_scripts_path() -> Result<PathBuf, AppError> {
+    Ok(env::current_exe()?
+        .parent() .ok_or("Failed to get executable's folder")?
+        .join(SCRIPTS_PATH)
+    )
+}
+
+
 
 /// Pauses automatically (via `pause!()`)
 fn handle_app_err(err: AppError) {
@@ -660,9 +675,9 @@ mod help {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, process::Command};
+    use std::{fs::File, path::PathBuf};
 
-    use crate::{util, APPNAME};
+    use crate::{config::ScriptsList, get_scripts_path, util::{self, get_all_files_at}, APPNAME};
 
     #[test]
     fn test_path() {
@@ -724,29 +739,16 @@ mod tests {
     }
 
     #[test]
-    fn test_strmatch_paths() {
-        let haystacks = [
-            "C:/Users/ddxte/AppData/Local/kdenlive/bin",
-            "C:/Users/ddxte/Documents/Projects/Craven",
-        ];
-        let needle = "craven";
-        let search_fn = util::str_match_cost;
+    fn test_scripts() {
+        let path = get_scripts_path() .unwrap();
+        dbg!(&path);
 
-        println!("Searching needle = {needle}");
+        let scripts = ScriptsList::load(&path) .unwrap();
+        println!("{:#?}", scripts);
 
-        let res1: Vec<(usize, usize)> = haystacks.iter().enumerate()
-            .filter_map(|(i, str)| search_fn(needle, str) .map(|cost| (i, cost)) )
-            .collect();
-
-        for (i, cost) in res1.iter() {
-            println!("cost = {cost} \t str = {}", haystacks[*i]);
-        }
-
-        /* for haystack in haystacks.iter() {
-            let cost = search_fn(needle, haystack);
-            dbg!(cost);
-        } */
-
+        scripts.run(0, None) .unwrap();
+        scripts.run(PathBuf::from("C:/Users/ddxte/Documents/Projects/tests/battest/main.bat"), None) .unwrap();
+        scripts.run("foo\\bar.bat", None) .unwrap();
     }
 
 }

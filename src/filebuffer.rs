@@ -117,6 +117,11 @@ impl FileBuffer {
     /// Sets the path
     /// If `path` is a file, set the path to the file's directory and automatically select it
     pub fn set_path(&mut self, path: &Path) {
+        if !path.exists() {
+            self.status_line.error( format!("\"{}\" does not exist", path.display()).into(), None);
+            return;
+        }
+
         if path.is_dir() {
             self.path = path.to_path_buf();
             try_err!(self.load_entries() => self; else {

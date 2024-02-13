@@ -1,13 +1,13 @@
-use std::fs::File;
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{ self, Write };
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 
-use crate::util::{self, read_lines};
-use crate::CONFIGS;
+use crate::util::{self, get_all_files_at_recursive, read_lines};
+use crate::{AppError, CONFIGS};
 
 #[macro_export]
 macro_rules! themevar {
@@ -61,7 +61,7 @@ impl Default for Configs {
 pub struct FavoritesList(Vec<PathBuf>);
 
 impl FavoritesList {
-    pub fn load(file: &Path) -> Result<Self, std::io::Error> {
+    pub fn load(file: &Path) -> io::Result<Self> {
         let mut list: FavoritesList = FavoritesList(Vec::new());
 
         *list = read_lines(file)?
@@ -196,6 +196,110 @@ impl AsRef<Vec<PathBuf>> for RecentList {
         &self.list
     }
 }
+
+
+
+pub trait ScriptKey {
+    fn get_run_path(&self, list: &[PathBuf]) -> Option<PathBuf>;
+}
+
+impl ScriptKey for usize {
+    fn get_run_path(&self, list: &[PathBuf]) -> Option<PathBuf> {
+        list.get(*self).cloned()
+    }
+}
+
+impl ScriptKey for PathBuf {
+    fn get_run_path(&self, _: &[PathBuf]) -> Option<PathBuf> {
+        Some(self.clone())
+    }
+}
+
+impl ScriptKey for &str {
+    fn get_run_path(&self, list: &[PathBuf]) -> Option<PathBuf> {
+        list.iter()
+            .filter(|pb| pb.ends_with(self))
+            .nth(0)
+            .cloned()
+    }
+}
+
+
+#[derive(Debug, Default)]
+pub struct ScriptsList(Vec<PathBuf>);
+
+impl ScriptsList {
+    pub fn load(dir: &Path) -> io::Result<Self> {
+        let files: Vec<PathBuf> = match get_all_files_at_recursive(dir) {
+            Ok(files) => files,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                    if let Err(err) = fs::create_dir(dir) {
+                        return Err(err);
+                    } else {
+                        Vec::new()
+                    }
+            },
+            Err(err) => {
+                return Err(err);
+            },
+        };
+        Ok(ScriptsList( files ))
+    }
+
+    pub fn run<S>(&self, script: S, at_dir: Option<&Path>) -> Result<(), AppError>
+    where S: ScriptKey {
+        let run_path: PathBuf = script.get_run_path(&self.0)
+            .ok_or(io::Error::new(io::ErrorKind::NotFound, "Script not found") )?;
+
+        use std::process::{ Command, Stdio };
+
+        let mut command: Command;
+        if cfg!(target_os = "windows") {
+            command = Command::new("cmd");
+            command.args([ "/C", "start", &run_path.display().to_string() ]);
+        } else {
+            todo!("KFiles start_terminal not yet implemented for OS' other than windows")
+        };
+
+        let dir: &Path = match at_dir {
+            Some(dir) => dir,
+            None => run_path.parent()
+                .ok_or(io::Error::other("Failed to get script parent directory") )?
+        };
+
+        command.current_dir(dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        Ok(())
+    }
+}
+
+impl AsRef<Vec<PathBuf>> for ScriptsList {
+    fn as_ref(&self) -> &Vec<PathBuf> {
+        &self.0
+    }
+}
+
+impl Deref for ScriptsList {
+    type Target = Vec<PathBuf>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ScriptsList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+
+
+
+
 
 pub type Col8 = (u8, u8, u8);
 

@@ -1,22 +1,30 @@
+use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Child;
 
 
-pub fn start_terminal() -> std::io::Result<Child> {
+pub fn start_terminal(at_dir: Option<&Path>) -> std::io::Result<Child> {
     use std::process::{ Command, Stdio };
 
+    let mut command: Command;
     if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .args([ "/C", "start" ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+        command = Command::new("cmd");
+        command.args([ "/C", "start" ]);
+
     } else {
         todo!("KFiles start_terminal not yet implemented for OS' other than windows")
     }
+
+    if let Some(dir) = at_dir {
+        command.current_dir(dir);
+    }
+
+    command.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
 }
 
 
@@ -37,7 +45,7 @@ pub fn file_name(path: &Path) -> String {
 }
 
 // Get files & folders and have folders come before files (ofc, alphabetically sorted)
-pub fn get_at_sorted<P>(path: P) -> Result<Vec<PathBuf>, std::io::Error>
+pub fn get_at_sorted<P>(path: P) -> io::Result<Vec<PathBuf>>
 where
     P: AsRef<Path>,
 {
@@ -51,7 +59,7 @@ where
     Ok(folders)
 }
 
-pub fn get_files_at<P>(path: P, limit: usize) -> Result<Vec<PathBuf>, std::io::Error>
+pub fn get_files_at<P>(path: P, limit: usize) -> io::Result<Vec<PathBuf>>
 where
     P: AsRef<Path>,
 {
@@ -63,7 +71,7 @@ where
         .collect())
 }
 
-pub fn get_folders_at<P>(path: P, limit: usize) -> Result<Vec<PathBuf>, std::io::Error>
+pub fn get_folders_at<P>(path: P, limit: usize) -> io::Result<Vec<PathBuf>>
 where
     P: AsRef<Path>,
 {
@@ -76,7 +84,7 @@ where
 }
 
 // get_folders_at() but without limits
-pub fn get_all_folders_at<P>(path: P) -> Result<Vec<PathBuf>, std::io::Error>
+pub fn get_all_folders_at<P>(path: P) -> io::Result<Vec<PathBuf>>
 where
     P: AsRef<Path>,
 {
@@ -87,8 +95,38 @@ where
         .collect())
 }
 
-// Bro just use io::Result
-pub fn get_all_at<P>(path: P) -> Result<Vec<PathBuf>, std::io::Error>
+// get_files_at() but without limits
+pub fn get_all_files_at<P>(path: P) -> io::Result<Vec<PathBuf>>
+where
+    P: AsRef<Path>,
+{
+    Ok(fs::read_dir(path)?
+        .flatten()
+        .map(|de| de.path())
+        .filter(|pathbuf| pathbuf.is_file())
+        .collect())
+}
+
+pub fn get_all_files_at_recursive<P>(path: P) -> io::Result<Vec<PathBuf>>
+where
+    P: AsRef<Path>,
+{
+    let (mut results, queue) = get_files_and_folders_at(path)?;
+    let mut queue = VecDeque::from(queue);
+
+    while let Some(search_path) = queue.pop_front() {
+        let Ok((mut files, folders)) = get_files_and_folders_at(search_path) else {
+            continue;
+        };
+
+        results.append(&mut files);
+        queue.append(&mut folders.into());
+    }
+
+    Ok(results)
+}
+
+pub fn get_all_at<P>(path: P) -> io::Result<Vec<PathBuf>>
 where
     P: AsRef<Path>,
 {
@@ -101,7 +139,7 @@ where
 
 // Get files & folders, separated into tuples
 // I don't know how it took me so long to discover Iterator.partition(). I almost implemented macro  segregate!(vec, condition)  no joke
-pub fn get_files_and_folders_at<P>(path: P) -> Result<(Vec<PathBuf>, Vec<PathBuf>), std::io::Error>
+pub fn get_files_and_folders_at<P>(path: P) -> io::Result<(Vec<PathBuf>, Vec<PathBuf>)>
 where
     P: AsRef<Path>,
 {

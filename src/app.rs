@@ -5,7 +5,7 @@ use console_engine::screen::Screen;
 use console_engine::{crossterm::event::KeyEvent, events::Event};
 use console_engine::{Color, ConsoleEngine, KeyCode, KeyEventKind, KeyModifiers};
 
-use crate::config::{ColorTheme, Configs, FavoritesList, RecentList, PerformanceConfigs};
+use crate::config::{ColorTheme, Configs, FavoritesList, PerformanceConfigs, RecentList, ScriptsList};
 use crate::filebuffer::{FileBuffer, StatusLine};
 use crate::search::{
     SelectPanel,
@@ -13,7 +13,7 @@ use crate::search::{
     query,
 };
 use crate::util::start_terminal;
-use crate::try_err;
+use crate::{get_scripts_path, try_err};
 use crate::{
     get_favorites_list_path, get_recent_dirs_path, themevar,
     SEARCH_PANEL_MARGIN,
@@ -45,6 +45,7 @@ macro_rules! select_panel {
 pub enum SelectPanelMode {
     Help,
     Recent,
+    Scripts,
     Favorites,
     SearchFiles,
     SearchFolders,
@@ -60,7 +61,7 @@ pub enum AppState {
 
 pub struct App {
     pub engine: Option<ConsoleEngine>,
-    file_buffer: FileBuffer,
+    pub file_buffer: FileBuffer,
     select_panel: Option<(SelectPanelMode, SelectPanel)>,
     recent_dirs: RecentList,
     favorites: FavoritesList,
@@ -238,7 +239,7 @@ impl App {
                     return;
                 }
 
-                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
+                let (sw, sh) = screen_size!(self.engine.as_ref() .expect("Failed to get engine"));
                 let perf: &PerformanceConfigs = Configs::performance();
                 let app = self as *mut App;
                 let root_path = self.file_buffer.path .clone();
@@ -274,7 +275,7 @@ impl App {
                     return;
                 }
 
-                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
+                let (sw, sh) = screen_size!(self.engine.as_ref() .expect("Failed to get engine"));
                 let cfg: &Configs = Configs::global();
                 let app = self as *mut App;
                 let root_path = self.file_buffer.path.clone();
@@ -311,7 +312,7 @@ impl App {
                     return;
                 }
 
-                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
+                let (sw, sh) = screen_size!(self.engine.as_ref() .expect("Failed to get engine"));
                 let app = self as *mut App;
                 let panel: SelectPanel = select_panel!(sw, sh,
                     query::SearchPathList::new(&self.recent_dirs)
@@ -342,7 +343,7 @@ impl App {
                     return;
                 }
 
-                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
+                let (sw, sh) = screen_size!(self.engine.as_ref() .expect("Failed to get engine"));
                 let app = self as *mut App;
                 let panel: SelectPanel = select_panel!(sw, sh,
                      query::SearchPathList::new(&self.favorites)
@@ -372,7 +373,7 @@ impl App {
                     return;
                 }
 
-                let (sw, sh) = screen_size!(self.engine.as_ref().unwrap());
+                let (sw, sh) = screen_size!(self.engine.as_ref() .expect("Failed to get engine"));
                 let app = self as *mut App;
                 let panel: SelectPanel = select_panel!(sw, sh,
                     query::SearchList::new( Action::display_list() )
@@ -412,8 +413,65 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                try_err!( start_terminal().map_err(AppError::from) => self.file_buffer );
+                let dir: &Path = &self.file_buffer.path;
+                try_err!( start_terminal(Some(dir)).map_err(AppError::from) => self.file_buffer );
             },
+
+            // Open scripts list with F2
+            KeyEvent {
+                code: KeyCode::F(2),
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                // If already open, close
+                if let Some((SelectPanelMode::Scripts, _)) = &self.select_panel {
+                    self.select_panel = None;
+                    self.state = AppState::Running;
+                    return;
+                }
+
+                let (sw, sh) = screen_size!(self.engine.as_ref() .expect("Failed to get engine"));
+                let app = self as *mut App;
+                let scripts_path: PathBuf = match get_scripts_path() {
+                    Ok(p) => p,
+                    Err(err) => {
+                        self.status_line_mut().error(err, Some("Failed to get scripts path:\n "));
+                        return;
+                    },
+                };
+                let scriptlist: ScriptsList = match ScriptsList::load( &scripts_path ) {
+                    Ok(sl) => sl,
+                    Err(err) => {
+                        self.status_line_mut().error(err.into(), Some("Failed to get scripts list:\n "));
+                        return;
+                    },
+                };
+                let list: Vec<PathBuf> = scriptlist.iter()
+                    .map(|pb| {
+                        if let Ok(p) = pb.strip_prefix(&scripts_path) { // Try to strip root prefix first
+                            p.to_path_buf()
+                        } else if let Some(file_name) = pb.file_name() { // Then try to get file name
+                            PathBuf::from(file_name)
+                        } else { // Fuck it, display path as is
+                            pb.clone()
+                        }
+                    })
+                    .collect();
+
+                let panel: SelectPanel = select_panel!(sw, sh,
+                    query::SearchPathList::new(&list)
+                    )
+                    .with_title("Scripts")
+                    .with_color(themevar!(special_color))
+                    .on_selected(move |is| {
+                        let app = unsafe { &mut *app };
+                        if let Err(err) = scriptlist.run( is.index(), Some(app.get_path()) ) {
+                            app.status_line_mut().error(err, Some(&format!("Failed to run script:\n ")));
+                        }
+                    });
+                self.select_panel = Some((SelectPanelMode::Scripts, panel));
+            }
 
             key_event => {
                 // Try to update search panel first
