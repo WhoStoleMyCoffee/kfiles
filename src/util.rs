@@ -1,6 +1,23 @@
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::process::Child;
+
+
+pub fn start_terminal() -> std::io::Result<Child> {
+    use std::process::{ Command, Stdio };
+
+    if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .args([ "/C", "start" ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    } else {
+        todo!("KFiles start_terminal not yet implemented for OS' other than windows")
+    }
+}
 
 
 
@@ -116,13 +133,11 @@ pub fn str_match_cost(needle: &str, haystack: &str) -> Option<usize> {
         };
 
         // if is_first_char { is_first_char = false; } else { cost += i; }
-        cost += i * is_first_char as usize;
+        cost += i * (!is_first_char as usize);
         is_first_char = false;
     }
     Some(cost)
 }
-
-
 
 
 

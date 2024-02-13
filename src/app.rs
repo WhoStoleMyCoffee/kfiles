@@ -12,6 +12,7 @@ use crate::search::{
     SelectPanelState,
     query,
 };
+use crate::util::start_terminal;
 use crate::try_err;
 use crate::{
     get_favorites_list_path, get_recent_dirs_path, themevar,
@@ -402,6 +403,16 @@ impl App {
                     self.file_buffer.display_path();
                     self.file_buffer.update_scroll();
                 });
+            },
+
+            // Open terminal with Ctrl-t
+            KeyEvent {
+                code: KeyCode::Char('t'),
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                try_err!( start_terminal().map_err(AppError::from) => self.file_buffer );
             },
 
             key_event => {

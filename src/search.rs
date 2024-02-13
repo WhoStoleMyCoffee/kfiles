@@ -412,9 +412,10 @@ pub mod query {
             }
 
             let mut matches: Vec<(usize, usize)> = self.items.iter().enumerate()
-                .filter_map(|(i, p)| {
-                    str_match_cost(query, &path2string(p))
-                        .map(|cost| (i, cost))
+                .map(IndexedString::from)
+                .filter_map(|is| {
+                    str_match_cost(query, &is.to_string())
+                        .map(|cost| (is.index(), cost))
                 })
                 .collect();
             matches.sort_by_key(|(_i, cost)| *cost);

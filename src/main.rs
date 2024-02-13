@@ -591,6 +591,7 @@ mod help {
             "Ctrl-Shift-p", "Search folders";
             "Ctrl-e", "Reveal current directory in default file explorer";
             "Ctrl-Shift-e", "Reveal current directory in default file explorer and exit KFiles";
+            "Ctrl-t", "Start a new instance of the terminal";
             "Ctrl-n", "Create file";
             "Ctrl-Shift-n", "Create folder";
             "Ctrl-d", "Delete file / folder";
@@ -723,14 +724,29 @@ mod tests {
     }
 
     #[test]
-    fn test_cd() {
-        let path = &Path::new("C:/Users/ddxte/Documents/Projects/kfiles");
-        // std::env::set_current_dir(path) .unwrap();
+    fn test_strmatch_paths() {
+        let haystacks = [
+            "C:/Users/ddxte/AppData/Local/kdenlive/bin",
+            "C:/Users/ddxte/Documents/Projects/Craven",
+        ];
+        let needle = "craven";
+        let search_fn = util::str_match_cost;
 
-        Command::new("cd")
-            .arg("C:/Users/ddxte/Documents/Projects")
-            .spawn()
-            .unwrap();
+        println!("Searching needle = {needle}");
+
+        let res1: Vec<(usize, usize)> = haystacks.iter().enumerate()
+            .filter_map(|(i, str)| search_fn(needle, str) .map(|cost| (i, cost)) )
+            .collect();
+
+        for (i, cost) in res1.iter() {
+            println!("cost = {cost} \t str = {}", haystacks[*i]);
+        }
+
+        /* for haystack in haystacks.iter() {
+            let cost = search_fn(needle, haystack);
+            dbg!(cost);
+        } */
+
     }
 
 }
