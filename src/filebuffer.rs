@@ -163,7 +163,7 @@ impl FileBuffer {
         let bup: Option<(usize, usize)> = self.entries.iter().enumerate()
             // (index, pathbuf) -> (index, cost)
             .filter_map(|(i, pathbuf)| {
-                let file_name = file_name(&pathbuf);
+                let file_name = file_name(pathbuf);
                 str_match_cost(pattern, &file_name) .map(|cost| (i, cost))
             })
             .min_by_key(|(_i, cost)| *cost);

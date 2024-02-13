@@ -231,8 +231,8 @@ pub struct PerformanceConfigs {
     pub update_rate: u32,
     pub max_search_queue_len: Option<usize>,
     pub search_thread_count: u8,
-    pub thread_fast_ms: u16,
-    pub thread_slow_ms: u16,
+    pub thread_active_ms: u16,
+    pub thread_inactive_ms: u16,
 }
 
 impl Default for PerformanceConfigs {
@@ -241,8 +241,8 @@ impl Default for PerformanceConfigs {
             max_search_queue_len: Some(1024),
             search_thread_count: 4,
             update_rate: 12,
-            thread_fast_ms: 1,
-            thread_slow_ms: 500,
+            thread_active_ms: 1,
+            thread_inactive_ms: 500,
         }
     }
 }

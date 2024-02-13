@@ -255,6 +255,7 @@ fn main() {
 
         }
     }
+
 }
 
 
@@ -643,9 +644,9 @@ mod help {
             "max_search_queue_len", "(Optional; default = unlimited) How long to allow the queue to be when searching";
             "", "This setting may allow you to save memory, but if set *too* low, it may cause it to skip some directories when searching";
             "search_thread_count", "How many threads to use while searching";
-            "thread_fast_ms", "How fast active search threads should be working";
+            "thread_active_ms", "How fast active search threads should be working";
             "", "This option is to prevent \"hyperactive threads\" over-using CPU resources";
-            "thread_slow_ms", "How fast inactive search threads should be working";
+            "thread_inactive_ms", "How fast inactive search threads should be working";
             "", "This option is to prevent \"hyperactive threads\" over-using CPU resources";
         );
 
@@ -658,6 +659,8 @@ mod help {
 
 #[cfg(test)]
 mod tests {
+    use std::{path::Path, process::Command};
+
     use crate::{util, APPNAME};
 
     #[test]
@@ -717,6 +720,17 @@ mod tests {
             dbg!(cost);
         } */
 
+    }
+
+    #[test]
+    fn test_cd() {
+        let path = &Path::new("C:/Users/ddxte/Documents/Projects/kfiles");
+        // std::env::set_current_dir(path) .unwrap();
+
+        Command::new("cd")
+            .arg("C:/Users/ddxte/Documents/Projects")
+            .spawn()
+            .unwrap();
     }
 
 }

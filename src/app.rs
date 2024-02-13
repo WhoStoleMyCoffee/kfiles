@@ -376,7 +376,7 @@ impl App {
                 let panel: SelectPanel = select_panel!(sw, sh,
                     query::SearchList::new( Action::display_list() )
                     )
-                    .with_title("Help")
+                    .with_title("Command Palette")
                     .with_color(themevar!(special_color))
                     .on_selected(move |is| {
                         let app = unsafe { &mut *app };
@@ -397,6 +397,7 @@ impl App {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
+                // Reload entries
                 try_err!(self.file_buffer.load_entries() => self.file_buffer; else {
                     self.file_buffer.display_path();
                     self.file_buffer.update_scroll();

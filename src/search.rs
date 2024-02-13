@@ -494,6 +494,7 @@ pub mod query {
 
 
 
+    #[derive(PartialEq, Eq)]
     enum QueryResults {
         ConnectionCheck,
         Results {
@@ -609,7 +610,7 @@ pub mod query {
             // Spawn threads
             let (fast_loop_ms, slow_loop_ms) = {
                 let perf = Configs::performance();
-                (perf.thread_fast_ms, perf.thread_slow_ms)
+                (perf.thread_active_ms, perf.thread_inactive_ms)
             };
 
             for _ in 0..self.thread_count {
@@ -859,7 +860,7 @@ pub mod query {
             // Spawn threads
             let (fast_loop_ms, slow_loop_ms) = {
                 let perf = Configs::performance();
-                (perf.thread_fast_ms, perf.thread_slow_ms)
+                (perf.thread_active_ms, perf.thread_inactive_ms)
             };
 
             for _ in  0..self.thread_count {

@@ -3,21 +3,6 @@ use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 
-/// Search for a string in an `Iterator::<Item = &str>`
-#[macro_export]
-macro_rules! search_str {
-    ($iter:expr, $query:expr) => {
-        $iter.enumerate()
-            .filter_map(|(i, s)| {
-                s.to_lowercase()
-                    .match_indices($query).next()
-                    .map(|m| (i, m.0))
-            })
-            .min_by(|(_ai, ascore), (_bi, bscore)| ascore.cmp(&bscore))
-            .map(|(i, _score)| i)
-    };
-}
-
 
 // Idk if there's any builtin methods for this
 #[inline]
