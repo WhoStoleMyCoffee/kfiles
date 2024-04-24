@@ -8,3 +8,11 @@ edition = "2021"
 [dependencies]
 iced = { version = "0.12.1", features = ["image", "debug", "tokio"] }
 walkdir = "2.5.0"
+opener =  { version = "0.6.1", features = ["reveal"] }
+confy = "0.5.1"
+serde = { version = "1.0.195", features = ["derive"] }
+directories = "5.0.1"
+toml = "0.8.12"
+anyhow = "1.0.82"
+thiserror = "1.0.59"
+# clean-path = "0.2.1"

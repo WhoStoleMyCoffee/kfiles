@@ -1,22 +1,12 @@
-use iced::{
-    Application,
-    Settings,
-};
-
+use iced::{Application, Settings};
 
 pub mod app;
+pub mod tag;
 
 use app::TagExplorer;
 
-
-
 const UPDATE_RATE_MS: u64 = 250;
-const FOCUS_QUERY_KEYS: [&str; 3] = [
-    "s",
-    "/",
-    ";",
-];
-
+const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
 
 fn main() -> iced::Result {
     TagExplorer::run(Settings {
@@ -27,6 +17,3 @@ fn main() -> iced::Result {
         ..Default::default()
     })
 }
-
-
-
