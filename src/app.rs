@@ -1,15 +1,23 @@
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
+use std::{io, thread};
 
 use iced;
-use iced::widget::{column, scrollable, text, text_input};
+use iced::widget::{button, column, row, scrollable, text, text_input};
 use iced::{time, Application, Command, Theme};
 
-use crate::{FOCUS_QUERY_KEYS, UPDATE_RATE_MS};
+use crate::tag::{self, Tag};
+
+const UPDATE_RATE_MS: u64 = 100;
+const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
+const MAX_RESULT_COUNT: usize = 256;
+const MAX_RESULTS_PER_TICK: usize = 10;
 
 pub struct TagExplorer {
     query: String,
     items: Vec<PathBuf>,
+    receiver: Option<Receiver<PathBuf>>,
 }
 
 impl Application for TagExplorer {
@@ -22,6 +30,7 @@ impl Application for TagExplorer {
         let te: TagExplorer = TagExplorer {
             query: String::new(),
             items: Vec::new(),
+            receiver: None,
         };
 
         (te, Command::none())
@@ -33,13 +42,28 @@ impl Application for TagExplorer {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::Tick => {}
+            Message::Tick => {
+                let Some(rx) = &mut self.receiver else {
+                    return Command::none();
+                };
+
+                if self.items.len() >= MAX_RESULT_COUNT {
+                    return Command::none();
+                }
+
+                self.items.append(&mut rx.try_iter()
+                    .take(MAX_RESULTS_PER_TICK)
+                    .collect()
+                );
+            }
 
             Message::FocusQuery => {
                 return text_input::focus(text_input::Id::new("query_input"));
             }
 
             Message::QueryChanged(new_query) => {
+                self.items.clear();
+                self.query(&new_query);
                 self.query = new_query;
             }
         }
@@ -65,7 +89,18 @@ impl Application for TagExplorer {
             })
         ];
 
-        column![query_input, main,].into()
+        let all_tags = Tag::get_all_tag_ids().unwrap();
+        let tags_list = scrollable(column(
+            all_tags.into_iter()
+                .map(|id| {
+                    button(text( format!("#{id}") ))
+                        .on_press(Message::QueryChanged(id))
+                        .into()
+                }),
+        ))
+        .width(100);
+
+        row![tags_list, column![query_input, main]].into()
     }
 
     fn theme(&self) -> Self::Theme {
@@ -105,6 +140,34 @@ impl TagExplorer {
             }
             _ => None,
         }
+    }
+
+    /// TODO
+    pub fn query(&mut self, query: &str) {
+        let query_lower = query.to_lowercase();
+        let tag = match Tag::load(&query_lower) {
+            Ok(tag) => tag,
+            Err(tag::LoadError::IO(err)) if err.kind() == io::ErrorKind::NotFound => {
+                return;
+            }
+            Err(err) => {
+                panic!("failed to load tag: {}", err);
+            }
+        };
+
+        println!("Loading tag {}", &tag.id);
+
+        let (tx, rx) = mpsc::channel::<PathBuf>();
+        self.receiver = Some(rx);
+
+        thread::spawn(move || {
+            let it = tag.get_dirs();
+            for pb in it {
+                if tx.send(pb).is_err() {
+                    return;
+                }
+            }
+        });
     }
 }
 

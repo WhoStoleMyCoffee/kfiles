@@ -5,9 +5,6 @@ pub mod tag;
 
 use app::TagExplorer;
 
-const UPDATE_RATE_MS: u64 = 250;
-const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
-
 fn main() -> iced::Result {
     TagExplorer::run(Settings {
         window: iced::window::Settings {
