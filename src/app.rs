@@ -7,12 +7,14 @@ use iced;
 use iced::widget::{button, column, row, scrollable, text, text_input};
 use iced::{time, Application, Command, Theme};
 
-use crate::tag::{self, Tag};
+use crate::tag::{self, Tag, TagID};
 
 const UPDATE_RATE_MS: u64 = 100;
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
 const MAX_RESULT_COUNT: usize = 256;
 const MAX_RESULTS_PER_TICK: usize = 10;
+
+
 
 pub struct TagExplorer {
     query: String,
@@ -89,12 +91,13 @@ impl Application for TagExplorer {
             })
         ];
 
-        let all_tags = Tag::get_all_tag_ids().unwrap();
+        let all_tags = Tag::get_all_tag_ids().unwrap(); // TODO cache these
         let tags_list = scrollable(column(
             all_tags.into_iter()
                 .map(|id| {
-                    button(text( format!("#{id}") ))
-                        .on_press(Message::QueryChanged(id))
+                    let id_str = id.as_ref();
+                    button(text( format!("#{id_str}") ))
+                        .on_press(Message::QueryChanged( id_str.to_string() ))
                         .into()
                 }),
         ))
@@ -144,8 +147,8 @@ impl TagExplorer {
 
     /// TODO
     pub fn query(&mut self, query: &str) {
-        let query_lower = query.to_lowercase();
-        let tag = match Tag::load(&query_lower) {
+        let query_tag = TagID::parse(query);
+        let tag = match Tag::load(&query_tag) {
             Ok(tag) => tag,
             Err(tag::LoadError::IO(err)) if err.kind() == io::ErrorKind::NotFound => {
                 return;

@@ -1,9 +1,12 @@
+use std::fmt::Display;
 use std::fs::{create_dir_all, read_dir, remove_file, File};
 use std::io::{self, Read, Write};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use toml;
+use convert_case::{Case, Casing};
 
 use serde::{Deserialize, Serialize};
 use walkdir::{DirEntry, WalkDir};
@@ -36,24 +39,29 @@ pub enum SaveError {
     IO(#[from] io::Error),
 }
 
+
+
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Tag {
     #[serde(skip)]
-    pub id: String,
+    pub id: TagID,
 
     entries: Vec<PathBuf>,
 
     /// All tags that are tagged with this tag
     /// E.g. tag `"pictures"` could have `subtags = [ "trip", "cats" ]`
     /// Then, searching for tag `"pictures"` would reveal dirs from all 3 tags
-    subtags: Vec<String>,
+    subtags: Vec<TagID>,
 }
 
 impl Tag {
     /// Create a new tag with the id `id`
-    pub fn create(id: &str) -> Self {
+    pub fn create<ID>(id: ID) -> Self
+        where ID: Into<TagID>
+    {
         Tag {
-            id: id.to_string(),
+            id: id.into(),
             entries: Vec::new(),
             subtags: Vec::new(),
         }
@@ -84,46 +92,31 @@ impl Tag {
     }
 
     /// Returns the base dir where all tags are stored
-    // #[cfg(not(test))]
+    #[cfg(not(test))]
     #[inline]
     pub fn get_base_dir() -> PathBuf {
-        let base_dirs = directories::BaseDirs::new() .expect("could not get base dirs");
-
-        let mut p = base_dirs.config_dir().to_path_buf();
-        // dbg!(&p);
-        // dbg!( std::env!("CARGO_PKG_NAME") );
-
-        let app_name = std::env!("CARGO_PKG_NAME").to_string();
-        p.push(app_name + "/tags/");
-
-        p
+        const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
+        directories::BaseDirs::new() .expect("could not get base dirs")
+            .config_dir().to_path_buf()
+            .join(APP_NAME.to_string() + "/tags/")
     }
 
     /// Returns the base dir where all tags are stored (for tests only)
-    /* #[cfg(test)]
+    #[cfg(test)]
     #[inline]
-    pub fn base_dir() -> PathBuf {
+    pub fn get_base_dir() -> PathBuf {
         PathBuf::from("C:/Users/ddxte/Documents/Projects/tag-explorer/test_tags/")
     }
-    */
-
-    pub fn get_path_for_tag(with_name: &str) -> PathBuf {
-        Tag::get_base_dir().join(format!("{with_name}.toml"))
-    }
+   
 
     #[inline]
     pub fn get_save_path(&self) -> PathBuf {
-        Tag::get_path_for_tag(&self.id)
-    }
-
-    #[inline]
-    pub fn tag_exists(tag_id: &str) -> bool {
-        Tag::get_path_for_tag(tag_id).exists()
+        self.id.get_path()
     }
 
     #[inline]
     pub fn exists(&self) -> bool {
-        Tag::tag_exists(&self.id)
+        self.id.exists()
     }
 
     /// Get all existing tags as paths
@@ -136,14 +129,12 @@ impl Tag {
     }
 
     /// Get all existing tag ids
-    pub fn get_all_tag_ids() -> io::Result<Vec<String>> {
+    pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
         Ok(Tag::get_all_tags()?
             .iter()
-            .filter_map(|pb| {
-                pb.file_stem()
-                    .and_then(|osstr| osstr.to_str())
-                    .map(|str| str.to_string())
-            })
+            .filter_map(|pb|
+                TagID::try_from(pb.as_path()).ok()
+            )
             .collect())
     }
 
@@ -198,8 +189,7 @@ impl Tag {
         // Merge subtags' entries into this one
         let it = self.subtags.iter().filter_map(|id| Tag::load(id).ok());
         for subtag in it {
-            let subtag_entries = subtag.get_all_entries();
-            let mut st_entries_filtered: Vec<PathBuf> = subtag_entries
+            let mut st_entries_filtered: Vec<PathBuf> = subtag.get_all_entries()
                 .into_iter()
                 .filter(|sub_pb| !entries.iter().any(|p| sub_pb.starts_with(p)))
                 .collect();
@@ -221,8 +211,8 @@ impl Tag {
         Ok(false)
     }
 
-    pub fn load(name: &str) -> Result<Tag, LoadError> {
-        Tag::load_from_path(Tag::get_path_for_tag(name))
+    pub fn load(id: &TagID) -> Result<Tag, LoadError> {
+        Tag::load_from_path( id.get_path() )
     }
 
     pub fn save_to_path<P>(&self, path: P) -> Result<(), SaveError>
@@ -252,15 +242,14 @@ impl Tag {
         File::open(&path)?.read_to_string(&mut contents)?;
         let mut tag = toml::from_str::<Tag>(&contents)?;
 
-        tag.id = path
-            .as_ref()
+        let file_name = path.as_ref()
             .file_stem()
             .and_then(|osstr| osstr.to_str())
-            .ok_or_else(|| LoadError::InvalidName(path.as_ref().to_path_buf()))?
-            .to_string();
+            .ok_or_else(|| LoadError::InvalidName(path.as_ref().to_path_buf()))?;
+        tag.id = TagID( file_name.to_string() );
 
         tag.entries.retain(|pb| pb.exists());
-        tag.subtags.retain(|tag_id| Tag::tag_exists(tag_id));
+        tag.subtags.retain(|tag_id| tag_id.exists());
 
         Ok(tag)
     }
@@ -289,20 +278,19 @@ impl Tag {
     }
 
     #[inline]
-    pub fn get_subtags(&mut self) -> &Vec<String> {
+    pub fn get_subtags(&mut self) -> &Vec<TagID> {
         &self.subtags
     }
 
-    pub fn add_subtag(&mut self, tag_id: &str) -> bool {
-        let s = tag_id.to_string();
-        if self.subtags.contains(&s) {
+    pub fn add_subtag(&mut self, tag_id: &TagID) -> bool {
+        if self.subtags.contains(tag_id) {
             return false;
         }
-        self.subtags.push(s);
+        self.subtags.push(tag_id.clone());
         true
     }
 
-    pub fn remove_subtag(&mut self, tag_id: &str) -> bool {
+    pub fn remove_subtag(&mut self, tag_id: &TagID) -> bool {
         if let Some(idx) = self.subtags.iter().position(|st| st == tag_id) {
             self.subtags.remove(idx);
             return true;
@@ -310,6 +298,75 @@ impl Tag {
         false
     }
 }
+
+
+
+
+
+
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Clone)]
+pub struct TagID(String);
+
+impl TagID {
+    pub fn parse<T>(value: T) -> Self
+        where T: AsRef<str>
+    {
+        TagID( value.as_ref().to_case(Case::Kebab) )
+    }
+
+    fn get_path(&self) -> PathBuf {
+        Tag::get_base_dir().join(format!("{}.toml", self.0))
+    }
+
+    fn exists(&self) -> bool {
+        self.get_path().exists()
+    }
+}
+
+impl From<&str> for TagID {
+    fn from(value: &str) -> Self {
+        TagID::parse(value)
+    }
+}
+
+
+
+/// Invalid file name error
+pub struct InvalidFileName;
+
+impl TryFrom<&Path> for TagID {
+    type Error = InvalidFileName;
+
+    fn try_from(value: &Path) -> Result<Self, Self::Error> {
+        Ok(TagID(value.file_stem()
+            .and_then(|osstr| osstr.to_str())
+            .ok_or(InvalidFileName)?
+            .to_string()
+        ))
+    }
+}
+
+impl AsRef<String> for TagID {
+    fn as_ref(&self) -> &String {
+        &self.0
+    }
+}
+
+impl Deref for TagID {
+    type Target = String;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for TagID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TagID({})", self.0)
+    }
+}
+
+
+
 
 fn is_direntry_hidden(entry: &DirEntry) -> bool {
     entry
@@ -326,7 +383,8 @@ mod tests {
 
     #[test]
     fn serde() {
-        let mut tag = Tag::create("test");
+        let tag_id = TagID::from("test");
+        let mut tag = Tag::create( tag_id.clone() );
         tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
         tag.add_entry("C:/Users/ddxte/Documents/").unwrap();
 
@@ -334,14 +392,17 @@ mod tests {
         tag.save().unwrap();
 
         println!("Loading...");
-        let tag2 = Tag::load("test").unwrap();
+        // let tag2 = Tag::load( &"test".into() ).unwrap();
+        // let tag2 = Tag::load( &TagID::parse("test") ).unwrap();
+        let tag2 = Tag::load(&tag_id).unwrap();
 
         assert_eq!(tag.get_entries(), tag2.get_entries());
     }
 
     #[test]
     fn add_and_remove() {
-        let mut tag = Tag::create("test");
+        let tag_id = TagID::from("test");
+        let mut tag = Tag::create(tag_id);
         tag.add_entry("C:/Users/ddxte/Documents/").unwrap();
 
         assert!(tag.contains("C:/Users/ddxte/Documents/"));
@@ -358,16 +419,18 @@ mod tests {
 
     #[test]
     fn save_empty() {
-        let tag_id = "empty tag".to_string();
+        let tag_id = TagID::from("empty tag");
 
-        let mut tag = Tag::create(&tag_id);
+        println!("Saving normally...");
+        let mut tag = Tag::create(tag_id.clone());
         tag.add_entry("C:/Users/ddxte/Documents/").unwrap();
         tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
         tag.save().unwrap();
 
         assert!(Tag::get_all_tag_ids().unwrap().contains(&tag_id));
 
-        let tag = Tag::create(&tag_id);
+        println!("Saving empty...");
+        let tag = Tag::create(tag_id.clone());
         tag.save().unwrap();
 
         assert!(!Tag::get_all_tag_ids().unwrap().contains(&tag_id));
@@ -389,16 +452,14 @@ mod tests {
     #[test]
     fn subtags_basic() {
         let mut tag = Tag::create("test");
-        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/")
-            .unwrap();
+        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/") .unwrap();
         tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
 
         println!("Creating subtag");
-        let mut tag2 = Tag::create("bup").as_subtag_of(&mut tag);
-        tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/")
-            .unwrap();
-        tag2.add_entry("C:/Users/ddxte/Documents/Projects/")
-            .unwrap();
+        let mut tag2 = Tag::create("bup")
+            .as_subtag_of(&mut tag);
+        tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/") .unwrap();
+        tag2.add_entry("C:/Users/ddxte/Documents/Projects/") .unwrap();
 
         assert!(tag.get_subtags().contains(&tag2.id));
 
@@ -423,13 +484,12 @@ mod tests {
         use std::collections::HashSet;
 
         let mut tag = Tag::create("test");
-        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/")
-            .unwrap();
+        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/") .unwrap();
         tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
 
-        let mut tag2 = Tag::create("bup").as_subtag_of(&mut tag);
-        tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/")
-            .unwrap();
+        let mut tag2 = Tag::create("bup")
+            .as_subtag_of(&mut tag);
+        tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/") .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/godot/").unwrap();
 
         // TODO autosave on drop?
@@ -446,4 +506,13 @@ mod tests {
         let is_all_unique = tag_paths.into_iter().all(move |p| uniq.insert(p));
         assert!(is_all_unique);
     }
+
+    #[test]
+    fn tagid_casing() {
+        let id_string = "test tagYeah";
+        let id = TagID::parse(id_string);
+        assert_eq!("test-tag-yeah", id.as_ref());
+    }
 }
+
+
