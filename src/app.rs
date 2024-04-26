@@ -7,6 +7,7 @@ use iced;
 use iced::widget::{button, column, row, scrollable, text, text_input};
 use iced::{time, Application, Command, Theme};
 
+use crate::search::Query;
 use crate::tag::{self, Tag, TagID};
 
 const UPDATE_RATE_MS: u64 = 100;
@@ -17,7 +18,7 @@ const MAX_RESULTS_PER_TICK: usize = 10;
 
 
 pub struct TagExplorer {
-    query: String,
+    query: Query,
     items: Vec<PathBuf>,
     receiver: Option<Receiver<PathBuf>>,
 }
@@ -30,7 +31,7 @@ impl Application for TagExplorer {
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let te: TagExplorer = TagExplorer {
-            query: String::new(),
+            query: Query::empty(),
             items: Vec::new(),
             receiver: None,
         };
@@ -63,27 +64,49 @@ impl Application for TagExplorer {
                 return text_input::focus(text_input::Id::new("query_input"));
             }
 
-            Message::QueryChanged(new_query) => {
-                self.items.clear();
-                self.query(&new_query);
-                self.query = new_query;
+            Message::QueryTextChanged(new_query) => {
+                self.query.query = new_query;
+                self.update_query();
+            }
+
+            Message::AddQueryTag(tag_id) => {
+                if self.query.add_tag(tag_id) {
+                    self.update_query();
+                }
+            }
+
+            Message::RemoveQueryTag(tag_id) => {
+                if self.query.remove_tag(&tag_id) {
+                    self.update_query();
+                }
             }
         }
 
         Command::none()
     }
 
+    /// TODO REFACTOR view()
     fn view(&self) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
-        let query_input = text_input("Query...", &self.query)
-            .id(text_input::Id::new("query_input"))
-            .on_input(Message::QueryChanged);
+        let query_input = column![
+            row(self.query.tags.iter()
+                .map(|id| button(id.as_ref().as_str())
+                     .on_press(Message::RemoveQueryTag(id.clone()))
+                     .into()
+                 )
+           ),
+            text_input("Query...", &self.query.query)
+                .id(text_input::Id::new("query_input"))
+                .on_input(Message::QueryTextChanged)
+        ];
 
         let main = column![
             text("Results:"),
             scrollable(column(
-                self.items
-                    .iter()
-                    .map(|pb| text(pb.display().to_string()).size(14).into())
+                self.items.iter()
+                    .map(|pb| text(pb.display().to_string())
+                         .size(14)
+                         .into()
+                    )
             ))
             .direction(scrollable::Direction::Both {
                 horizontal: scrollable::Properties::default(),
@@ -91,19 +114,23 @@ impl Application for TagExplorer {
             })
         ];
 
+        // Tags list
         let all_tags = Tag::get_all_tag_ids().unwrap(); // TODO cache these
         let tags_list = scrollable(column(
             all_tags.into_iter()
                 .map(|id| {
                     let id_str = id.as_ref();
                     button(text( format!("#{id_str}") ))
-                        .on_press(Message::QueryChanged( id_str.to_string() ))
+                        .on_press( Message::AddQueryTag(id) )
                         .into()
                 }),
         ))
         .width(100);
 
-        row![tags_list, column![query_input, main]].into()
+        row![
+            tags_list,
+            column![query_input, main]
+        ].into()
     }
 
     fn theme(&self) -> Self::Theme {
@@ -146,8 +173,13 @@ impl TagExplorer {
     }
 
     /// TODO
-    pub fn query(&mut self, query: &str) {
-        let query_tag = TagID::parse(query);
+    pub fn update_query(&mut self) {
+        self.items.clear();
+
+        let Some(query_tag) = self.query.tags.first() else {
+            self.receiver = None;
+            return;
+        };
         let tag = match Tag::load(&query_tag) {
             Ok(tag) => tag,
             Err(tag::LoadError::IO(err)) if err.kind() == io::ErrorKind::NotFound => {
@@ -157,8 +189,6 @@ impl TagExplorer {
                 panic!("failed to load tag: {}", err);
             }
         };
-
-        println!("Loading tag {}", &tag.id);
 
         let (tx, rx) = mpsc::channel::<PathBuf>();
         self.receiver = Some(rx);
@@ -176,7 +206,9 @@ impl TagExplorer {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    QueryChanged(String),
+    QueryTextChanged(String),
+    AddQueryTag(TagID),
+    RemoveQueryTag(TagID),
     Tick,
     FocusQuery,
 }

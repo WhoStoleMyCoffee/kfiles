@@ -2,6 +2,7 @@ use iced::{Application, Settings};
 
 pub mod app;
 pub mod tag;
+pub mod search;
 
 use app::TagExplorer;
 

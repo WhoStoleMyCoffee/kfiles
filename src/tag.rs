@@ -308,6 +308,10 @@ impl Tag {
 pub struct TagID(String);
 
 impl TagID {
+    pub fn new(value: &str) -> Self {
+        TagID(value.to_string())
+    }
+
     pub fn parse<T>(value: T) -> Self
         where T: AsRef<str>
     {
@@ -329,6 +333,11 @@ impl From<&str> for TagID {
     }
 }
 
+impl From<&TagID> for PathBuf {
+    fn from(value: &TagID) -> Self {
+        value.get_path()
+    }
+}
 
 
 /// Invalid file name error
@@ -508,10 +517,15 @@ mod tests {
     }
 
     #[test]
-    fn tagid_casing() {
+    fn tagid() {
+        println!("Testing conversion");
         let id_string = "test tagYeah";
         let id = TagID::parse(id_string);
-        assert_eq!("test-tag-yeah", id.as_ref());
+        assert_eq!("test-tag-yeah", id.as_ref()); // Conversion
+
+        println!("Testing eq");
+        assert_eq!("test-tag-yeah", *id); // PartialEq
+        assert_eq!(id, id); // Eq
     }
 }
 
