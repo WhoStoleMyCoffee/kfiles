@@ -9,7 +9,7 @@ use app::TagExplorer;
 fn main() -> iced::Result {
     TagExplorer::run(Settings {
         window: iced::window::Settings {
-            size: iced::Size::new(600.0, 400.0),
+            size: iced::Size::new(800.0, 400.0),
             ..Default::default()
         },
         ..Default::default()

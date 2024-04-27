@@ -11,6 +11,8 @@ use convert_case::{Case, Casing};
 use serde::{Deserialize, Serialize};
 use walkdir::{DirEntry, WalkDir};
 
+use crate::search::Searcher;
+
 #[derive(Debug, Error)]
 pub enum AddEntryError {
     #[error("path '{}' does not exist", .0.display())]
@@ -42,7 +44,7 @@ pub enum SaveError {
 
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tag {
     #[serde(skip)]
     pub id: TagID,
@@ -256,25 +258,8 @@ impl Tag {
 
     /// Get all directories under this [`Tag`], including all subtags
     pub fn get_dirs(&self) -> Box<dyn Iterator<Item = PathBuf>> {
-        // Files and folders merged with subtags
-        let (files, folders) = self
-            .get_all_entries()
-            .iter()
-            .cloned()
-            .partition::<Vec<PathBuf>, _>(|pb| pb.is_file());
-
-        let mut it: Box<dyn Iterator<Item = PathBuf>> = Box::new(files.into_iter());
-
-        for pathbuf in folders {
-            let walker = WalkDir::new(pathbuf)
-                .into_iter()
-                .filter_entry(|de| !is_direntry_hidden(de))
-                .flatten()
-                .map(|e| e.into_path());
-            it = Box::new(it.chain(walker));
-        }
-
-        it
+        let searcher = Searcher::from(self);
+        searcher.search()
     }
 
     #[inline]
@@ -297,6 +282,29 @@ impl Tag {
         }
         false
     }
+
+    pub fn is_subtag_of(&self, other: &Tag) -> bool {
+        other.subtags.contains(&self.id)
+    }
+}
+
+
+impl PartialEq<TagID> for Tag {
+    fn eq(&self, other: &TagID) -> bool {
+        self.id == *other
+    }
+}
+
+impl PartialEq<Tag> for Tag {
+    fn eq(&self, other: &Tag) -> bool {
+        self.id == other.id
+    }
+}
+
+impl PartialEq<Tag> for TagID {
+    fn eq(&self, other: &Tag) -> bool {
+        other.id == *self
+    }
 }
 
 
@@ -318,12 +326,17 @@ impl TagID {
         TagID( value.as_ref().to_case(Case::Kebab) )
     }
 
-    fn get_path(&self) -> PathBuf {
+    pub fn get_path(&self) -> PathBuf {
         Tag::get_base_dir().join(format!("{}.toml", self.0))
     }
 
-    fn exists(&self) -> bool {
+    pub fn exists(&self) -> bool {
         self.get_path().exists()
+    }
+
+    #[inline]
+    pub fn load(&self) -> Result<Tag, LoadError> {
+        Tag::load(self)
     }
 }
 
@@ -501,7 +514,6 @@ mod tests {
         tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/") .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/godot/").unwrap();
 
-        // TODO autosave on drop?
         println!("Saving...");
         tag.save().unwrap();
         tag2.save().unwrap();
