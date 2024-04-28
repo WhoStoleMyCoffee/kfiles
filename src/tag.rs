@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::fs::{create_dir_all, read_dir, remove_file, File};
 use std::io::{self, Read, Write};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -9,7 +9,6 @@ use toml;
 use convert_case::{Case, Casing};
 
 use serde::{Deserialize, Serialize};
-use walkdir::{DirEntry, WalkDir};
 
 use crate::search::Searcher;
 
@@ -49,7 +48,7 @@ pub struct Tag {
     #[serde(skip)]
     pub id: TagID,
 
-    entries: Vec<PathBuf>,
+    entries: Entries,
 
     /// All tags that are tagged with this tag
     /// E.g. tag `"pictures"` could have `subtags = [ "trip", "cats" ]`
@@ -64,7 +63,7 @@ impl Tag {
     {
         Tag {
             id: id.into(),
-            entries: Vec::new(),
+            entries: Entries(Vec::new()),
             subtags: Vec::new(),
         }
     }
@@ -185,17 +184,14 @@ impl Tag {
     }
 
     /// Get all entries under this [`Tag`], including all subtags
-    pub fn get_all_entries(&self) -> Vec<PathBuf> {
+    /// TODO what if there's a cyclic dependency?
+    pub fn get_all_entries(&self) -> Entries {
         let mut entries = self.entries.clone();
 
         // Merge subtags' entries into this one
         let it = self.subtags.iter().filter_map(|id| Tag::load(id).ok());
         for subtag in it {
-            let mut st_entries_filtered: Vec<PathBuf> = subtag.get_all_entries()
-                .into_iter()
-                .filter(|sub_pb| !entries.iter().any(|p| sub_pb.starts_with(p)))
-                .collect();
-            entries.append(&mut st_entries_filtered);
+            entries.or( subtag.get_all_entries() );
         }
 
         entries
@@ -390,13 +386,89 @@ impl Display for TagID {
 
 
 
-fn is_direntry_hidden(entry: &DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with('.'))
-        .unwrap_or(false)
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Entries( Vec<PathBuf> );
+
+impl Entries {
+    pub fn or<E>(&mut self, other: E)
+        where E: IntoIterator<Item = PathBuf>
+    {
+        let mut c: Vec<PathBuf> = other.into_iter()
+            .filter(|bp| self.0.iter().all(|ap| !bp.starts_with(ap)) )
+            .collect();
+        self.0.retain(|ap| c.iter().all(|bp| !ap.starts_with(bp) || ap == bp) );
+        self.0.append(&mut c);
+    }
+
+    pub fn and<E>(&mut self, other: E)
+        where E: IntoIterator<Item = PathBuf>
+    {
+        let mut c: Vec<PathBuf> = other.into_iter()
+            .filter(|bp| self.0.iter().any(|ap| bp.starts_with(ap)) )
+            .collect();
+        self.0.retain(|ap| c.iter().any(|bp| ap.starts_with(bp) || ap == bp) );
+        self.0.append(&mut c);
+    }
+
+    pub fn contains<P>(&self, path: P) -> bool
+        where P: AsRef<Path>
+    {
+        let path = path.as_ref();
+        self.0.iter().any(|p| path.starts_with(p))
+    }
+
+    #[inline]
+    pub fn push(&mut self, value: PathBuf) {
+        self.0.push(value);
+    }
 }
+
+impl AsRef<Vec<PathBuf>> for Entries {
+    fn as_ref(&self) -> &Vec<PathBuf> {
+        &self.0
+    }
+}
+
+impl AsMut<Vec<PathBuf>> for Entries {
+    fn as_mut(&mut self) -> &mut Vec<PathBuf> {
+        &mut self.0
+    }
+}
+
+impl Deref for Entries {
+    type Target = Vec<PathBuf>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Entries {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T: Into<Vec<PathBuf>>> From<T> for Entries {
+    fn from(value: T) -> Self {
+        Entries (value.into())
+    }
+}
+
+impl IntoIterator for Entries {
+    type Item = PathBuf;
+    type IntoIter = <Vec<PathBuf> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -459,19 +531,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "no assertions"]
-    fn get_paths() {
-        let mut tag = Tag::create("test");
-        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/")
-            .unwrap();
-        tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
-
-        for path in tag.get_dirs() {
-            dbg!(&path);
-        }
-    }
-
-    #[test]
     fn subtags_basic() {
         let mut tag = Tag::create("test");
         tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/") .unwrap();
@@ -483,7 +542,7 @@ mod tests {
         tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/") .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/Projects/") .unwrap();
 
-        assert!(tag.get_subtags().contains(&tag2.id));
+        assert!(tag2.is_subtag_of(&tag));
 
         println!("Saving...");
         tag.save().unwrap();
@@ -492,7 +551,7 @@ mod tests {
         println!("Getting merged entries");
         let all_entries = tag.get_all_entries();
         assert_eq!(
-            all_entries,
+            *all_entries,
             vec![
                 PathBuf::from("C:/Users/ddxte/Documents/Apps/KFiles/"),
                 PathBuf::from("C:/Users/ddxte/Pictures/bread.JPG"),
@@ -538,6 +597,56 @@ mod tests {
         println!("Testing eq");
         assert_eq!("test-tag-yeah", *id); // PartialEq
         assert_eq!(id, id); // Eq
+    }
+
+    #[test]
+    fn entries_or() {
+        let mut a = Entries::from(vec![
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Pictures/bread.jpg"),
+            PathBuf::from("C:/Users/ddxte/Music/"),
+        ]);
+
+        let b = vec![
+            PathBuf::from("C:/Users/ddxte/Pictures/"),
+            PathBuf::from("C:/Users/ddxte/Documents/TankInSands/"),
+            PathBuf::from("C:/Users/ddxte/Music/"),
+        ];
+
+        a.or(b);
+        dbg!(&a);
+
+        let expected = vec![
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Music/"),
+            PathBuf::from("C:/Users/ddxte/Pictures/"),
+        ];
+        assert!( a.iter().all(|pb| expected.contains(pb)) );
+    }
+
+    #[test]
+    fn entries_and() {
+        let mut a = Entries::from(vec![
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Pictures/bread.jpg"),
+            PathBuf::from("C:/Users/ddxte/Music/"),
+        ]);
+
+        let b = vec![
+            PathBuf::from("C:/Users/ddxte/Pictures/"),
+            PathBuf::from("C:/Users/ddxte/Documents/TankInSands/"),
+            PathBuf::from("C:/Users/ddxte/Music/"),
+        ];
+
+        a.and(b);
+        dbg!(&a);
+
+        let expected = vec![
+            PathBuf::from("C:/Users/ddxte/Documents/TankInSands/"),
+            PathBuf::from("C:/Users/ddxte/Pictures/bread.jpg"),
+            PathBuf::from("C:/Users/ddxte/Music/"),
+        ];
+        assert!( a.iter().all(|pb| expected.contains(pb)) );
     }
 }
 

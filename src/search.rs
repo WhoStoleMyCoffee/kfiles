@@ -4,7 +4,19 @@ use std::thread;
 
 use walkdir::{ WalkDir, DirEntry };
 
-use crate::tag::{ Tag, TagID };
+use crate::tag::{ Entries, Tag, TagID };
+
+
+
+fn is_direntry_hidden(entry: &DirEntry) -> bool {
+    entry
+        .file_name()
+        .to_str()
+        .map(|s| s.starts_with('.'))
+        .unwrap_or(false)
+}
+
+
 
 
 #[derive(Debug, Default)]
@@ -71,7 +83,7 @@ impl Query {
 
 
 pub struct Searcher {
-    entries: Vec<PathBuf>,
+    entries: Entries,
 }
 
 impl Searcher {
@@ -100,7 +112,7 @@ impl Searcher {
 impl From<&Tag> for Searcher {
     fn from(tag: &Tag) -> Self {
         Searcher {
-            entries: tag.get_all_entries(),
+            entries: Entries::from(tag.get_all_entries()),
         }
     }
 }
@@ -108,11 +120,3 @@ impl From<&Tag> for Searcher {
 // TODO impl from<intoiter tag>
 
 
-
-fn is_direntry_hidden(entry: &DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with('.'))
-        .unwrap_or(false)
-}
