@@ -191,7 +191,7 @@ impl Tag {
         // Merge subtags' entries into this one
         let it = self.subtags.iter().filter_map(|id| Tag::load(id).ok());
         for subtag in it {
-            entries.or( subtag.get_all_entries() );
+            entries = entries.or( &subtag.get_all_entries() );
         }
 
         entries
@@ -388,27 +388,42 @@ impl Display for TagID {
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+// TODO hashset
 pub struct Entries( Vec<PathBuf> );
 
 impl Entries {
-    pub fn or<E>(&mut self, other: E)
-        where E: IntoIterator<Item = PathBuf>
+    // TODO optimize
+    pub fn or<E>(&self, other: &E) -> Entries
+        where E: AsRef<Vec<PathBuf>>
     {
-        let mut c: Vec<PathBuf> = other.into_iter()
-            .filter(|bp| self.0.iter().all(|ap| !bp.starts_with(ap)) )
+        let c: Vec<PathBuf> = self.0.iter()
+            .filter(|&ap| !other.as_ref().iter()
+                .any(|bp| ap.starts_with(bp) || ap == bp)
+            )
+            .chain(other.as_ref().iter()
+                .filter(|bp| !self.0.iter().any(|ap| bp.starts_with(ap)) )
+            )
+            .cloned()
             .collect();
-        self.0.retain(|ap| c.iter().all(|bp| !ap.starts_with(bp) || ap == bp) );
-        self.0.append(&mut c);
+
+        Entries(c)
     }
 
-    pub fn and<E>(&mut self, other: E)
-        where E: IntoIterator<Item = PathBuf>
+    // TODO optimize
+    pub fn and<E>(&self, other: &E) -> Entries
+        where E: AsRef<Vec<PathBuf>>
     {
-        let mut c: Vec<PathBuf> = other.into_iter()
-            .filter(|bp| self.0.iter().any(|ap| bp.starts_with(ap)) )
+        let c: Vec<PathBuf> = self.0.iter()
+            .filter(|&ap| other.as_ref().iter()
+                .any(|bp| ap.starts_with(bp) || ap == bp)
+            )
+            .chain(other.as_ref().iter()
+                .filter(|bp| self.0.iter().any(|ap| bp.starts_with(ap)) )
+            )
+            .cloned()
             .collect();
-        self.0.retain(|ap| c.iter().any(|bp| ap.starts_with(bp) || ap == bp) );
-        self.0.append(&mut c);
+
+        Entries(c)
     }
 
     pub fn contains<P>(&self, path: P) -> bool
@@ -416,11 +431,6 @@ impl Entries {
     {
         let path = path.as_ref();
         self.0.iter().any(|p| path.starts_with(p))
-    }
-
-    #[inline]
-    pub fn push(&mut self, value: PathBuf) {
-        self.0.push(value);
     }
 }
 
@@ -473,7 +483,7 @@ impl IntoIterator for Entries {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use std::{collections::HashSet, path::Path, time::Instant};
 
     #[test]
     fn serde() {
@@ -600,53 +610,38 @@ mod tests {
     }
 
     #[test]
-    fn entries_or() {
-        let mut a = Entries::from(vec![
+    fn entries() {
+        let a = Entries::from(vec![
             PathBuf::from("C:/Users/ddxte/Documents/"),
             PathBuf::from("C:/Users/ddxte/Pictures/bread.jpg"),
             PathBuf::from("C:/Users/ddxte/Music/"),
         ]);
 
-        let b = vec![
+        let b = Entries::from(vec![
             PathBuf::from("C:/Users/ddxte/Pictures/"),
             PathBuf::from("C:/Users/ddxte/Documents/TankInSands/"),
-            PathBuf::from("C:/Users/ddxte/Music/"),
-        ];
-
-        a.or(b);
-        dbg!(&a);
-
-        let expected = vec![
-            PathBuf::from("C:/Users/ddxte/Documents/"),
-            PathBuf::from("C:/Users/ddxte/Music/"),
-            PathBuf::from("C:/Users/ddxte/Pictures/"),
-        ];
-        assert!( a.iter().all(|pb| expected.contains(pb)) );
-    }
-
-    #[test]
-    fn entries_and() {
-        let mut a = Entries::from(vec![
-            PathBuf::from("C:/Users/ddxte/Documents/"),
-            PathBuf::from("C:/Users/ddxte/Pictures/bread.jpg"),
             PathBuf::from("C:/Users/ddxte/Music/"),
         ]);
 
-        let b = vec![
+        println!("Testing or");
+        let c = HashSet::from_iter(a.or(&b));
+        let expected: HashSet<PathBuf> = HashSet::from_iter(vec![
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Music/"),
             PathBuf::from("C:/Users/ddxte/Pictures/"),
+        ]);
+        assert!( c.is_subset(&expected) );
+        assert!( HashSet::from_iter(b.or(&a)).is_subset(&c) );
+
+        println!("Testing and");
+        let c = HashSet::from_iter(a.and(&b));
+        let expected: HashSet<PathBuf> = HashSet::from_iter(vec![
             PathBuf::from("C:/Users/ddxte/Documents/TankInSands/"),
             PathBuf::from("C:/Users/ddxte/Music/"),
-        ];
-
-        a.and(b);
-        dbg!(&a);
-
-        let expected = vec![
-            PathBuf::from("C:/Users/ddxte/Documents/TankInSands/"),
             PathBuf::from("C:/Users/ddxte/Pictures/bread.jpg"),
-            PathBuf::from("C:/Users/ddxte/Music/"),
-        ];
-        assert!( a.iter().all(|pb| expected.contains(pb)) );
+        ]);
+        assert!( c.is_subset(&expected) );
+        assert!( HashSet::from_iter(b.and(&a)).is_subset(&c) );
     }
 }
 

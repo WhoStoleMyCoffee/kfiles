@@ -55,16 +55,14 @@ impl Query {
 
     /// TODO turn this into a Result
     pub fn search(&self) -> Option<Receiver<PathBuf>> {
-        let Some(tag) = self.tags.first() else {
-            return None;
-        };
+        let mut searcher = Searcher::from(self.tags.first()?);
+        for tag in self.tags.iter().skip(1) {
+            // or?
+            searcher.and( &tag.get_all_entries() );
+        }
 
         let (tx, rx) = mpsc::channel::<PathBuf>();
 
-        // TODO merge tags
-        // use search::queryorsomething that searches through Vec<PB>
-        let searcher = Searcher::from(tag);
-        
         thread::spawn(move || {
             let it = searcher.search();
             for pb in it {
@@ -82,12 +80,22 @@ impl Query {
 
 
 
+/// TODO create from list of tags? -> Option<Self>
 pub struct Searcher {
     entries: Entries,
+    // query: String,
 }
 
 impl Searcher {
-    // TODO merge tag
+    pub fn and(&mut self, entries: &Entries) -> &mut Self {
+        self.entries = self.entries.and(entries);
+        self
+    }
+
+    pub fn or(&mut self, entries: &Entries) -> &mut Self {
+        self.entries = self.entries.or(entries);
+        self
+    }
 
     pub fn search(&self) -> Box<dyn Iterator<Item = PathBuf>> {
         // Files and folders merged with subtags
@@ -117,6 +125,5 @@ impl From<&Tag> for Searcher {
     }
 }
 
-// TODO impl from<intoiter tag>
 
 
