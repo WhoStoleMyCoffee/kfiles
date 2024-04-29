@@ -1,10 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use iced::{self, Length};
-use iced::widget::{button, column, row, scrollable, text, text_input, Column};
+use iced::widget::{button, column, container, image, row, scrollable, text, text_input, Column, Container, Row};
 use iced::{time, Application, Command, Theme};
+use iced_aw::Wrap;
 
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
@@ -174,15 +175,34 @@ impl TagExplorer {
                 .on_input(Message::QueryTextChanged)
         ];
 
+        /*
+        let mut column = Column::new();
+        for _ in 0..10 {
+            let mut row = Row::new();
+            for _ in 0..10 {
+                row = row.push( display_dir(Path::new("C:/Users/ddxte/")) )
+            }
+            column = column.push(row);
+        }
+
         use scrollable::{ Properties, Direction };
         let results = column![
             text("Results:"),
-            scrollable(column(
-                self.items.iter()
-                    .map(|pb| text(pb.display().to_string())
-                         .size(14)
-                         .into()
-                    )
+            scrollable(column)
+            .direction(Direction::Vertical(Properties::default()))
+            .width(Length::Fill)
+            .height(Length::Fill)
+        ];
+        */
+
+        use scrollable::{ Properties, Direction };
+        let results = column![
+            text("Results:"),
+            scrollable(Wrap::with_elements(
+                self.items.iter().map(|pb|
+                    display_dir(&pb).into()
+                )
+                .collect()
             ))
             .direction(Direction::Vertical(Properties::default()))
             .width(Length::Fill)
@@ -200,4 +220,19 @@ pub enum Message {
     RemoveQueryTag(TagID),
     Tick,
     FocusQuery,
+}
+
+
+
+fn display_dir(path: &Path) -> Container<'static, Message> {
+    container(
+        image("assets/wimdy.jpg")
+            .width(48)
+    )
+}
+
+
+fn file_image(width: u16) -> image::Image<image::Handle> {
+    image("assets/wimdy.jpg")
+        .width(width)
 }

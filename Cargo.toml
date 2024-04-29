@@ -7,13 +7,14 @@ edition = "2021"
 
 [dependencies]
 iced = { version = "0.12.1", features = ["image", "debug", "tokio"] }
+iced_aw = { version = "0.8.0", features = ["wrap"] }
 walkdir = "2.5.0"
-opener =  { version = "0.6.1", features = ["reveal"] }
-confy = "0.5.1"
 serde = { version = "1.0.195", features = ["derive"] }
 directories = "5.0.1"
 toml = "0.8.12"
-anyhow = "1.0.82"
 thiserror = "1.0.59"
 convert_case = "0.6.0"
-# clean-path = "0.2.1"
+# anyhow
+# clean-path
+# opener
+# confy
