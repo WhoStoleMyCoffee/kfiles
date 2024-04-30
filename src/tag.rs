@@ -4,9 +4,9 @@ use std::io::{self, Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
+use convert_case::{Case, Casing};
 use thiserror::Error;
 use toml;
-use convert_case::{Case, Casing};
 
 use serde::{Deserialize, Serialize};
 
@@ -40,9 +40,6 @@ pub enum SaveError {
     IO(#[from] io::Error),
 }
 
-
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tag {
     #[serde(skip)]
@@ -59,7 +56,8 @@ pub struct Tag {
 impl Tag {
     /// Create a new tag with the id `id`
     pub fn create<ID>(id: ID) -> Self
-        where ID: Into<TagID>
+    where
+        ID: Into<TagID>,
     {
         Tag {
             id: id.into(),
@@ -97,8 +95,10 @@ impl Tag {
     #[inline]
     pub fn get_base_dir() -> PathBuf {
         const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
-        directories::BaseDirs::new() .expect("could not get base dirs")
-            .config_dir().to_path_buf()
+        directories::BaseDirs::new()
+            .expect("could not get base dirs")
+            .config_dir()
+            .to_path_buf()
             .join(APP_NAME.to_string() + "/tags/")
     }
 
@@ -108,7 +108,6 @@ impl Tag {
     pub fn get_base_dir() -> PathBuf {
         PathBuf::from("C:/Users/ddxte/Documents/Projects/tag-explorer/test_tags/")
     }
-   
 
     #[inline]
     pub fn get_save_path(&self) -> PathBuf {
@@ -133,9 +132,7 @@ impl Tag {
     pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
         Ok(Tag::get_all_tags()?
             .iter()
-            .filter_map(|pb|
-                TagID::try_from(pb.as_path()).ok()
-            )
+            .filter_map(|pb| TagID::try_from(pb.as_path()).ok())
             .collect())
     }
 
@@ -191,7 +188,7 @@ impl Tag {
         // Merge subtags' entries into this one
         let it = self.subtags.iter().filter_map(|id| Tag::load(id).ok());
         for subtag in it {
-            entries = entries.or( &subtag.get_all_entries() );
+            entries = entries.or(&subtag.get_all_entries());
         }
 
         entries
@@ -210,7 +207,7 @@ impl Tag {
     }
 
     pub fn load(id: &TagID) -> Result<Tag, LoadError> {
-        Tag::load_from_path( id.get_path() )
+        Tag::load_from_path(id.get_path())
     }
 
     pub fn save_to_path<P>(&self, path: P) -> Result<(), SaveError>
@@ -240,11 +237,12 @@ impl Tag {
         File::open(&path)?.read_to_string(&mut contents)?;
         let mut tag = toml::from_str::<Tag>(&contents)?;
 
-        let file_name = path.as_ref()
+        let file_name = path
+            .as_ref()
             .file_stem()
             .and_then(|osstr| osstr.to_str())
             .ok_or_else(|| LoadError::InvalidName(path.as_ref().to_path_buf()))?;
-        tag.id = TagID( file_name.to_string() );
+        tag.id = TagID(file_name.to_string());
 
         tag.entries.retain(|pb| pb.exists());
         tag.subtags.retain(|tag_id| tag_id.exists());
@@ -284,7 +282,6 @@ impl Tag {
     }
 }
 
-
 impl PartialEq<TagID> for Tag {
     fn eq(&self, other: &TagID) -> bool {
         self.id == *other
@@ -303,11 +300,6 @@ impl PartialEq<Tag> for TagID {
     }
 }
 
-
-
-
-
-
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq, Clone)]
 pub struct TagID(String);
 
@@ -317,9 +309,10 @@ impl TagID {
     }
 
     pub fn parse<T>(value: T) -> Self
-        where T: AsRef<str>
+    where
+        T: AsRef<str>,
     {
-        TagID( value.as_ref().to_case(Case::Kebab) )
+        TagID(value.as_ref().to_case(Case::Kebab))
     }
 
     pub fn get_path(&self) -> PathBuf {
@@ -348,7 +341,6 @@ impl From<&TagID> for PathBuf {
     }
 }
 
-
 /// Invalid file name error
 pub struct InvalidFileName;
 
@@ -356,10 +348,12 @@ impl TryFrom<&Path> for TagID {
     type Error = InvalidFileName;
 
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
-        Ok(TagID(value.file_stem()
-            .and_then(|osstr| osstr.to_str())
-            .ok_or(InvalidFileName)?
-            .to_string()
+        Ok(TagID(
+            value
+                .file_stem()
+                .and_then(|osstr| osstr.to_str())
+                .ok_or(InvalidFileName)?
+                .to_string(),
         ))
     }
 }
@@ -383,25 +377,30 @@ impl Display for TagID {
     }
 }
 
-
-
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 // TODO hashset
-pub struct Entries( Vec<PathBuf> );
+pub struct Entries(Vec<PathBuf>);
 
 impl Entries {
     // TODO optimize
     pub fn or<E>(&self, other: &E) -> Entries
-        where E: AsRef<Vec<PathBuf>>
+    where
+        E: AsRef<Vec<PathBuf>>,
     {
-        let c: Vec<PathBuf> = self.0.iter()
-            .filter(|&ap| !other.as_ref().iter()
-                .any(|bp| ap.starts_with(bp) || ap == bp)
-            )
-            .chain(other.as_ref().iter()
-                .filter(|bp| !self.0.iter().any(|ap| bp.starts_with(ap)) )
+        let c: Vec<PathBuf> = self
+            .0
+            .iter()
+            .filter(|&ap| {
+                !other
+                    .as_ref()
+                    .iter()
+                    .any(|bp| ap.starts_with(bp) || ap == bp)
+            })
+            .chain(
+                other
+                    .as_ref()
+                    .iter()
+                    .filter(|bp| !self.0.iter().any(|ap| bp.starts_with(ap))),
             )
             .cloned()
             .collect();
@@ -411,14 +410,23 @@ impl Entries {
 
     // TODO optimize
     pub fn and<E>(&self, other: &E) -> Entries
-        where E: AsRef<Vec<PathBuf>>
+    where
+        E: AsRef<Vec<PathBuf>>,
     {
-        let c: Vec<PathBuf> = self.0.iter()
-            .filter(|&ap| other.as_ref().iter()
-                .any(|bp| ap.starts_with(bp) || ap == bp)
-            )
-            .chain(other.as_ref().iter()
-                .filter(|bp| self.0.iter().any(|ap| bp.starts_with(ap)) )
+        let c: Vec<PathBuf> = self
+            .0
+            .iter()
+            .filter(|&ap| {
+                other
+                    .as_ref()
+                    .iter()
+                    .any(|bp| ap.starts_with(bp) || ap == bp)
+            })
+            .chain(
+                other
+                    .as_ref()
+                    .iter()
+                    .filter(|bp| self.0.iter().any(|ap| bp.starts_with(ap))),
             )
             .cloned()
             .collect();
@@ -427,7 +435,8 @@ impl Entries {
     }
 
     pub fn contains<P>(&self, path: P) -> bool
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         let path = path.as_ref();
         self.0.iter().any(|p| path.starts_with(p))
@@ -462,7 +471,7 @@ impl DerefMut for Entries {
 
 impl<T: Into<Vec<PathBuf>>> From<T> for Entries {
     fn from(value: T) -> Self {
-        Entries (value.into())
+        Entries(value.into())
     }
 }
 
@@ -475,11 +484,6 @@ impl IntoIterator for Entries {
     }
 }
 
-
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,7 +492,7 @@ mod tests {
     #[test]
     fn serde() {
         let tag_id = TagID::from("test");
-        let mut tag = Tag::create( tag_id.clone() );
+        let mut tag = Tag::create(tag_id.clone());
         tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
         tag.add_entry("C:/Users/ddxte/Documents/").unwrap();
 
@@ -543,14 +547,16 @@ mod tests {
     #[test]
     fn subtags_basic() {
         let mut tag = Tag::create("test");
-        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/") .unwrap();
+        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/")
+            .unwrap();
         tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
 
         println!("Creating subtag");
-        let mut tag2 = Tag::create("bup")
-            .as_subtag_of(&mut tag);
-        tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/") .unwrap();
-        tag2.add_entry("C:/Users/ddxte/Documents/Projects/") .unwrap();
+        let mut tag2 = Tag::create("bup").as_subtag_of(&mut tag);
+        tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/")
+            .unwrap();
+        tag2.add_entry("C:/Users/ddxte/Documents/Projects/")
+            .unwrap();
 
         assert!(tag2.is_subtag_of(&tag));
 
@@ -575,12 +581,13 @@ mod tests {
         use std::collections::HashSet;
 
         let mut tag = Tag::create("test");
-        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/") .unwrap();
+        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/")
+            .unwrap();
         tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
 
-        let mut tag2 = Tag::create("bup")
-            .as_subtag_of(&mut tag);
-        tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/") .unwrap();
+        let mut tag2 = Tag::create("bup").as_subtag_of(&mut tag);
+        tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/")
+            .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/godot/").unwrap();
 
         println!("Saving...");
@@ -630,8 +637,8 @@ mod tests {
             PathBuf::from("C:/Users/ddxte/Music/"),
             PathBuf::from("C:/Users/ddxte/Pictures/"),
         ]);
-        assert!( c.is_subset(&expected) );
-        assert!( HashSet::from_iter(b.or(&a)).is_subset(&c) );
+        assert!(c.is_subset(&expected));
+        assert!(HashSet::from_iter(b.or(&a)).is_subset(&c));
 
         println!("Testing and");
         let c = HashSet::from_iter(a.and(&b));
@@ -640,9 +647,7 @@ mod tests {
             PathBuf::from("C:/Users/ddxte/Music/"),
             PathBuf::from("C:/Users/ddxte/Pictures/bread.jpg"),
         ]);
-        assert!( c.is_subset(&expected) );
-        assert!( HashSet::from_iter(b.and(&a)).is_subset(&c) );
+        assert!(c.is_subset(&expected));
+        assert!(HashSet::from_iter(b.and(&a)).is_subset(&c));
     }
 }
-
-

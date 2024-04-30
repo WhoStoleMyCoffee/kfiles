@@ -2,11 +2,9 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-use walkdir::{ WalkDir, DirEntry };
+use walkdir::{DirEntry, WalkDir};
 
-use crate::tag::{ Entries, Tag, TagID };
-
-
+use crate::tag::{ Entries, Tag };
 
 fn is_direntry_hidden(entry: &DirEntry) -> bool {
     entry
@@ -15,9 +13,6 @@ fn is_direntry_hidden(entry: &DirEntry) -> bool {
         .map(|s| s.starts_with('.'))
         .unwrap_or(false)
 }
-
-
-
 
 #[derive(Debug, Default)]
 pub struct Query {
@@ -44,7 +39,8 @@ impl Query {
     /// Returns whether the tag was found and removed
     /// If the tag was not contained, returns `false`
     pub fn remove_tag<T>(&mut self, tag: &T) -> bool
-        where T: PartialEq<Tag>
+    where
+        T: PartialEq<Tag>,
     {
         if let Some(index) = self.tags.iter().position(|t| tag == t) {
             self.tags.remove(index);
@@ -58,7 +54,7 @@ impl Query {
         let mut searcher = Searcher::from(self.tags.first()?);
         for tag in self.tags.iter().skip(1) {
             // or?
-            searcher.and( &tag.get_all_entries() );
+            searcher.and(&tag.get_all_entries());
         }
 
         let (tx, rx) = mpsc::channel::<PathBuf>();
@@ -70,15 +66,11 @@ impl Query {
                     return;
                 }
             }
-
         });
 
         Some(rx)
     }
-
 }
-
-
 
 /// TODO create from list of tags? -> Option<Self>
 pub struct Searcher {
@@ -99,14 +91,17 @@ impl Searcher {
 
     pub fn search(&self) -> Box<dyn Iterator<Item = PathBuf>> {
         // Files and folders merged with subtags
-        let (files, folders) = self.entries.iter()
+        let (files, folders) = self
+            .entries
+            .iter()
             .cloned()
             .partition::<Vec<PathBuf>, _>(|pb| pb.is_file());
 
         let mut it: Box<dyn Iterator<Item = PathBuf>> = Box::new(files.into_iter());
 
         for pb in folders {
-            let walker = WalkDir::new(pb).into_iter()
+            let walker = WalkDir::new(pb)
+                .into_iter()
                 .filter_entry(|de| !is_direntry_hidden(de))
                 .flatten()
                 .map(|e| e.into_path());
@@ -124,6 +119,3 @@ impl From<&Tag> for Searcher {
         }
     }
 }
-
-
-

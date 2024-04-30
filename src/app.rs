@@ -2,8 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-use iced::{self, Length};
-use iced::widget::{button, column, container, image, row, scrollable, text, text_input, Column, Container, Row};
+use iced::advanced::graphics::image::image_rs::imageops::thumbnail;
+use iced::widget::{
+    button, column, image, row, scrollable, text, text_input, Column,
+};
+use iced::{self, alignment, Length};
 use iced::{time, Application, Command, Theme};
 use iced_aw::Wrap;
 
@@ -14,7 +17,6 @@ const UPDATE_RATE_MS: u64 = 100;
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
 const MAX_RESULT_COUNT: usize = 256;
 const MAX_RESULTS_PER_TICK: usize = 10;
-
 
 
 pub struct TagExplorer {
@@ -54,10 +56,8 @@ impl Application for TagExplorer {
                     return Command::none();
                 }
 
-                self.items.append(&mut rx.try_iter()
-                    .take(MAX_RESULTS_PER_TICK)
-                    .collect()
-                );
+                self.items
+                    .append(&mut rx.try_iter().take(MAX_RESULTS_PER_TICK).collect());
             }
 
             Message::FocusQuery => {
@@ -69,19 +69,17 @@ impl Application for TagExplorer {
                 self.update_query();
             }
 
-            Message::AddQueryTag(tag_id) => {
-                match tag_id.load() {
-                    Ok(tag) => {
-                        if self.query.add_tag(tag) {
-                            self.update_query();
-                        }
-                    }
-
-                    Err(err) => {
-                        todo!()
+            Message::AddQueryTag(tag_id) => match tag_id.load() {
+                Ok(tag) => {
+                    if self.query.add_tag(tag) {
+                        self.update_query();
                     }
                 }
-            }
+
+                Err(err) => {
+                    todo!()
+                }
+            },
 
             Message::RemoveQueryTag(tag_id) => {
                 if self.query.remove_tag(&tag_id) {
@@ -95,24 +93,17 @@ impl Application for TagExplorer {
 
     /// TODO REFACTOR view()
     fn view(&self) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
-
         // Tags list
         let all_tags = Tag::get_all_tag_ids().unwrap(); // TODO cache these
-        let tags_list = scrollable(column(
-            all_tags.into_iter()
-                .map(|id| {
-                    let id_str = id.as_ref();
-                    button(text( format!("#{id_str}") ))
-                        .on_press( Message::AddQueryTag(id) )
-                        .into()
-                }),
-        ))
+        let tags_list = scrollable(column(all_tags.into_iter().map(|id| {
+            let id_str = id.as_ref();
+            button(text(format!("#{id_str}")))
+                .on_press(Message::AddQueryTag(id))
+                .into()
+        })))
         .width(100);
 
-        row![
-            tags_list,
-            self.view_main(),
-        ].into()
+        row![tags_list, self.view_main(),].into()
     }
 
     fn theme(&self) -> Self::Theme {
@@ -138,19 +129,19 @@ impl Application for TagExplorer {
 
 impl TagExplorer {
     fn unhandled_key_input(event: iced::keyboard::Event) -> Option<Message> {
-        use iced::keyboard::{ Event, Key };
+        use iced::keyboard::{Event, Key};
 
         let Event::KeyPressed { key, modifiers, .. } = event else {
             return None;
         };
 
         // "No modifiers, please"
-        if !modifiers.is_empty() { return None; }
+        if !modifiers.is_empty() {
+            return None;
+        }
 
         match key.as_ref() {
-            Key::Character(ch) if FOCUS_QUERY_KEYS.contains(&ch) => {
-                Some(Message::FocusQuery)
-            }
+            Key::Character(ch) if FOCUS_QUERY_KEYS.contains(&ch) => Some(Message::FocusQuery),
             _ => None,
         }
     }
@@ -162,48 +153,29 @@ impl TagExplorer {
 
     fn view_main(&self) -> Column<'static, Message> {
         let query_input = column![
-            row(self.query.tags.iter()
-                .map(|tag| {
-                    let id = &tag.id;
-                    button( text(id.as_ref().as_str()) .size(14) )
-                        .on_press(Message::RemoveQueryTag(id.clone()))
-                        .into()
-                })
-           ),
+            row(self.query.tags.iter().map(|tag| {
+                let id = &tag.id;
+                button(text(id.as_ref().as_str()).size(14))
+                    .on_press(Message::RemoveQueryTag(id.clone()))
+                    .into()
+            })),
             text_input("Query...", &self.query.query)
                 .id(text_input::Id::new("query_input"))
                 .on_input(Message::QueryTextChanged)
         ];
 
-        /*
-        let mut column = Column::new();
-        for _ in 0..10 {
-            let mut row = Row::new();
-            for _ in 0..10 {
-                row = row.push( display_dir(Path::new("C:/Users/ddxte/")) )
-            }
-            column = column.push(row);
-        }
 
-        use scrollable::{ Properties, Direction };
-        let results = column![
-            text("Results:"),
-            scrollable(column)
-            .direction(Direction::Vertical(Properties::default()))
-            .width(Length::Fill)
-            .height(Length::Fill)
-        ];
-        */
-
-        use scrollable::{ Properties, Direction };
+        use scrollable::{Direction, Properties};
         let results = column![
             text("Results:"),
             scrollable(Wrap::with_elements(
-                self.items.iter().map(|pb|
-                    display_dir(&pb).into()
-                )
-                .collect()
-            ))
+                self.items.iter()
+                    .map(|pb| display_dir(&pb).into())
+                    .collect()
+            )
+            .spacing(8.0)
+            .line_spacing(8.0)
+            )
             .direction(Direction::Vertical(Properties::default()))
             .width(Length::Fill)
             .height(Length::Fill)
@@ -224,15 +196,30 @@ pub enum Message {
 
 
 
-fn display_dir(path: &Path) -> Container<'static, Message> {
-    container(
+fn display_dir(path: &Path) -> Column<'static, Message> {
+    use iced::ContentFit;
+
+    let file_name = path.file_name()
+        .unwrap()
+        .to_string_lossy();
+
+    let is_image = path.extension()
+        .map(|ext| ext == "png")
+        .unwrap_or(false);
+    let image = if is_image {
+        image(path)
+    } else {
         image("assets/wimdy.jpg")
-            .width(48)
-    )
+    };
+
+    column![
+        image
+            .content_fit(ContentFit::ScaleDown),
+        text( file_name )
+            .size(14)
+            .vertical_alignment(alignment::Vertical::Center),
+    ]
+    .width(72)
+    .clip(true)
 }
 
-
-fn file_image(width: u16) -> image::Image<image::Handle> {
-    image("assets/wimdy.jpg")
-        .width(width)
-}
