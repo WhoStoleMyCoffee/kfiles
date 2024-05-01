@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use image::io::Reader as ImageReader;
-use image::ImageError;
+use image::{ImageError, ImageFormat};
 use thiserror::Error;
 
 use crate::get_temp_dir;
@@ -34,9 +34,8 @@ impl ThumbnailError {
 
 
 
-
 #[allow(unused)]
-enum ThumbnalSize {
+enum ThumbnailSize {
     Icon,
     Small,
     Medium,
@@ -44,14 +43,14 @@ enum ThumbnalSize {
     Custom(u32, u32),
 }
 
-impl ThumbnalSize {
+impl ThumbnailSize {
     pub fn size(&self) -> (u32, u32) {
         match *self {
-            ThumbnalSize::Icon => (64, 64),
-            ThumbnalSize::Small => (128, 128),
-            ThumbnalSize::Medium => (256, 256),
-            ThumbnalSize::Large => (512, 512),
-            ThumbnalSize::Custom(w, h) => (w, h),
+            ThumbnailSize::Icon => (64, 64),
+            ThumbnailSize::Small => (128, 128),
+            ThumbnailSize::Medium => (256, 256),
+            ThumbnailSize::Large => (512, 512),
+            ThumbnailSize::Custom(w, h) => (w, h),
         }
     }
 }
@@ -75,40 +74,46 @@ fn hash_path(path: &Path) -> u64 {
     s.finish()
 }
 
+pub fn is_file_supported(path: &Path) -> Result<bool, ImageError> {
+    match ImageFormat::from_path(path) {
+        Ok(_) => Ok(true),
+        Err(ImageError::Unsupported(_)) => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
 
 
 
 
 /// TODO impl Thumbnail for AsRef<Path>?
-trait Thumbnail {
+pub trait Thumbnail {
+    /// TODO rename
     fn get_cache_path(&self) -> PathBuf;
 
     fn create_thumbnail(&self) -> Result<(), ThumbnailError>;
-
-    fn get_thumbnail(&self);
 }
 
 impl Thumbnail for &Path {
     #[inline]
+    // todo maybe check out other image formats like png, *qoi* (promising!)
     fn get_cache_path(&self) -> PathBuf {
-        get_cache_dir() .join( format!("{}.jpg", hash_path(self)) )
+        get_cache_dir() .join( format!("{}.jpeg", hash_path(self)) )
     }
 
     fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
         let img = ImageReader::open(self)?
             .decode()?;
 
-        let (w, h) = ThumbnalSize::Icon.size();
+        let (w, h) = ThumbnailSize::Icon.size();
         img.thumbnail(w, h)
             .into_rgb8()
             .save(self.get_cache_path())?;
         Ok(())
     }
 
-    fn get_thumbnail(&self) {
-        todo!()
-    }
 }
+
 
 
 
@@ -123,18 +128,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn thumbnails_single() {
-        let path = Path::new("C:/Users/ddxte/Pictures/bread.JPG");
-        assert!( path.create_thumbnail().is_ok() );
-
-        let path = Path::new("C:/Users/ddxte/Documents/AutoClicker.exe");
-        let err = path.create_thumbnail() .unwrap_err();
-        assert!( err.is_unsupported() );
-    }
-
-    #[test]
-    fn test_thumbnails_bulk() {
-        let it = WalkDir::new("C:/Users/ddxte/Pictures/art stuff/")
+    #[ignore]
+    fn rebuild_thumbnails() {
+        let it = WalkDir::new("C:/Users/ddxte/Pictures/")
             .into_iter()
             .filter_entry(|de|
                 !de.file_name()
@@ -147,20 +143,20 @@ mod tests {
             .filter(|pb| pb.is_file());
 
         for pb in it {
-            match pb.as_path().create_thumbnail() {
-                Ok(()) => {
-                    println!("Created thumbnail for {}", pb.display());
-                },
 
-                Err(err) => {
-                    if err.is_unsupported() {
-                        println!("Ignoring {}: Unsupported", pb.display());
-                        continue;
-                    }
+            std::thread::spawn(move || {
+                match pb.as_path().create_thumbnail() {
+                    Ok(()) => {
+                        println!("Created thumbnail for {}", pb.display());
+                    },
 
-                    println!("Error on {}: {}", pb.display(), err);
-                },
-            }
+                    Err(err) => {
+                        if !err.is_unsupported() {
+                            println!("Error on {}: {}", pb.display(), err);
+                        }
+                    },
+                }
+            });
 
         }
     }

@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-use iced::advanced::graphics::image::image_rs::imageops::thumbnail;
 use iced::widget::{
     button, column, image, row, scrollable, text, text_input, Column,
+    lazy,
 };
 use iced::{self, alignment, Length};
 use iced::{time, Application, Command, Theme};
@@ -12,6 +12,7 @@ use iced_aw::Wrap;
 
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
+use crate::thumbnail::Thumbnail;
 
 const UPDATE_RATE_MS: u64 = 100;
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
@@ -151,7 +152,7 @@ impl TagExplorer {
         self.receiver = self.query.search();
     }
 
-    fn view_main(&self) -> Column<'static, Message> {
+    fn view_main(&self) -> Column<Message> {
         let query_input = column![
             row(self.query.tags.iter().map(|tag| {
                 let id = &tag.id;
@@ -166,22 +167,24 @@ impl TagExplorer {
 
 
         use scrollable::{Direction, Properties};
-        let results = column![
-            text("Results:"),
-            scrollable(Wrap::with_elements(
+        let results = lazy(self.items.len(), |_| {
+            Wrap::with_elements(
                 self.items.iter()
-                    .map(|pb| display_dir(&pb).into())
-                    .collect()
+                .map(|pb| display_dir(&pb).into())
+                .collect()
             )
             .spacing(8.0)
             .line_spacing(8.0)
-            )
-            .direction(Direction::Vertical(Properties::default()))
-            .width(Length::Fill)
-            .height(Length::Fill)
-        ];
+        });
 
-        column![query_input, results]
+        column![
+            query_input,
+            text("Results:"),
+            scrollable(results)
+                .direction(Direction::Vertical(Properties::default()))
+                .width(Length::Fill)
+                .height(Length::Fill),
+        ]
     }
 }
 
@@ -203,23 +206,30 @@ fn display_dir(path: &Path) -> Column<'static, Message> {
         .unwrap()
         .to_string_lossy();
 
-    let is_image = path.extension()
-        .map(|ext| ext == "png")
-        .unwrap_or(false);
-    let image = if is_image {
-        image(path)
+    let img = if path.get_cache_path().exists() {
+        image(path.get_cache_path())
+    } else if path.is_dir() {
+        image("assets/folder.png")
     } else {
-        image("assets/wimdy.jpg")
+
+        // TODO TEMP
+        if let Err(err) = path.create_thumbnail() {
+            if !err.is_unsupported() {
+                println!("ERROR! OH NO {}. path = {}", err, path.display());
+            }
+        }
+
+        image("assets/file.png")
     };
 
     column![
-        image
-            .content_fit(ContentFit::ScaleDown),
+        img.content_fit(ContentFit::Contain),
         text( file_name )
             .size(14)
             .vertical_alignment(alignment::Vertical::Center),
     ]
-    .width(72)
+    .width(80)
     .clip(true)
+    .align_items(iced::Alignment::Center)
 }
 
