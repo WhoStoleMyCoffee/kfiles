@@ -1,8 +1,9 @@
 use std::fs::create_dir;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io;
+use std::{io, thread};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::thread::JoinHandle;
 
 use image::io::Reader as ImageReader;
 use image::{ImageError, ImageFormat};
@@ -116,13 +117,41 @@ impl Thumbnail for &Path {
 
 
 
+#[derive(Default)]
+pub struct ThumbnailBuilder( Option<JoinHandle<()>> );
+
+impl ThumbnailBuilder {
+    pub fn build_for_path(&mut self, path: &Path) {
+        if self.is_active() {
+            return;
+        }
+
+        let handle = ThumbnailBuilder::build(path);
+        self.0.replace(handle);
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.0.as_ref()
+            .map(|handle| !handle.is_finished())
+            .unwrap_or(false)
+    }
+
+    fn build(path: &Path) -> JoinHandle<()> {
+        let path = path.to_path_buf();
+        thread::spawn(move || {
+            // TODO return result
+            path.as_path().create_thumbnail();
+        })
+    }
+}
+
+
 
 
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::path::Path;
     use walkdir:: WalkDir;
 
     use super::*;
