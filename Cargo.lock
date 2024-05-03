@@ -2992,6 +2992,7 @@ dependencies = [
  "iced",
  "iced_aw",
  "image 0.25.1",
+ "rand",
  "serde",
  "thiserror",
  "toml",

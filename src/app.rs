@@ -1,4 +1,3 @@
-use std::ops::RangeBounds;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -10,10 +9,11 @@ use iced::widget::{
 use iced::{self, alignment, Length, Rectangle};
 use iced::{time, Application, Command, Theme};
 use iced_aw::Wrap;
+use rand::Rng;
 
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
-use crate::thumbnail::{Thumbnail, ThumbnailBuilder};
+use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 
 const UPDATE_RATE_MS: u64 = 100;
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
@@ -29,7 +29,7 @@ pub struct TagExplorer {
     query: Query,
     items: Vec<PathBuf>,
     receiver: Option<Receiver<PathBuf>>,
-    thumbnail_builder: ThumbnailBuilder,
+    thumbnail_builder: (usize, ThumbnailBuilder),
     // TODO refactor
     scroll: f32,
     results_container_size: (f32, f32),
@@ -46,7 +46,7 @@ impl Application for TagExplorer {
             query: Query::empty(),
             items: Vec::new(),
             receiver: None,
-            thumbnail_builder: ThumbnailBuilder::default(),
+            thumbnail_builder: (0, ThumbnailBuilder::new(4)),
             scroll: 0.0,
             results_container_size: (1.0, 1.0),
         };
@@ -61,6 +61,8 @@ impl Application for TagExplorer {
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
             Message::Tick => {
+                self.build_thumbnails();
+
                 let Some(rx) = &mut self.receiver else {
                     return Command::none();
                 };
@@ -74,7 +76,6 @@ impl Application for TagExplorer {
                     .take(MAX_RESULTS_PER_TICK)
                     .collect()
                 );
-
             }
 
             Message::FocusQuery => {
@@ -116,7 +117,6 @@ impl Application for TagExplorer {
             }
 
             Message::MainResultsResized(rect) => {
-                // println!("Main resized: {rect:?}");
                 self.results_container_size = (rect.width, rect.height);
             }
 
@@ -231,14 +231,42 @@ impl TagExplorer {
         ])
     }
 
-    fn build_thumbnails(&mut self) {}
+    fn build_thumbnails(&mut self) {
+        let range = self.get_visible_items_range();
+        let (index, builder) = &mut self.thumbnail_builder;
+
+        let Some(path) = self.items.get(*index) else {
+            *index = 0;
+            return;
+        };
+
+        *index += 1;
+        if !range.contains(index) {
+            *index = range.start;
+        }
+        
+        if path.is_dir() || !thumbnail::is_file_supported(path) {
+            return;
+        }
+
+        if path.get_thumbnail_cache_path().exists() {
+            if rand::thread_rng().gen_bool(0.9) {
+                return;
+            }
+        }
+
+        let accepted = builder.build_for_path(path);
+        if !accepted {
+            return;
+        }
+    }
 
     fn get_visible_items_range(&self) -> std::ops::Range<usize> {
         let items_per_row: usize = (self.results_container_size.0 / TOTAL_ITEM_SIZE.0) as usize;
         //          (        Which row do we start at?       ) * items per row
         let start = (self.scroll / TOTAL_ITEM_SIZE.1) as usize * items_per_row;
         //        start + (           How many rows does the view span?                    ) * items per row
-        let end = start + ((self.results_container_size.1 / TOTAL_ITEM_SIZE.1) as usize + 1) * items_per_row;
+        let end = start + ((self.results_container_size.1 / TOTAL_ITEM_SIZE.1) as usize + 2) * items_per_row;
 
         start..end
     }
@@ -254,17 +282,16 @@ impl TagExplorer {
             .unwrap()
             .to_string_lossy();
 
-        let img = if path.get_cache_path().exists() {
-            image(path.get_cache_path())
+        let img = if path.get_thumbnail_cache_path().exists() {
+            image(path.get_thumbnail_cache_path())
         } else if path.is_dir() {
             image("assets/folder.png")
         } else {
             image("assets/file.png")
         };
 
-        use iced::ContentFit;
         column![
-            img.content_fit(ContentFit::Contain),
+            img.content_fit(iced::ContentFit::Contain),
             text(file_name)
                 .size(14)
                 .vertical_alignment(alignment::Vertical::Center),

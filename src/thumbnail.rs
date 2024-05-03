@@ -75,30 +75,35 @@ fn hash_path(path: &Path) -> u64 {
     s.finish()
 }
 
-pub fn is_file_supported(path: &Path) -> Result<bool, ImageError> {
-    match ImageFormat::from_path(path) {
-        Ok(_) => Ok(true),
-        Err(ImageError::Unsupported(_)) => Ok(false),
-        Err(err) => Err(err),
-    }
+// TODO return Result?
+// pub fn is_file_supported(path: &Path) -> Result<bool, ImageError> {
+//     match ImageFormat::from_path(path) {
+//         Ok(_) => Ok(true),
+//         Err(ImageError::Unsupported(_)) => Ok(false),
+//         Err(err) => Err(err),
+//     }
+// }
+pub fn is_file_supported(path: &Path) -> bool {
+    ImageFormat::from_path(path).is_ok()
+}
+
+pub fn clear_thumbnails() -> std::io::Result<()> {
+    std::fs::remove_dir_all( get_cache_dir() )
 }
 
 
 
 
 
-/// TODO impl Thumbnail for AsRef<Path>?
 pub trait Thumbnail {
-    /// TODO rename
-    fn get_cache_path(&self) -> PathBuf;
+    fn get_thumbnail_cache_path(&self) -> PathBuf;
 
     fn create_thumbnail(&self) -> Result<(), ThumbnailError>;
 }
 
 impl Thumbnail for &Path {
     #[inline]
-    // todo maybe check out other image formats like png, *qoi* (promising!)
-    fn get_cache_path(&self) -> PathBuf {
+    fn get_thumbnail_cache_path(&self) -> PathBuf {
         get_cache_dir() .join( format!("{}.jpeg", hash_path(self)) )
     }
 
@@ -109,40 +114,74 @@ impl Thumbnail for &Path {
         let (w, h) = ThumbnailSize::Icon.size();
         img.thumbnail(w, h)
             .into_rgb8()
-            .save(self.get_cache_path())?;
+            .save(self.get_thumbnail_cache_path())?;
         Ok(())
     }
+}
 
+impl Thumbnail for PathBuf {
+    #[inline]
+    fn get_thumbnail_cache_path(&self) -> PathBuf {
+        self.as_path().get_thumbnail_cache_path()
+    }
+
+    fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
+        self.as_path().create_thumbnail()
+    }
 }
 
 
 
-#[derive(Default)]
-pub struct ThumbnailBuilder( Option<JoinHandle<()>> );
+type Worker = JoinHandle<Result<(), ThumbnailError>>;
+pub struct ThumbnailBuilder(Vec< Option<Worker> >);
 
 impl ThumbnailBuilder {
-    pub fn build_for_path(&mut self, path: &Path) {
-        if self.is_active() {
-            return;
+    pub fn new(thread_count: usize) -> Self {
+        ThumbnailBuilder (
+            (0..thread_count)
+                .map(|_| None)
+                .collect()
+        )
+    }
+
+    /// Returns whether the job was accepted
+    pub fn build_for_path(&mut self, path: &Path) -> bool {
+        for worker_maybe in self.0.iter_mut() {
+            let is_done = worker_maybe.as_ref()
+                .map(|h| h.is_finished())
+                .unwrap_or(true);
+            if !is_done {
+                continue;
+            }
+
+            let handle = ThumbnailBuilder::build(path);
+            if let Some(old_worker) = worker_maybe.replace(handle) {
+                old_worker.join();
+            }
+
+            return true;
         }
 
-        let handle = ThumbnailBuilder::build(path);
-        self.0.replace(handle);
+        false
     }
 
-    pub fn is_active(&self) -> bool {
-        self.0.as_ref()
-            .map(|handle| !handle.is_finished())
-            .unwrap_or(false)
-    }
-
-    fn build(path: &Path) -> JoinHandle<()> {
+    fn build(path: &Path) -> Worker {
         let path = path.to_path_buf();
         thread::spawn(move || {
-            // TODO return result
-            path.as_path().create_thumbnail();
+            path.create_thumbnail()
         })
     }
+}
+
+impl Drop for ThumbnailBuilder {
+	fn drop(&mut self) {
+
+        for worker in self.0.iter_mut() {
+            if let Some(handle) = worker.take() {
+                handle.join();
+            }
+        }
+	}
 }
 
 
@@ -174,7 +213,7 @@ mod tests {
         for pb in it {
 
             std::thread::spawn(move || {
-                match pb.as_path().create_thumbnail() {
+                match pb.create_thumbnail() {
                     Ok(()) => {
                         println!("Created thumbnail for {}", pb.display());
                     },
@@ -188,6 +227,13 @@ mod tests {
             });
 
         }
+    }
+
+    #[test]
+    #[ignore]
+    fn clear_cache() {
+        println!("Clearing cache...");
+        clear_thumbnails() .unwrap();
     }
 
 
