@@ -1,20 +1,20 @@
 use std::fs::create_dir;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::{io, thread};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::thread::JoinHandle;
+use std::{io, thread};
 
 use image::io::Reader as ImageReader;
 use image::{ImageError, ImageFormat};
+use iced::widget;
 use thiserror::Error;
 
 use crate::get_temp_dir;
 
+pub const MAX_CACHE_SIZE_BYTES: u64 = 100_000;
 
 static CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
-
-
 
 #[derive(Debug, Error)]
 pub enum ThumbnailError {
@@ -32,8 +32,6 @@ impl ThumbnailError {
         )
     }
 }
-
-
 
 #[allow(unused)]
 enum ThumbnailSize {
@@ -56,12 +54,91 @@ impl ThumbnailSize {
     }
 }
 
+/// Trait that handles thumbnail building
+pub trait Thumbnail {
+    fn get_thumbnail_cache_path(&self) -> PathBuf;
 
+    fn create_thumbnail(&self) -> Result<(), ThumbnailError>;
+}
 
+impl Thumbnail for &Path {
+    #[inline]
+    fn get_thumbnail_cache_path(&self) -> PathBuf {
+        get_cache_dir().join(format!("{}.jpg", hash_path(self)))
+    }
+
+    fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
+        let img = ImageReader::open(self)?.decode()?;
+
+        let (w, h) = ThumbnailSize::Icon.size();
+        img.thumbnail(w, h)
+            .into_rgb8()
+            .save(self.get_thumbnail_cache_path())?;
+        Ok(())
+    }
+}
+
+impl Thumbnail for PathBuf {
+    #[inline]
+    fn get_thumbnail_cache_path(&self) -> PathBuf {
+        self.as_path().get_thumbnail_cache_path()
+    }
+
+    fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
+        self.as_path().create_thumbnail()
+    }
+}
+
+type Worker = JoinHandle<Result<(), ThumbnailError>>;
+pub struct ThumbnailBuilder(Vec<Option<Worker>>);
+
+impl ThumbnailBuilder {
+    pub fn new(thread_count: usize) -> Self {
+        ThumbnailBuilder((0..thread_count).map(|_| None).collect())
+    }
+
+    /// Returns whether the job was accepted
+    pub fn build_for_path(&mut self, path: &Path) -> bool {
+        for worker_maybe in self.0.iter_mut() {
+            let is_done = worker_maybe
+                .as_ref()
+                .map(|h| h.is_finished())
+                .unwrap_or(true);
+            if !is_done {
+                continue;
+            }
+
+            let handle = ThumbnailBuilder::build(path);
+            if let Some(old_worker) = worker_maybe.replace(handle) {
+                old_worker.join();
+            }
+
+            return true;
+        }
+
+        false
+    }
+
+    fn build(path: &Path) -> Worker {
+        let path = path.to_path_buf();
+        thread::spawn(move || path.create_thumbnail())
+    }
+}
+
+impl Drop for ThumbnailBuilder {
+    fn drop(&mut self) {
+        // Join all threads
+        for worker in self.0.iter_mut() {
+            if let Some(handle) = worker.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
 
 pub fn get_cache_dir() -> &'static PathBuf {
     CACHE_DIR.get_or_init(|| {
-        let pb = get_temp_dir() .join("thumbnails/");
+        let pb = get_temp_dir().join("thumbnails/");
         if !pb.exists() {
             create_dir(&pb).unwrap(); // handle this unwrap at some point lol
         }
@@ -88,110 +165,101 @@ pub fn is_file_supported(path: &Path) -> bool {
 }
 
 pub fn clear_thumbnails() -> std::io::Result<()> {
-    std::fs::remove_dir_all( get_cache_dir() )
+    std::fs::remove_dir_all(get_cache_dir())
 }
 
-
-
-
-
-pub trait Thumbnail {
-    fn get_thumbnail_cache_path(&self) -> PathBuf;
-
-    fn create_thumbnail(&self) -> Result<(), ThumbnailError>;
+pub fn cache_size() -> io::Result<u64> {
+    let size: u64 = get_cache_dir()
+        .read_dir()?
+        .flatten()
+        .flat_map(|de| de.metadata())
+        .fold(0, |acc, meta| acc + meta.len());
+    Ok(size)
 }
 
-impl Thumbnail for &Path {
-    #[inline]
-    fn get_thumbnail_cache_path(&self) -> PathBuf {
-        get_cache_dir() .join( format!("{}.jpeg", hash_path(self)) )
+/// Removes cached thumbnails randomly until `max_size_bytes`.
+/// May remove more or less depending on rng ¯\_(ツ)_/¯
+/// The idea is that unused files will slowly be removed over time, and frequently
+/// used ones will just be rebuilt when necessary.
+/// Returns how many bytes were trimmed
+pub fn trim_cache(max_size_bytes: u64) -> io::Result<u64> {
+    let size = cache_size().unwrap();
+    // No need to trim
+    if size < max_size_bytes {
+        return Ok(0);
     }
 
-    fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
-        let img = ImageReader::open(self)?
-            .decode()?;
-
-        let (w, h) = ThumbnailSize::Icon.size();
-        img.thumbnail(w, h)
-            .into_rgb8()
-            .save(self.get_thumbnail_cache_path())?;
-        Ok(())
-    }
+    trim_cache_percent(1.0 - max_size_bytes as f64 / size as f64)
 }
 
-impl Thumbnail for PathBuf {
-    #[inline]
-    fn get_thumbnail_cache_path(&self) -> PathBuf {
-        self.as_path().get_thumbnail_cache_path()
+/// Removes cached thumbnails randomly until `max_size_bytes`.
+/// The idea is that unused files will slowly be removed over time, and frequently
+/// used ones will just be rebuilt when necessary.
+/// Returns how many bytes were trimmed
+pub fn trim_cache_strict(max_size_bytes: u64) -> io::Result<u64> {
+    let original_size = cache_size().unwrap();
+    // No need to trim
+    if original_size < max_size_bytes {
+        return Ok(0);
     }
 
-    fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
-        self.as_path().create_thumbnail()
+    let mut size: u64 = original_size;
+    while size >= max_size_bytes {
+        size -= trim_cache_percent(1.0 - max_size_bytes as f64 / size as f64)?;
     }
+
+    Ok(original_size - size)
 }
 
-
-
-type Worker = JoinHandle<Result<(), ThumbnailError>>;
-pub struct ThumbnailBuilder(Vec< Option<Worker> >);
-
-impl ThumbnailBuilder {
-    pub fn new(thread_count: usize) -> Self {
-        ThumbnailBuilder (
-            (0..thread_count)
-                .map(|_| None)
-                .collect()
-        )
+/// Removes `target_percentage` (between 0 and 1) percent of cached thumbnails randomly.
+/// The idea is that unused files will slowly be removed over time, and frequently
+/// used ones will just be rebuilt when necessary.
+/// Returns how many bytes were trimmed
+fn trim_cache_percent(target_percentage: f64) -> io::Result<u64> {
+    if target_percentage <= 0.0 {
+        return Ok(0);
     }
 
-    /// Returns whether the job was accepted
-    pub fn build_for_path(&mut self, path: &Path) -> bool {
-        for worker_maybe in self.0.iter_mut() {
-            let is_done = worker_maybe.as_ref()
-                .map(|h| h.is_finished())
-                .unwrap_or(true);
-            if !is_done {
-                continue;
-            }
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
 
-            let handle = ThumbnailBuilder::build(path);
-            if let Some(old_worker) = worker_maybe.replace(handle) {
-                old_worker.join();
-            }
-
-            return true;
+    let readdir = get_cache_dir().read_dir()?.flatten().map(|de| de.path());
+    let mut trimmed_bytes: u64 = 0;
+    for pb in readdir {
+        if !rng.gen_bool(target_percentage) {
+            continue;
         }
 
-        false
-    }
+        let size = pb.metadata().map(|m| m.len()).unwrap_or(0);
 
-    fn build(path: &Path) -> Worker {
-        let path = path.to_path_buf();
-        thread::spawn(move || {
-            path.create_thumbnail()
-        })
-    }
-}
-
-impl Drop for ThumbnailBuilder {
-	fn drop(&mut self) {
-
-        for worker in self.0.iter_mut() {
-            if let Some(handle) = worker.take() {
-                handle.join();
-            }
+        if std::fs::remove_file(&pb).is_ok() {
+            trimmed_bytes += size;
         }
-	}
+    }
+    Ok(trimmed_bytes)
 }
 
+
+
+pub fn load_thumbnail_for_path(path: &Path) -> widget::Image<widget::image::Handle> {
+    let cache_path = path.get_thumbnail_cache_path();
+    if cache_path.exists() {
+        return widget::image(cache_path);
+    } else if path.is_dir() {
+        return widget::image("assets/folder.png");
+    }
+    widget::image("assets/file.png")
+    // Custom file icons ...
+}
 
 
 
 
 #[cfg(test)]
 mod tests {
+    use rand::Rng;
     use std::collections::HashSet;
-    use walkdir:: WalkDir;
+    use walkdir::WalkDir;
 
     use super::*;
 
@@ -200,50 +268,46 @@ mod tests {
     fn rebuild_thumbnails() {
         let it = WalkDir::new("C:/Users/ddxte/Pictures/")
             .into_iter()
-            .filter_entry(|de|
+            .filter_entry(|de| {
                 !de.file_name()
                     .to_str()
                     .map(|s| s.starts_with('.'))
                     .unwrap_or(false)
-            )
+            })
             .flatten()
             .map(|de| de.into_path())
             .filter(|pb| pb.is_file());
 
+        let thread_count = 10;
+        let mut builder = ThumbnailBuilder::new(thread_count);
+
+        println!("Building thumbnails... {thread_count} threads");
         for pb in it {
+            if pb.is_dir() || !is_file_supported(&pb) {
+                continue;
+            }
 
-            std::thread::spawn(move || {
-                match pb.create_thumbnail() {
-                    Ok(()) => {
-                        println!("Created thumbnail for {}", pb.display());
-                    },
-
-                    Err(err) => {
-                        if !err.is_unsupported() {
-                            println!("Error on {}: {}", pb.display(), err);
-                        }
-                    },
+            loop {
+                let accepted = builder.build_for_path(&pb);
+                if accepted {
+                    break;
                 }
-            });
-
+            }
         }
+
+        drop(builder);
+        println!("Finishing...");
+        thread::sleep(std::time::Duration::from_millis(1000));
+
+        println!("Done");
+        println!("Size = {}", cache_size().unwrap());
     }
 
     #[test]
     #[ignore]
     fn clear_cache() {
         println!("Clearing cache...");
-        clear_thumbnails() .unwrap();
-    }
-
-
-    #[test]
-    #[ignore = "non-funtional"]
-    fn test_cache_size() {
-        // TODO use fs_extra: https://stackoverflow.com/questions/60041710/how-to-check-directory-size
-        let meta = std::fs::metadata("assets/wimdy.jpg") .unwrap();
-        let len = meta.len();
-        println!("Size of assets folder: {} bytes", len);
+        clear_thumbnails().unwrap();
     }
 
     #[test]
@@ -252,12 +316,12 @@ mod tests {
         let mut map = HashSet::new();
         let it = WalkDir::new("C:/Users/ddxte/")
             .into_iter()
-            .filter_entry(|de|
+            .filter_entry(|de| {
                 !de.file_name()
                     .to_str()
                     .map(|s| s.starts_with('.'))
                     .unwrap_or(false)
-            )
+            })
             .flatten()
             .map(|de| de.into_path())
             .filter(|pb| pb.is_file());
@@ -278,4 +342,51 @@ mod tests {
         assert!(duplicate_count < 10);
     }
 
+    #[test]
+    #[ignore]
+    fn test_prune_cache() {
+        let max_size = 100_000;
+        let size = cache_size().unwrap();
+
+        if size < max_size {
+            println!("No need for pruning");
+            dbg!(size, max_size);
+            return;
+        }
+
+        println!("Size before pruning: {size}");
+
+        let readdir = get_cache_dir()
+            .read_dir()
+            .unwrap()
+            .flatten()
+            .map(|de| de.path());
+
+        let mut rng = rand::thread_rng();
+        let prob: f64 = 1.0 - max_size as f64 / size as f64;
+        let mut count: usize = 0;
+        let mut files_count: usize = 0;
+
+        println!("Pruning... target = {}%", prob * 100.0);
+
+        for pb in readdir {
+            files_count += 1;
+            if !rng.gen_bool(prob) {
+                continue;
+            }
+            let res = std::fs::remove_file(pb);
+            if res.is_ok() {
+                count += 1;
+            }
+        }
+
+        println!(
+            "Removed {} / {} files ({}%)",
+            count,
+            files_count,
+            (count as f32 / files_count as f32) * 100.0
+        );
+        let size = cache_size().unwrap();
+        println!("Size after pruning: {size}");
+    }
 }

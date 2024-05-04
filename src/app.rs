@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use iced::widget::scrollable::Viewport;
 use iced::widget::{
-    button, column, container, image, row, scrollable, text, text_input, Column, Container
+    button, column, container, row, scrollable, text, text_input, Column, Container
 };
 use iced::{self, alignment, Length, Rectangle};
 use iced::{time, Application, Command, Theme};
@@ -13,7 +13,7 @@ use rand::Rng;
 
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
-use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
+use crate::thumbnail::{self, load_thumbnail_for_path, Thumbnail, ThumbnailBuilder};
 
 const UPDATE_RATE_MS: u64 = 100;
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
@@ -157,7 +157,7 @@ impl Application for TagExplorer {
                     }
                     TagExplorer::unhandled_key_input(kb_event)
                 },
-                Event::Window(id, iced::window::Event::Resized { width, height }) => {
+                Event::Window(_id, iced::window::Event::Resized { width, height }) => {
                     Some(Message::WindowResized(width as f32, height as f32))
                 },
                 _ => None,
@@ -240,6 +240,7 @@ impl TagExplorer {
             return;
         };
 
+        // Move on to the next one
         *index += 1;
         if !range.contains(index) {
             *index = range.start;
@@ -249,18 +250,19 @@ impl TagExplorer {
             return;
         }
 
-        if path.get_thumbnail_cache_path().exists() {
-            if rand::thread_rng().gen_bool(0.9) {
-                return;
-            }
-        }
-
-        let accepted = builder.build_for_path(path);
-        if !accepted {
+        // If thumbnail already exists, don't try to rebuild it 90% of the time
+        // TODO make the probability configurable
+        if path.get_thumbnail_cache_path().exists()
+            && rand::thread_rng().gen_bool(0.9)
+        {
             return;
         }
+
+        // Build
+        builder.build_for_path(path);
     }
 
+    /// Get the range of items which are visible in the main view
     fn get_visible_items_range(&self) -> std::ops::Range<usize> {
         let items_per_row: usize = (self.results_container_size.0 / TOTAL_ITEM_SIZE.0) as usize;
         //          (        Which row do we start at?       ) * items per row
@@ -281,14 +283,7 @@ impl TagExplorer {
         let file_name = path.file_name()
             .unwrap()
             .to_string_lossy();
-
-        let img = if path.get_thumbnail_cache_path().exists() {
-            image(path.get_thumbnail_cache_path())
-        } else if path.is_dir() {
-            image("assets/folder.png")
-        } else {
-            image("assets/file.png")
-        };
+        let img = load_thumbnail_for_path(path);
 
         column![
             img.content_fit(iced::ContentFit::Contain),

@@ -115,7 +115,7 @@ impl Searcher {
 impl From<&Tag> for Searcher {
     fn from(tag: &Tag) -> Self {
         Searcher {
-            entries: Entries::from(tag.get_all_entries()),
+            entries: tag.get_all_entries(),
         }
     }
 }
