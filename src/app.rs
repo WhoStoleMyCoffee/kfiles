@@ -4,13 +4,14 @@ use std::time::Duration;
 
 use iced::widget::scrollable::Viewport;
 use iced::widget::{
-    button, column, container, row, scrollable, text, text_input, Column, Container
+    button, column, container, row, scrollable, text, text_input, tooltip, Column, Container
 };
 use iced::{self, alignment, Length, Rectangle};
 use iced::{time, Application, Command, Theme};
 use iced_aw::Wrap;
 use rand::Rng;
 
+use crate::dir_entry::dir_entry;
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
 use crate::thumbnail::{self, load_thumbnail_for_path, Thumbnail, ThumbnailBuilder};
@@ -25,12 +26,12 @@ const ITEM_SPACING: (f32, f32) = (8.0, 8.0);
 const TOTAL_ITEM_SIZE: (f32, f32) = (ITEM_SIZE.0 + ITEM_SPACING.0, ITEM_SIZE.1 + ITEM_SPACING.1);
 
 
+// TODO refactor
 pub struct TagExplorer {
     query: Query,
     items: Vec<PathBuf>,
     receiver: Option<Receiver<PathBuf>>,
     thumbnail_builder: (usize, ThumbnailBuilder),
-    // TODO refactor
     scroll: f32,
     results_container_size: (f32, f32),
 }
@@ -138,7 +139,10 @@ impl Application for TagExplorer {
         })))
         .width(100);
 
-        row![tags_list, self.view_main()].into()
+        row![
+            tags_list,
+            self.view_main(),
+        ].into()
     }
 
     fn theme(&self) -> Self::Theme {
@@ -210,8 +214,11 @@ impl TagExplorer {
         let visible_range = self.get_visible_items_range();
         let results = Wrap::with_elements(
                 self.items.iter().enumerate()
-                .map(|(i, pb)|
-                     self.display_dir( &pb, visible_range.contains(&i) ).into()
+                .map(|(i, pb)| dir_entry(&pb)
+                    .cull( !visible_range.contains(&i) )
+                    .width(ITEM_SIZE.0)
+                    .height(ITEM_SIZE.1)
+                    .into()
                 )
                 .collect()
             )
@@ -273,30 +280,6 @@ impl TagExplorer {
         start..end
     }
 
-    fn display_dir(&self, path: &Path, is_visible: bool) -> Column<'static, Message> {
-        if !is_visible {
-            return column![]
-                .width(ITEM_SIZE.0)
-                .height(ITEM_SIZE.1);
-        }
-
-        let file_name = path.file_name()
-            .unwrap()
-            .to_string_lossy();
-        let img = load_thumbnail_for_path(path);
-
-        column![
-            img.content_fit(iced::ContentFit::Contain),
-            text(file_name)
-                .size(14)
-                .vertical_alignment(alignment::Vertical::Center),
-        ]
-        .width(ITEM_SIZE.0)
-        .height(ITEM_SIZE.1)
-        .clip(true)
-        .align_items(iced::Alignment::Center)
-    }
-
 }
 
 #[derive(Debug, Clone)]
@@ -311,4 +294,6 @@ pub enum Message {
     MainResultsResized(Rectangle),
     WindowResized(f32, f32),
 }
+
+
 

@@ -6,6 +6,7 @@ pub mod app;
 pub mod search;
 pub mod tag;
 pub mod thumbnail;
+pub mod dir_entry;
 
 use app::TagExplorer;
 
