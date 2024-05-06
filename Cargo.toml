@@ -16,10 +16,10 @@ thiserror = "1.0.59"
 convert_case = "0.6.0"
 image = "0.25.1"
 rand = "0.8.5"
+opener = "0.7.0"
 
 # anyhow
 # clean-path
-# opener
 # confy
 
 [profile.dev]

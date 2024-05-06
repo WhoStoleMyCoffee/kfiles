@@ -10,6 +10,7 @@ use toml;
 
 use serde::{Deserialize, Serialize};
 
+use crate::app::Item;
 use crate::search::Searcher;
 
 #[derive(Debug, Error)]
@@ -251,7 +252,7 @@ impl Tag {
     }
 
     /// Get all directories under this [`Tag`], including all subtags
-    pub fn get_dirs(&self) -> Box<dyn Iterator<Item = PathBuf>> {
+    pub fn get_dirs(&self) -> Box<dyn Iterator<Item = Item>> {
         let searcher = Searcher::from(self);
         searcher.search()
     }
@@ -377,30 +378,24 @@ impl Display for TagID {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 // TODO hashset
 pub struct Entries(Vec<PathBuf>);
 
 impl Entries {
-    // TODO optimize
+    /// Combines this `Entry` with `other` by union
     pub fn or<E>(&self, other: &E) -> Entries
     where
         E: AsRef<Vec<PathBuf>>,
     {
-        let c: Vec<PathBuf> = self
-            .0
-            .iter()
-            .filter(|&ap| {
-                !other
-                    .as_ref()
-                    .iter()
-                    .any(|bp| ap.starts_with(bp) || ap == bp)
-            })
-            .chain(
-                other
-                    .as_ref()
-                    .iter()
-                    .filter(|bp| !self.0.iter().any(|ap| bp.starts_with(ap))),
+        let c: Vec<PathBuf> = self.0.iter()
+            .filter(|&ap| !other.as_ref().iter()
+                .any(|bp| ap.starts_with(bp) || ap == bp)
+            )
+            .chain(other.as_ref().iter()
+                .filter(|bp| !self.0.iter()
+                    .any(|ap| bp.starts_with(ap))
+                )
             )
             .cloned()
             .collect();
@@ -408,25 +403,19 @@ impl Entries {
         Entries(c)
     }
 
-    // TODO optimize
+    /// Combines this `Entry` with `other` by intersection
     pub fn and<E>(&self, other: &E) -> Entries
     where
         E: AsRef<Vec<PathBuf>>,
     {
-        let c: Vec<PathBuf> = self
-            .0
-            .iter()
-            .filter(|&ap| {
-                other
-                    .as_ref()
-                    .iter()
-                    .any(|bp| ap.starts_with(bp) || ap == bp)
-            })
-            .chain(
-                other
-                    .as_ref()
-                    .iter()
-                    .filter(|bp| self.0.iter().any(|ap| bp.starts_with(ap))),
+        let c: Vec<PathBuf> = self.0.iter()
+            .filter(|&ap| other.as_ref().iter()
+                .any(|bp| ap.starts_with(bp) || ap == bp)
+            )
+            .chain(other.as_ref().iter()
+                .filter(|bp| self.0.iter()
+                    .any(|ap| bp.starts_with(ap))
+                )
             )
             .cloned()
             .collect();

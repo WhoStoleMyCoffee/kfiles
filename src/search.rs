@@ -4,7 +4,9 @@ use std::thread;
 
 use walkdir::{DirEntry, WalkDir};
 
+use crate::app::Item;
 use crate::tag::{ Entries, Tag };
+
 
 fn is_direntry_hidden(entry: &DirEntry) -> bool {
     entry
@@ -14,6 +16,8 @@ fn is_direntry_hidden(entry: &DirEntry) -> bool {
         .unwrap_or(false)
 }
 
+/// A query to search through `tags` with an optional `query`
+/// Use [`search`] to begin the search
 #[derive(Debug, Default)]
 pub struct Query {
     pub tags: Vec<Tag>,
@@ -49,20 +53,20 @@ impl Query {
         false
     }
 
-    /// TODO turn this into a Result
-    pub fn search(&self) -> Option<Receiver<PathBuf>> {
-        let mut searcher = Searcher::from(self.tags.first()?);
-        for tag in self.tags.iter().skip(1) {
-            // or?
-            searcher.and(&tag.get_all_entries());
+    /// TODO turn this into a Result?
+    /// Begins the search.
+    /// Returns `None`if there is on query
+    pub fn search(&self) -> Option<Receiver<Item>> {
+        let (tx, rx) = mpsc::channel::<Item>();
+        let searcher = Searcher::from(self);
+        if searcher.is_empty() {
+            return None;
         }
-
-        let (tx, rx) = mpsc::channel::<PathBuf>();
 
         thread::spawn(move || {
             let it = searcher.search();
-            for pb in it {
-                if tx.send(pb).is_err() {
+            for item in it {
+                if tx.send(item).is_err() {
                     return;
                 }
             }
@@ -72,7 +76,9 @@ impl Query {
     }
 }
 
+/// A struct that searches through
 /// TODO create from list of tags? -> Option<Self>
+#[derive(Debug, Default)]
 pub struct Searcher {
     entries: Entries,
     // query: String,
@@ -89,22 +95,32 @@ impl Searcher {
         self
     }
 
-    pub fn search(&self) -> Box<dyn Iterator<Item = PathBuf>> {
+    /// Returns whether this `Searcher` is empty
+    /// Empty `Searcher`s will yield no results
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn search(&self) -> Box<dyn Iterator<Item = Item>> {
+        if self.is_empty() {
+            return Box::new(std::iter::empty());
+        }
+
         // Files and folders merged with subtags
-        let (files, folders) = self
-            .entries
-            .iter()
+        let (files, folders) = self.entries.iter()
             .cloned()
             .partition::<Vec<PathBuf>, _>(|pb| pb.is_file());
 
-        let mut it: Box<dyn Iterator<Item = PathBuf>> = Box::new(files.into_iter());
+        let mut it: Box<dyn Iterator<Item = Item>> = Box::new(files.into_iter()
+            .map(|pb| Item(0, pb))
+        );
 
         for pb in folders {
-            let walker = WalkDir::new(pb)
-                .into_iter()
+            let walker = WalkDir::new(pb).into_iter()
                 .filter_entry(|de| !is_direntry_hidden(de))
                 .flatten()
-                .map(|e| e.into_path());
+                .map(|de| Item(0, de.into_path()) );
             it = Box::new(it.chain(walker));
         }
 
@@ -113,9 +129,25 @@ impl Searcher {
 }
 
 impl From<&Tag> for Searcher {
+    #[inline]
     fn from(tag: &Tag) -> Self {
         Searcher {
             entries: tag.get_all_entries(),
         }
+    }
+}
+
+impl From<&Query> for Searcher {
+    fn from(query: &Query) -> Self {
+        let mut searcher = match query.tags.first() {
+            Some(tag) => Searcher::from(tag),
+            None => return Searcher::default(),
+        };
+        for tag in query.tags.iter().skip(1) {
+            // or?
+            searcher.and(&tag.get_all_entries());
+        }
+
+        searcher
     }
 }

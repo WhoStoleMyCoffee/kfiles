@@ -1,4 +1,5 @@
 use std::path::{ PathBuf, Path };
+use std::time::{Duration, Instant};
 
 use iced::alignment::Vertical;
 use iced::widget::container::Appearance;
@@ -18,7 +19,9 @@ const HOVERED_COLOR: Color = Color {
 
 
 pub fn dir_entry<Message, P>(path: P) -> DirEntry<Message>
-where P: AsRef<Path>
+where
+    P: AsRef<Path>,
+    Message: Clone,
 {
     DirEntry::new(path)
 }
@@ -28,11 +31,13 @@ where P: AsRef<Path>
 pub enum Event {
     Hovered,
     Unhovered,
+    Pressed,
 }
 
 #[derive(Debug, Default)]
 pub struct State {
     is_hovered: bool,
+    last_pressed: Option<Instant>,
 }
 
 impl State {
@@ -45,15 +50,15 @@ impl State {
 }
 
 
-pub struct DirEntry<Message> {
+pub struct DirEntry<Message: Clone> {
     path: PathBuf,
     do_cull: bool,
     width: Length,
     height: Length,
-    on_press: Option<Message>
+    on_select: Option<Message>
 }
 
-impl<Message> DirEntry<Message> {
+impl<Message: Clone> DirEntry<Message> {
     pub fn new<P>(path: P) -> Self
     where P: AsRef<Path>
     {
@@ -62,7 +67,7 @@ impl<Message> DirEntry<Message> {
             do_cull: false,
             width: Length::Shrink,
             height: Length::Shrink,
-            on_press: None,
+            on_select: None,
         }
     }
 
@@ -80,10 +85,18 @@ impl<Message> DirEntry<Message> {
         self.height = height.into();
         self
     }
+
+    /// Does nothing if culled (See [`cull`])
+    pub fn on_select(mut self, message: Message) -> Self {
+        if !self.do_cull {
+            self.on_select = Some(message);
+        }
+        self
+    }
 }
 
 
-impl<Message> Component<Message> for DirEntry<Message> {
+impl<Message: Clone> Component<Message> for DirEntry<Message> {
     type State = State;
     type Event = Event;
 
@@ -99,6 +112,16 @@ impl<Message> Component<Message> for DirEntry<Message> {
 
             Event::Unhovered => {
                 state.is_hovered = false;
+            }
+
+            Event::Pressed => {
+                const DOUBLE_CLICK_MILLIS: u64 = 500;
+
+                if let Some(instant) = state.last_pressed.replace(Instant::now()) {
+                    if instant.elapsed() < Duration::from_millis(DOUBLE_CLICK_MILLIS) {
+                        return self.on_select.clone();
+                    }
+                }
             }
         }
 
@@ -135,16 +158,16 @@ impl<Message> Component<Message> for DirEntry<Message> {
             mouse_area(inner)
                 .on_enter(Event::Hovered)
                 .on_exit(Event::Unhovered)
+                .on_press(Event::Pressed)
         )
         .style(state.get_appearance())
         .into()
     }
 }
 
-impl<'a, Message> From<DirEntry<Message>>
-    for Element<'a, Message>
+impl<'a, Message> From<DirEntry<Message>> for Element<'a, Message>
 where
-    Message: 'a
+    Message: 'a + Clone
 {
     fn from(dir_entry: DirEntry<Message>) -> Self {
         component(dir_entry)

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
@@ -25,6 +25,8 @@ const ITEM_SIZE: (f32, f32) = (80.0, 120.0);
 const ITEM_SPACING: (f32, f32) = (8.0, 8.0);
 const TOTAL_ITEM_SIZE: (f32, f32) = (ITEM_SIZE.0 + ITEM_SPACING.0, ITEM_SIZE.1 + ITEM_SPACING.1);
 
+
+
 #[derive(Debug, Clone)]
 pub enum Message {
     None,
@@ -38,6 +40,8 @@ impl From<MainMessage> for Message {
         Self::MainMessage(value)
     }
 }
+
+
 
 pub struct TagExplorer {
     main: Main,
@@ -147,6 +151,10 @@ impl TagExplorer {
     }
 }
 
+
+
+
+
 #[derive(Debug, Clone)]
 pub enum MainMessage {
     QueryTextChanged(String),
@@ -155,12 +163,24 @@ pub enum MainMessage {
     FocusQuery,
     MainResultsScrolled(Viewport),
     MainResultsResized(Rectangle),
+    OpenPath(PathBuf),
 }
+
+
+pub struct Item(pub isize, pub PathBuf);
+
+impl AsRef<PathBuf> for Item {
+    fn as_ref(&self) -> &PathBuf {
+        &self.1
+    }
+}
+
 
 struct Main {
     query: Query,
-    items: Vec<PathBuf>,
-    receiver: Option<Receiver<PathBuf>>,
+    items: Vec<Item>,
+    receiver: Option< Receiver<Item> >,
+    /// Tuple with the item index it's trying to build and the builder itself
     thumbnail_builder: (usize, ThumbnailBuilder),
     scroll: f32,
     results_container_size: (f32, f32),
@@ -210,6 +230,11 @@ impl Main {
                 }
             }
 
+            MainMessage::OpenPath(path) => {
+                println!("Opening path {}", path.display());
+                opener::open(&path) .unwrap();
+            }
+
             MainMessage::RemoveQueryTag(tag_id) => {
                 if self.query.remove_tag(&tag_id) {
                     self.update_query();
@@ -247,11 +272,12 @@ impl Main {
             self.items
                 .iter()
                 .enumerate()
-                .map(|(i, pb)| {
+                .map(|(i, Item(_score, pb))| {
                     dir_entry(&pb)
                         .cull(!visible_range.contains(&i))
                         .width(ITEM_SIZE.0)
                         .height(ITEM_SIZE.1)
+                        .on_select( MainMessage::OpenPath( pb.clone() ).into() )
                         .into()
                 })
                 .collect(),
@@ -277,7 +303,7 @@ impl Main {
         let range = self.get_visible_items_range();
         let (index, builder) = &mut self.thumbnail_builder;
 
-        let Some(path) = self.items.get(*index) else {
+        let Some(Item(_score, path)) = self.items.get(*index) else {
             *index = 0;
             return;
         };
