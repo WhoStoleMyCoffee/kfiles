@@ -1,10 +1,20 @@
 use std::path::{ PathBuf, Path };
 
 use iced::alignment::Vertical;
-use iced::{Element, Length};
-use iced::widget::{column, component, text, Component};
+use iced::widget::container::Appearance;
+use iced::{Alignment, Color, Element, Length};
+use iced::widget::{column, component, container, mouse_area, text, Component};
 
 use crate::thumbnail::load_thumbnail_for_path;
+
+
+const HOVERED_COLOR: Color = Color {
+    r: 1.0,
+    g: 1.0,
+    b: 1.0,
+    a: 0.05,
+};
+
 
 
 pub fn dir_entry<Message, P>(path: P) -> DirEntry<Message>
@@ -16,6 +26,22 @@ where P: AsRef<Path>
 
 #[derive(Debug, Clone)]
 pub enum Event {
+    Hovered,
+    Unhovered,
+}
+
+#[derive(Debug, Default)]
+pub struct State {
+    is_hovered: bool,
+}
+
+impl State {
+    fn get_appearance(&self) -> Appearance {
+        match self.is_hovered {
+            true => Appearance::default().with_background(HOVERED_COLOR),
+            false => Appearance::default(),
+        }
+    }
 }
 
 
@@ -24,7 +50,7 @@ pub struct DirEntry<Message> {
     do_cull: bool,
     width: Length,
     height: Length,
-    bup: Option<Message>,
+    on_press: Option<Message>
 }
 
 impl<Message> DirEntry<Message> {
@@ -36,7 +62,7 @@ impl<Message> DirEntry<Message> {
             do_cull: false,
             width: Length::Shrink,
             height: Length::Shrink,
-            bup: None,
+            on_press: None,
         }
     }
 
@@ -56,9 +82,9 @@ impl<Message> DirEntry<Message> {
     }
 }
 
-impl<Message> Component<Message> for DirEntry<Message>
-{
-    type State = ();
+
+impl<Message> Component<Message> for DirEntry<Message> {
+    type State = State;
     type Event = Event;
 
     fn update(
@@ -66,7 +92,17 @@ impl<Message> Component<Message> for DirEntry<Message>
         state: &mut Self::State,
         event: Self::Event,
     ) -> Option<Message> {
-        todo!()
+        match event {
+            Event::Hovered => {
+                state.is_hovered = true;
+            }
+
+            Event::Unhovered => {
+                state.is_hovered = false;
+            }
+        }
+
+        None
     }
 
     fn view(
@@ -84,16 +120,23 @@ impl<Message> Component<Message> for DirEntry<Message>
             .unwrap()
             .to_string_lossy();
         let img = load_thumbnail_for_path(&self.path);
+        let inner = column![
+                img.content_fit(iced::ContentFit::Contain),
+                text(file_name)
+                    .size(14)
+                    .vertical_alignment(Vertical::Center),
+            ]
+            .width(self.width)
+            .height(self.height)
+            .align_items(Alignment::Center)
+            .clip(true);
 
-        column![
-            img.content_fit(iced::ContentFit::Contain),
-            text(file_name)
-                .size(14)
-                .vertical_alignment(Vertical::Center),
-        ]
-        .width(self.width)
-        .height(self.height)
-        .clip(true)
+        container(
+            mouse_area(inner)
+                .on_enter(Event::Hovered)
+                .on_exit(Event::Unhovered)
+        )
+        .style(state.get_appearance())
         .into()
     }
 }

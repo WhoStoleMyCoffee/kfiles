@@ -1,12 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use iced::widget::scrollable::Viewport;
 use iced::widget::{
-    button, column, container, row, scrollable, text, text_input, tooltip, Column, Container
+    button, column, container, row, scrollable, text, text_input, Container,
 };
-use iced::{self, alignment, Length, Rectangle};
+use iced::{self, Length, Rectangle};
 use iced::{time, Application, Command, Theme};
 use iced_aw::Wrap;
 use rand::Rng;
@@ -14,7 +14,7 @@ use rand::Rng;
 use crate::dir_entry::dir_entry;
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
-use crate::thumbnail::{self, load_thumbnail_for_path, Thumbnail, ThumbnailBuilder};
+use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 
 const UPDATE_RATE_MS: u64 = 100;
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
@@ -25,15 +25,22 @@ const ITEM_SIZE: (f32, f32) = (80.0, 120.0);
 const ITEM_SPACING: (f32, f32) = (8.0, 8.0);
 const TOTAL_ITEM_SIZE: (f32, f32) = (ITEM_SIZE.0 + ITEM_SPACING.0, ITEM_SIZE.1 + ITEM_SPACING.1);
 
+#[derive(Debug, Clone)]
+pub enum Message {
+    None,
+    MainMessage(MainMessage),
+    Tick,
+    WindowResized(f32, f32),
+}
 
-// TODO refactor
+impl From<MainMessage> for Message {
+    fn from(value: MainMessage) -> Self {
+        Self::MainMessage(value)
+    }
+}
+
 pub struct TagExplorer {
-    query: Query,
-    items: Vec<PathBuf>,
-    receiver: Option<Receiver<PathBuf>>,
-    thumbnail_builder: (usize, ThumbnailBuilder),
-    scroll: f32,
-    results_container_size: (f32, f32),
+    main: Main,
 }
 
 impl Application for TagExplorer {
@@ -43,16 +50,12 @@ impl Application for TagExplorer {
     type Theme = Theme;
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        let te: TagExplorer = TagExplorer {
-            query: Query::empty(),
-            items: Vec::new(),
-            receiver: None,
-            thumbnail_builder: (0, ThumbnailBuilder::new(4)),
-            scroll: 0.0,
-            results_container_size: (1.0, 1.0),
-        };
-
-        (te, Command::none())
+        (
+            TagExplorer {
+                main: Main::default(),
+            },
+            Command::none(),
+        )
     }
 
     fn title(&self) -> String {
@@ -62,63 +65,18 @@ impl Application for TagExplorer {
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
             Message::Tick => {
-                self.build_thumbnails();
-
-                let Some(rx) = &mut self.receiver else {
-                    return Command::none();
-                };
-
-                if self.items.len() >= MAX_RESULT_COUNT {
-                    self.receiver = None;
-                    return Command::none();
-                }
-
-                self.items.append(&mut rx.try_iter()
-                    .take(MAX_RESULTS_PER_TICK)
-                    .collect()
-                );
+                return self.main.tick();
             }
 
-            Message::FocusQuery => {
-                return text_input::focus(text_input::Id::new("query_input"));
-            }
-
-            Message::QueryTextChanged(new_query) => {
-                self.query.query = new_query;
-                self.update_query();
-            }
-
-            Message::AddQueryTag(tag_id) => match tag_id.load() {
-                Ok(tag) => {
-                    if self.query.add_tag(tag) {
-                        self.update_query();
-                    }
-                }
-
-                Err(err) => {
-                    todo!()
-                }
-            },
-
-            Message::RemoveQueryTag(tag_id) => {
-                if self.query.remove_tag(&tag_id) {
-                    self.update_query();
-                }
-            }
-
-            Message::MainResultsScrolled(viewport) => {
-                self.scroll = viewport.absolute_offset().y;
-
-                self.get_visible_items_range();
+            Message::MainMessage(main_message) => {
+                return self.main.update(main_message);
             }
 
             Message::WindowResized(_width, _height) => {
                 return container::visible_bounds(container::Id::new("main_results"))
-                    .map(|rect| rect.map_or(Message::None, Message::MainResultsResized) );
-            }
-
-            Message::MainResultsResized(rect) => {
-                self.results_container_size = (rect.width, rect.height);
+                    .map(|rect|
+                        rect.map_or(Message::None, |rect| MainMessage::MainResultsResized(rect).into())
+                    );
             }
 
             Message::None => {}
@@ -127,21 +85,20 @@ impl Application for TagExplorer {
         Command::none()
     }
 
-    /// TODO REFACTOR view()
     fn view(&self) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
         // Tags list
         let all_tags = Tag::get_all_tag_ids().unwrap(); // TODO cache these
         let tags_list = scrollable(column(all_tags.into_iter().map(|id| {
             let id_str = id.as_ref();
             button(text(format!("#{id_str}")))
-                .on_press(Message::AddQueryTag(id))
+                .on_press( MainMessage::AddQueryTag(id).into() )
                 .into()
         })))
         .width(100);
 
         row![
             tags_list,
-            self.view_main(),
+            self.main.view(),
         ].into()
     }
 
@@ -152,20 +109,18 @@ impl Application for TagExplorer {
     fn subscription(&self) -> iced::Subscription<Self::Message> {
         let tick = time::every(Duration::from_millis(UPDATE_RATE_MS)).map(|_| Message::Tick);
 
-        use iced::{ event, Event };
-        let events = event::listen_with(|event, status| {
-            match event {
-                Event::Keyboard(kb_event) => {
-                    if status == event::Status::Captured {
-                        return None;
-                    }
-                    TagExplorer::unhandled_key_input(kb_event)
-                },
-                Event::Window(_id, iced::window::Event::Resized { width, height }) => {
-                    Some(Message::WindowResized(width as f32, height as f32))
-                },
-                _ => None,
+        use iced::{event, Event};
+        let events = event::listen_with(|event, status| match event {
+            Event::Keyboard(kb_event) => {
+                if status == event::Status::Captured {
+                    return None;
+                }
+                TagExplorer::unhandled_key_input(kb_event)
             }
+            Event::Window(_id, iced::window::Event::Resized { width, height }) => {
+                Some(Message::WindowResized(width as f32, height as f32))
+            }
+            _ => None,
         });
 
         iced::Subscription::batch(vec![tick, events])
@@ -186,53 +141,133 @@ impl TagExplorer {
         }
 
         match key.as_ref() {
-            Key::Character(ch) if FOCUS_QUERY_KEYS.contains(&ch) => Some(Message::FocusQuery),
+            Key::Character(ch) if FOCUS_QUERY_KEYS.contains(&ch) => Some(MainMessage::FocusQuery.into()),
             _ => None,
         }
     }
+}
 
-    pub fn update_query(&mut self) {
-        self.items.clear();
-        self.receiver = self.query.search();
+#[derive(Debug, Clone)]
+pub enum MainMessage {
+    QueryTextChanged(String),
+    AddQueryTag(TagID),
+    RemoveQueryTag(TagID),
+    FocusQuery,
+    MainResultsScrolled(Viewport),
+    MainResultsResized(Rectangle),
+}
+
+struct Main {
+    query: Query,
+    items: Vec<PathBuf>,
+    receiver: Option<Receiver<PathBuf>>,
+    thumbnail_builder: (usize, ThumbnailBuilder),
+    scroll: f32,
+    results_container_size: (f32, f32),
+}
+
+impl Main {
+    fn tick(&mut self) -> Command<Message> {
+        self.build_thumbnails();
+
+        let Some(rx) = &mut self.receiver else {
+            return Command::none();
+        };
+
+        if self.items.len() >= MAX_RESULT_COUNT {
+            self.receiver = None;
+            return Command::none();
+        }
+
+        self.items.append(&mut rx.try_iter()
+            .take(MAX_RESULTS_PER_TICK)
+            .collect()
+        );
+
+        Command::none()
     }
 
-    fn view_main(&self) -> Container<Message> {
+    fn update(&mut self, message: MainMessage) -> Command<Message> {
+        match message {
+            MainMessage::FocusQuery => {
+                return text_input::focus(text_input::Id::new("query_input"));
+            }
+
+            MainMessage::QueryTextChanged(new_text) => {
+                self.query.query = new_text;
+                self.update_query();
+            }
+
+            MainMessage::AddQueryTag(tag_id) => match tag_id.load() {
+                Ok(tag) => {
+                    if self.query.add_tag(tag) {
+                        self.update_query();
+                    }
+                }
+
+                Err(err) => {
+                    todo!()
+                }
+            }
+
+            MainMessage::RemoveQueryTag(tag_id) => {
+                if self.query.remove_tag(&tag_id) {
+                    self.update_query();
+                }
+            }
+
+            MainMessage::MainResultsScrolled(viewport) => {
+                self.scroll = viewport.absolute_offset().y;
+            }
+
+            MainMessage::MainResultsResized(rect) => {
+                self.results_container_size = (rect.width, rect.height);
+            }
+        }
+
+        Command::none()
+    }
+
+    fn view(&self) -> Container<Message> {
         let query_input = column![
             row(self.query.tags.iter().map(|tag| {
                 let id = &tag.id;
                 button(text(id.as_ref().as_str()).size(14))
-                    .on_press(Message::RemoveQueryTag(id.clone()))
+                    .on_press(MainMessage::RemoveQueryTag(id.clone()).into())
                     .into()
             })),
             text_input("Query...", &self.query.query)
                 .id(text_input::Id::new("query_input"))
-                .on_input(Message::QueryTextChanged)
+                .on_input(|text| MainMessage::QueryTextChanged(text).into())
         ];
-
 
         use scrollable::{Direction, Properties};
         let visible_range = self.get_visible_items_range();
         let results = Wrap::with_elements(
-                self.items.iter().enumerate()
-                .map(|(i, pb)| dir_entry(&pb)
-                    .cull( !visible_range.contains(&i) )
-                    .width(ITEM_SIZE.0)
-                    .height(ITEM_SIZE.1)
-                    .into()
-                )
-                .collect()
-            )
-            .spacing(ITEM_SPACING.0)
-            .line_spacing(ITEM_SPACING.1);
+            self.items
+                .iter()
+                .enumerate()
+                .map(|(i, pb)| {
+                    dir_entry(&pb)
+                        .cull(!visible_range.contains(&i))
+                        .width(ITEM_SIZE.0)
+                        .height(ITEM_SIZE.1)
+                        .into()
+                })
+                .collect(),
+        )
+        .spacing(ITEM_SPACING.0)
+        .line_spacing(ITEM_SPACING.1);
 
         container(column![
             query_input,
             text("Results:"),
-            container(scrollable(results)
-                .direction(Direction::Vertical(Properties::default()))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .on_scroll(Message::MainResultsScrolled)
+            container(
+                scrollable(results)
+                    .direction(Direction::Vertical(Properties::default()))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .on_scroll(|vp| MainMessage::MainResultsScrolled(vp).into())
             )
             .id(container::Id::new("main_results")),
         ])
@@ -252,16 +287,14 @@ impl TagExplorer {
         if !range.contains(index) {
             *index = range.start;
         }
-        
+
         if path.is_dir() || !thumbnail::is_file_supported(path) {
             return;
         }
 
         // If thumbnail already exists, don't try to rebuild it 90% of the time
         // TODO make the probability configurable
-        if path.get_thumbnail_cache_path().exists()
-            && rand::thread_rng().gen_bool(0.9)
-        {
+        if path.get_thumbnail_cache_path().exists() && rand::thread_rng().gen_bool(0.9) {
             return;
         }
 
@@ -274,26 +307,28 @@ impl TagExplorer {
         let items_per_row: usize = (self.results_container_size.0 / TOTAL_ITEM_SIZE.0) as usize;
         //          (        Which row do we start at?       ) * items per row
         let start = (self.scroll / TOTAL_ITEM_SIZE.1) as usize * items_per_row;
-        //        start + (           How many rows does the view span?                    ) * items per row
-        let end = start + ((self.results_container_size.1 / TOTAL_ITEM_SIZE.1) as usize + 2) * items_per_row;
+        let end = start
+        //  + (           How many rows does the view span?                    ) * items per row
+            + ((self.results_container_size.1 / TOTAL_ITEM_SIZE.1) as usize + 2) * items_per_row;
 
         start..end
     }
 
+    pub fn update_query(&mut self) {
+        self.items.clear();
+        self.receiver = self.query.search();
+    }
 }
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    None,
-    QueryTextChanged(String),
-    AddQueryTag(TagID),
-    RemoveQueryTag(TagID),
-    Tick,
-    FocusQuery,
-    MainResultsScrolled(Viewport),
-    MainResultsResized(Rectangle),
-    WindowResized(f32, f32),
+impl Default for Main {
+    fn default() -> Self {
+        Main {
+            query: Query::empty(),
+            items: Vec::new(),
+            receiver: None,
+            thumbnail_builder: (0, ThumbnailBuilder::new(4)),
+            scroll: 0.0,
+            results_container_size: (1.0, 1.0),
+        }
+    }
 }
-
-
-
