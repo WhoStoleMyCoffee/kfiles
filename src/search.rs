@@ -25,9 +25,15 @@ pub struct Query {
 }
 
 impl Query {
-    #[inline(always)]
     pub fn empty() -> Self {
         Query::default()
+    }
+
+    pub fn new(query: &str) -> Query {
+        Query {
+            tags: Vec::new(),
+            query: query.to_string(),
+        }
     }
 
     /// Returns whether the tag was added to the query
@@ -54,37 +60,57 @@ impl Query {
     }
 
     /// TODO turn this into a Result?
+    /// TODO refactor
     /// Begins the search.
-    /// Returns `None`if there is on query
-    pub fn search(&self) -> Option<Receiver<Item>> {
+    pub fn search(&self) -> Receiver<Item> {
         let (tx, rx) = mpsc::channel::<Item>();
-        let searcher = Searcher::from(self);
-        if searcher.is_empty() {
-            return None;
-        }
+        // let searcher = Searcher::from(self);
+
+        let query = self.query.clone();
+        let entries = Entries::intersection_of(self.tags.iter()
+            .map(|tag| tag.get_all_entries())
+        );
 
         thread::spawn(move || {
-            let it = searcher.search();
-            for item in it {
+            let iter = itersearch::IterSearcher::new(query, entries);
+            for item in iter {
                 if tx.send(item).is_err() {
                     return;
                 }
             }
         });
 
-        Some(rx)
+        rx
     }
 }
 
+
+
+
 /// A struct that searches through
 /// TODO create from list of tags? -> Option<Self>
+/// TODO just remove this...
 #[derive(Debug, Default)]
 pub struct Searcher {
     entries: Entries,
-    // query: String,
+    query: String,
 }
 
 impl Searcher {
+    /// Constructs a `Searcher` with the given query and tags
+    pub fn new<'a, T>(query: &str, tags: T) -> Searcher
+    where T: IntoIterator<Item = &'a Tag>
+    {
+        // What if we wanna use `or` instead of `and`?
+        Searcher {
+            entries: tags.into_iter()
+                .map(|tag| tag.get_all_entries())
+                .reduce(|acc, e| acc.and(&e))
+                .unwrap_or_default(),
+            query: query.to_string(),
+        }
+    }
+
     pub fn and(&mut self, entries: &Entries) -> &mut Self {
         self.entries = self.entries.and(entries);
         self
@@ -107,6 +133,8 @@ impl Searcher {
             return Box::new(std::iter::empty());
         }
 
+        let query_lower = self.query.to_lowercase();
+
         // Files and folders merged with subtags
         let (files, folders) = self.entries.iter()
             .cloned()
@@ -120,7 +148,14 @@ impl Searcher {
             let walker = WalkDir::new(pb).into_iter()
                 .filter_entry(|de| !is_direntry_hidden(de))
                 .flatten()
-                .map(|de| Item(0, de.into_path()) );
+                .map(|de| de.into_path() )
+                // .filter(|path| {
+                //     let file_name = path.file_name()
+                //         .unwrap()
+                //         .to_string_lossy();
+                //     file_name.to_lowercase().contains(&query_lower)
+                // })
+                .map(|path| Item(0, path));
             it = Box::new(it.chain(walker));
         }
 
@@ -128,26 +163,95 @@ impl Searcher {
     }
 }
 
-impl From<&Tag> for Searcher {
-    #[inline]
-    fn from(tag: &Tag) -> Self {
-        Searcher {
-            entries: tag.get_all_entries(),
-        }
-    }
-}
 
 impl From<&Query> for Searcher {
     fn from(query: &Query) -> Self {
-        let mut searcher = match query.tags.first() {
-            Some(tag) => Searcher::from(tag),
-            None => return Searcher::default(),
-        };
-        for tag in query.tags.iter().skip(1) {
-            // or?
-            searcher.and(&tag.get_all_entries());
-        }
-
-        searcher
+        Searcher::new(
+            &query.query,
+            &query.tags,
+       )
     }
 }
+
+
+
+mod itersearch {
+    use std::path::PathBuf;
+
+    use walkdir::WalkDir;
+
+    use crate::{app, tag::Entries};
+
+    use super::is_direntry_hidden;
+
+    pub struct IterSearcher {
+        iter: Box<dyn Iterator<Item = PathBuf>>,
+        query: String,
+    }
+
+    impl IterSearcher {
+        pub fn new(query: String, entries: Entries) -> Self {
+            // Files and folders merged with subtags
+            let (files, folders) = entries.iter()
+                .cloned()
+                .partition::<Vec<PathBuf>, _>(|pb| pb.is_file());
+            let mut iter: Box<dyn Iterator<Item = PathBuf>> = Box::new(files.into_iter());
+
+            for pb in folders {
+                let walker = WalkDir::new(pb).into_iter()
+                    .filter_entry(|de| !is_direntry_hidden(de))
+                    .flatten()
+                    .map(|de| de.into_path());
+                iter = Box::new(iter.chain(walker));
+            }
+
+            IterSearcher {
+                iter,
+                query,
+            }
+        }
+    }
+
+    impl Iterator for IterSearcher {
+        type Item = app::Item;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.iter.find(|pb| {
+                let file_name = pb.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_lowercase();
+                file_name.contains( &self.query )
+            })
+            .map(|pb| app::Item(0, pb))
+        }
+    }
+
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::{app::Item, tag::Entries};
+
+    use super::itersearch::IterSearcher;
+
+    #[test]
+    fn test_itersearch() {
+        let query = "fat".to_string();
+        let entries = Entries::from(vec![
+            PathBuf::from("C:/Users/ddxte/Pictures/")
+        ]);
+
+        let iter = IterSearcher::new(query, entries);
+        for Item(_, pb) in iter {
+            dbg!(&pb);
+        }
+
+    }
+}
+
+

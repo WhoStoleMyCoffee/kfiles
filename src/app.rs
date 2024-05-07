@@ -190,21 +190,31 @@ impl Main {
     fn tick(&mut self) -> Command<Message> {
         self.build_thumbnails();
 
+        self.try_receive_results();
+
+        Command::none()
+    }
+
+    /// TODO return Result
+    fn try_receive_results(&mut self) {
         let Some(rx) = &mut self.receiver else {
-            return Command::none();
+            return;
         };
 
         if self.items.len() >= MAX_RESULT_COUNT {
             self.receiver = None;
-            return Command::none();
+            return;
         }
+
+        self.items.push(match rx.try_recv() {
+            Ok(item) => item,
+            Err(_) => return,
+        });
 
         self.items.append(&mut rx.try_iter()
             .take(MAX_RESULTS_PER_TICK)
             .collect()
         );
-
-        Command::none()
     }
 
     fn update(&mut self, message: MainMessage) -> Command<Message> {
@@ -341,8 +351,8 @@ impl Main {
     }
 
     pub fn update_query(&mut self) {
-        self.items.clear();
-        self.receiver = self.query.search();
+        self.items.clear(); // TODO filter instead
+        self.receiver = Some(self.query.search());
     }
 }
 
