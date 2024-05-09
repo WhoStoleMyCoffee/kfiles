@@ -253,8 +253,7 @@ impl Tag {
 
     /// Get all directories under this [`Tag`], including all subtags
     pub fn get_dirs(&self) -> Box<dyn Iterator<Item = Item>> {
-        let searcher = Searcher::new("", [ self ]);
-        searcher.search()
+        unimplemented!()
     }
 
     #[inline]
@@ -388,18 +387,22 @@ impl Entries {
         Entries::default()
     }
 
-    /// TODO documentation
+    /// Create a new [`Entries`] that's a union of all `entries`, which means that
+    /// it contains all of their paths
     pub fn union_of<I>(entries: I) -> Entries
-    where I: IntoIterator<Item = Entries>
+    where
+        I: IntoIterator<Item = Entries>
     {
         entries.into_iter()
             .reduce(|acc, e| acc.or(&e))
             .unwrap_or_default()
     }
 
-    /// TODO documentation
+    /// Create a new [`Entries`] that's an intersection of all `entries`, which
+    /// means that it only contains paths that are shared between them
     pub fn intersection_of<I>(entries: I) -> Entries
-    where I: IntoIterator<Item = Entries>
+    where
+        I: IntoIterator<Item = Entries>
     {
         entries.into_iter()
             .reduce(|acc, e| acc.and(&e))
@@ -592,11 +595,8 @@ mod tests {
         );
     }
 
-    /// TODO FIXME
     #[test]
     fn subtags_dirs() {
-        use std::collections::HashSet;
-
         let mut tag = Tag::create("test");
         tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/")
             .unwrap();
@@ -611,14 +611,16 @@ mod tests {
         tag.save().unwrap();
         tag2.save().unwrap();
 
-        /* println!("Getting paths...");
-        let tag_paths = tag.get_dirs().collect::<Vec<PathBuf>>();
+        println!("Getting paths...");
+        let tag_paths = Searcher::new("".to_string(), tag.get_all_entries())
+            .map(|Item(_, pb)| pb)
+            .collect::<Vec<PathBuf>>();
         dbg!(&tag_paths);
 
         println!("Checking for duplicates");
         let mut uniq = HashSet::new();
         let is_all_unique = tag_paths.into_iter().all(move |p| uniq.insert(p));
-        assert!(is_all_unique); */
+        assert!(is_all_unique);
     }
 
     #[test]

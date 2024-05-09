@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
@@ -206,21 +206,31 @@ impl Main {
             return;
         }
 
-        self.items.push(match rx.try_recv() {
-            Ok(item) => item,
-            Err(_) => return,
-        });
+        // TODO work on this btw
+        use std::sync::mpsc::TryRecvError;
+        for _ in 0..MAX_RESULTS_PER_TICK {
+            let item = match rx.try_recv() {
+                Ok(item) => item,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.receiver = None;
+                    return
+                },
+            };
 
-        self.items.append(&mut rx.try_iter()
-            .take(MAX_RESULTS_PER_TICK)
-            .collect()
-        );
+            let index = self.items.partition_point(|&Item(score, _)| score > item.0);
+            self.items.insert(index, item);
+        }
     }
 
     fn update(&mut self, message: MainMessage) -> Command<Message> {
         match message {
             MainMessage::FocusQuery => {
-                return text_input::focus(text_input::Id::new("query_input"));
+                let id = text_input::Id::new("query_input");
+                return Command::batch(vec![
+                    text_input::focus(id.clone()),
+                    text_input::select_all(id),
+                ]);
             }
 
             MainMessage::QueryTextChanged(new_text) => {

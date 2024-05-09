@@ -7,6 +7,7 @@ pub mod search;
 pub mod tag;
 pub mod thumbnail;
 pub mod dir_entry;
+pub mod strmatch;
 
 use app::TagExplorer;
 
