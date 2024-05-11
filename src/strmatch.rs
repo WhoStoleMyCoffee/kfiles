@@ -22,68 +22,126 @@ pub trait StringMatcher {
 
 
 /// Simply checks whether `query` is contained within `target`
-/// TODO choose between case insensitive search
+/// Returns `Some(`[`DEFAULT_SCORE`]`)` if matches
 #[derive(Debug, Clone)]
-pub struct Contains(pub String);
+pub struct Contains {
+    pub query: String,
+    case_insensitive: bool,
+}
+
+impl Contains {
+    const DEFAULT_SCORE: isize = 100;
+
+    pub fn new(query: String) -> Self {
+        Contains {
+            query,
+            case_insensitive: false,
+        }
+    }
+
+    pub fn case_insensitive(mut self) -> Self {
+        self.case_insensitive = true;
+        self
+    }
+}
 
 impl StringMatcher for Contains {
     fn set_query(&mut self, q: &str) {
-        self.0 = q.to_string();
+        self.query = q.to_string();
     }
 
     fn score<S: AsRef<str>>(&self, target: &S) -> Option<isize> {
         if self.matches(target) {
-            return Some(1);
+            return Some(Contains::DEFAULT_SCORE);
         }
         None
     }
 
     fn matches<S: AsRef<str>>(&self, target: &S) -> bool {
-        target.as_ref().to_lowercase() .contains(&self.0.to_lowercase())
+        if self.case_insensitive {
+            target.as_ref().to_lowercase() .contains(&self.query.to_lowercase())
+        } else {
+            target.as_ref() .contains(&self.query)
+        }
     }
 }
 
 
 
 /// Naive method that checks whether the chars in `query` appear seuentially within `target`
-/// TODO choose between case insensitive search
+/// The returned score will have a maximum of `0`, subtracting 1 for every character in between
+/// matches
 #[derive(Debug, Clone)]
-pub struct Simple(pub String);
+pub struct Simple {
+    pub query: String,
+    case_insensitive: bool,
+}
+
+impl Simple {
+    fn new(query: String) -> Self {
+        Simple {
+            query,
+            case_insensitive: false,
+        }
+    }
+
+    pub fn case_insensitive(mut self) -> Self {
+        self.case_insensitive = true;
+        self
+    }
+}
 
 impl StringMatcher for Simple {
     fn set_query(&mut self, q: &str) {
-        self.0 = q.to_string();
+        self.query = q.to_string();
     }
 
     fn score<S: AsRef<str>>(&self, target: &S) -> Option<isize> {
-        let mut score: usize = 100;
-
         let mut tchars = target.as_ref().chars();
-        for qch in self.0.chars() {
-            let qch = qch.to_lowercase().to_string();
-            let p = tchars.position(|tch| tch.to_lowercase().to_string() == qch)?;
-            score -= p;
+
+        if self.case_insensitive {
+            let mut score: isize = 0;
+            for qch in self.query.chars() {
+                let qch = qch.to_lowercase().to_string();
+                let p = tchars.position(|tch| tch.to_lowercase().to_string() == qch)?;
+                score -= p as isize;
+            }
+            return Some(score);
         }
 
-        Some(score as isize)
+        let mut score: isize = 0;
+        for qch in self.query.chars() {
+            let p = tchars.position(|tch| tch == qch)?;
+            score -= p as isize;
+        }
+        Some(score)
     }
 
     fn matches<S: AsRef<str>>(&self, target: &S) -> bool {
         let mut tchars = target.as_ref().chars();
-        for qch in self.0.chars() {
-            let qch = qch.to_lowercase().to_string();
-            if !tchars.any(|tch| tch.to_lowercase().to_string() == qch) {
+
+        // bruh
+        if self.case_insensitive {
+            for qch in self.query.chars() {
+                let qch = qch.to_lowercase().to_string();
+                if !tchars.any(|tch| tch.to_lowercase().to_string() == qch) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        for qch in self.query.chars() {
+            if !tchars.any(|tch| tch == qch) {
                 return false;
             }
         }
-
         true
     }
 }
 
 
-// todo rename ig
-struct Pick {
+struct Match {
     index: usize,
     score: isize,
     consecutive_count: usize,
@@ -126,11 +184,11 @@ impl Sublime {
         target: &[char],
         target_index: usize,
         cache: &mut HashMap<(usize, usize), Option<(isize, usize)>>
-    ) -> Option<Pick>
+    ) -> Option<Match>
     {
         let Some(qch) = self.query.get(query_index) else {
             // Matched all query chars; success!
-            return Some(Pick {
+            return Some(Match {
                 index: target_index,
                 score: 0,
                 consecutive_count: 0,
@@ -140,14 +198,11 @@ impl Sublime {
         let qch_lower = qch.to_lowercase().to_string();
 
         // Get all occurences of qch
-        // TODO
-        // let occurences = target[target_index..].iter().enumerate()
-        //     .filter(|(_, tch)| tch.to_lowercase().to_string() == qch_lower);
-        let occurences = target.iter().enumerate()
-            .skip(target_index)
-            .filter(|(_, tch)| tch.to_lowercase().to_string() == qch_lower);
+        let occurences = target[target_index..].iter().enumerate()
+            .filter(|(_, ch)| ch.to_lowercase().to_string() == qch_lower)
+            .map(|(i, ch)| (i + target_index, ch));
 
-        let mut best: Option<Pick> = None;
+        let mut best: Option<Match> = None;
         for (i, tch) in occurences {
             let this_key = (query_index, i);
             
@@ -156,30 +211,29 @@ impl Sublime {
                 // println!("-- qch = {qch}, ti = {target_index}");
                 // println!("  cache hit!    {:?}", cached);
 
-                // Update score
-                // todo make dis better
-                if let Some((score, this_consecutive)) = cached {
-                    match best {
-                        Some(b) if *score > b.score => best = Some(Pick {
-                            index: i,
-                            score: *score,
-                            consecutive_count: *this_consecutive,
-                        }),
-                        None => best = Some(Pick {
-                            index: i,
-                            score: *score,
-                            consecutive_count: *this_consecutive,
-                        }),
-                        _ => {},
-                    }
+                let Some((score, this_consecutive)) = cached else {
+                    // There was no match in this branch
+                    continue;
+                };
+
+                match best {
+                    Some(ref b) if *score <= b.score => continue,
+                    _ => {},
                 }
+
+                // We have a new best
+                best = Some(Match {
+                    index: i,
+                    score: *score,
+                    consecutive_count: *this_consecutive,
+                });
 
                 continue;
             }
            
 
             // Branch out
-            let Some(Pick {
+            let Some(Match {
                 index: next_i,
                 score: next_score,
                 consecutive_count: next_consecutive
@@ -194,7 +248,6 @@ impl Sublime {
             let this_consecutive: usize = if dist == 0 { next_consecutive + 1 } else { 0 };
             let is_start: bool = !is_char_sep(*tch) && if i == 0 {
                 true
-                // tch.is_uppercase() // todo remove if things look good
             } else {
                 let prev_tch: char = target[i - 1]; // Will not fail
                 is_char_sep(prev_tch) || (prev_tch.is_lowercase() && tch.is_uppercase())
@@ -211,12 +264,12 @@ impl Sublime {
 
             // Update score
             match best {
-                Some(b) if score > b.score => best = Some(Pick {
+                Some(b) if score > b.score => best = Some(Match {
                     index: i,
                     score,
                     consecutive_count: this_consecutive,
                 }),
-                None => best = Some(Pick {
+                None => best = Some(Match {
                     index: i,
                     score,
                     consecutive_count: this_consecutive,
@@ -225,7 +278,7 @@ impl Sublime {
             }
         }
 
-        if let Some(Pick {
+        if let Some(Match {
             index,
             score,
             consecutive_count
@@ -242,10 +295,14 @@ impl StringMatcher for Sublime {
     }
 
     fn score<S: AsRef<str>>(&self, target: &S) -> Option<isize> {
+        if self.query.is_empty() {
+            return Some(0);
+        }
+
         let mut cache = HashMap::new();
         let t: Vec<char> = target.as_ref().chars().collect();
         self.score_recursive(0, &t, 0, &mut cache)
-            .map(|Pick { score, .. }| score)
+            .map(|Match { score, .. }| score)
     }
 
     // Just check if chars in query appear sequentially within target
@@ -282,13 +339,16 @@ mod tests {
 
     #[test]
     fn contains() {
+        let s = Contains::DEFAULT_SCORE;
         let targets: Vec<(&str, Option<isize>)> = vec![
-            ("aBc", Some(1)),
-            ("abc", Some(1)),
+            ("aBc", Some(s)),
+            ("abc", Some(s)),
             ("cBa", None),
+            ("", None),
         ];
 
-        let matcher = Contains("aBc".to_string());
+        let matcher = Contains::new("aBc".to_string())
+            .case_insensitive();
 
         for (target, expected) in targets.iter() {
             let score = matcher.score(target);
@@ -299,13 +359,15 @@ mod tests {
     #[test]
     fn simple() {
         let targets: Vec<(&str, Option<isize>)> = vec![
-            ("aBc", Some(100)),
-            ("abc", Some(100)),
-            ("axbxc", Some(98)),
+            ("aBc", Some(0)),
+            ("abc", Some(0)),
+            ("axbxc", Some(-2)),
             ("cBa", None),
+            ("", None),
         ];
 
-        let matcher = Simple("aBc".to_string());
+        let matcher = Simple::new("aBc".to_string())
+            .case_insensitive();
 
         for (target, expected) in targets.iter() {
             let score = matcher.score(target);
@@ -333,6 +395,7 @@ mod tests {
             ("a b c", Some( ss+sm + ss+sm + ss+sm+sc - pd*2 )),
             ("abx", None),
             ("xa bo obo c", Some( sm + ss+sm + ss+sm+sc - pd*7 )),
+            ("", None),
         ];
 
         for (index, (target, expected)) in targets.iter().enumerate() {

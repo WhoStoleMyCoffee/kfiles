@@ -11,35 +11,8 @@ use toml;
 use serde::{Deserialize, Serialize};
 
 use crate::app::Item;
-use crate::search::Searcher;
+use crate::search;
 
-#[derive(Debug, Error)]
-pub enum AddEntryError {
-    #[error("path '{}' does not exist", .0.display())]
-    NonexistentPath(PathBuf),
-    #[error("already exists")]
-    AlreadyContained,
-}
-
-#[derive(Debug, Error)]
-pub enum LoadError {
-    #[error("could not get tag name from file '{}'", .0.display())]
-    InvalidName(PathBuf),
-    #[error(transparent)]
-    IO(#[from] io::Error),
-    #[error("failed to parse: {0}")]
-    ParseError(#[from] toml::de::Error),
-}
-
-#[derive(Debug, Error)]
-pub enum SaveError {
-    #[error("no ID set")]
-    NoID,
-    #[error("failed to parse: {0}")]
-    ParseError(#[from] toml::ser::Error),
-    #[error(transparent)]
-    IO(#[from] io::Error),
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tag {
@@ -159,7 +132,9 @@ impl Tag {
     where
         P: PartialEq<PathBuf>,
     {
-        if let Some(index) = self.entries.iter().position(|p| path == p) {
+        if let Some(index) = self.entries.as_ref()
+            .iter().position(|p| path == p)
+        {
             self.entries.remove(index);
             return true;
         }
@@ -172,7 +147,7 @@ impl Tag {
         P: AsRef<Path>,
     {
         let path = path.as_ref();
-        self.entries.iter().any(|p| path.starts_with(p))
+        self.entries.as_ref() .iter().any(|p| path.starts_with(p))
     }
 
     /// Get entries under this [`Tag`], NOT including all subtags
@@ -456,6 +431,15 @@ impl Entries {
         let path = path.as_ref();
         self.0.iter().any(|p| path.starts_with(p))
     }
+
+    /// Iterates through all the paths contained
+    /// Same as [`search::iter_entries`]
+    /// If you want to simply iterate over the paths defining this [`Entries`], please do
+    /// `entries.as_ref().iter()`
+    #[inline(always)]
+    pub fn iter(self) -> Box<dyn Iterator<Item = PathBuf>> {
+        search::iter_entries(self)
+    }
 }
 
 impl AsRef<Vec<PathBuf>> for Entries {
@@ -501,12 +485,40 @@ impl IntoIterator for Entries {
 
 
 
+#[derive(Debug, Error)]
+pub enum AddEntryError {
+    #[error("path '{}' does not exist", .0.display())]
+    NonexistentPath(PathBuf),
+    #[error("already exists")]
+    AlreadyContained,
+}
+
+#[derive(Debug, Error)]
+pub enum LoadError {
+    #[error("could not get tag name from file '{}'", .0.display())]
+    InvalidName(PathBuf),
+    #[error(transparent)]
+    IO(#[from] io::Error),
+    #[error("failed to parse: {0}")]
+    ParseError(#[from] toml::de::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum SaveError {
+    #[error("no ID set")]
+    NoID,
+    #[error("failed to parse: {0}")]
+    ParseError(#[from] toml::ser::Error),
+    #[error(transparent)]
+    IO(#[from] io::Error),
+}
+
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{collections::HashSet, path::Path, time::Instant};
+    use std::{collections::HashSet, path::Path};
 
     #[test]
     fn serde() {
@@ -612,10 +624,9 @@ mod tests {
         tag2.save().unwrap();
 
         println!("Getting paths...");
-        let tag_paths = Searcher::new("".to_string(), tag.get_all_entries())
-            .map(|Item(_, pb)| pb)
-            .collect::<Vec<PathBuf>>();
-        dbg!(&tag_paths);
+        let tag_paths: Vec<PathBuf> = tag.get_all_entries()
+            .iter()
+            .collect();
 
         println!("Checking for duplicates");
         let mut uniq = HashSet::new();

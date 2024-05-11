@@ -60,21 +60,32 @@ impl Query {
         false
     }
 
+    pub fn has_query(&self) -> bool {
+        !self.query.is_empty()
+    }
+
     /// TODO turn this into a Result?
     /// TODO refactor
+    /// TODO change matcher depending on query input
     /// Begins the search.
     pub fn search(&self) -> Receiver<Item> {
         let (tx, rx) = mpsc::channel::<Item>();
-        // let searcher = Searcher::from(self);
 
-        let matcher = Sublime::default()
-            .with_query(&self.query);
+        let query = self.query.clone();
         let entries = Entries::intersection_of(self.tags.iter()
             .map(|tag| tag.get_all_entries())
         );
 
         thread::spawn(move || {
-            let iter = Searcher::new(matcher, entries);
+            let iter: Box<dyn Iterator<Item = app::Item>> = if query.is_empty() {
+                Box::new(iter_entries(entries)
+                    .map(|pb| app::Item(0, pb) )
+                )
+            } else {
+                let matcher = Sublime::default().with_query(&query);
+                Box::new( Searcher::new(matcher, entries) )
+            };
+
             for item in iter {
                 if tx.send(item).is_err() {
                     return;
@@ -91,6 +102,29 @@ impl Query {
 
 
 
+/// Iterates through all the paths within an [`Entries`]
+/// See also [`Searcher`]
+pub fn iter_entries(entries: Entries) -> Box<dyn Iterator<Item = PathBuf>> {
+    // Files and folders merged with subtags
+    let (files, folders) = entries.into_iter()
+        .partition::<Vec<PathBuf>, _>(|pb| pb.is_file());
+    let mut iter: Box<dyn Iterator<Item = PathBuf>> = Box::new(files.into_iter());
+
+    for dir in folders {
+        let walker = WalkDir::new(dir).into_iter()
+            .filter_entry(|de| !is_direntry_hidden(de))
+            .flatten()
+            .map(|de| de.into_path());
+        iter = Box::new(iter.chain(walker));
+    }
+
+    iter
+}
+
+
+
+/// Iteratively searches through some [`Entries`] with a [`StringMatcher`]
+/// See also [`iter_entries`]
 pub struct Searcher<Matcher: StringMatcher> {
     iter: Box<dyn Iterator<Item = PathBuf>>,
     matcher: Matcher,
@@ -98,22 +132,8 @@ pub struct Searcher<Matcher: StringMatcher> {
 
 impl<Matcher: StringMatcher> Searcher<Matcher> {
     pub fn new(matcher: Matcher, entries: Entries) -> Self {
-        // Files and folders merged with subtags
-        let (files, folders) = entries.iter()
-            .cloned()
-            .partition::<Vec<PathBuf>, _>(|pb| pb.is_file());
-        let mut iter: Box<dyn Iterator<Item = PathBuf>> = Box::new(files.into_iter());
-
-        for pb in folders {
-            let walker = WalkDir::new(pb).into_iter()
-                .filter_entry(|de| !is_direntry_hidden(de))
-                .flatten()
-                .map(|de| de.into_path());
-            iter = Box::new(iter.chain(walker));
-        }
-
         Searcher::<Matcher> {
-            iter,
+            iter: iter_entries(entries),
             matcher,
         }
     }
@@ -134,30 +154,5 @@ impl<Matcher: StringMatcher> Iterator for Searcher<Matcher> {
 }
 
 
-
-
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-    use crate::{app::Item, tag::Entries};
-    use crate::strmatch;
-    use super::Searcher;
-
-    #[test]
-    #[ignore]
-    fn test_itersearch() {
-        let entries = Entries::from(vec![
-            PathBuf::from("C:/Users/ddxte/Pictures/"),
-        ]);
-
-        let matcher = strmatch::Contains("dino".to_string());
-        let iter = Searcher::new(matcher, entries);
-        for Item(_, pb) in iter {
-            dbg!(&pb);
-        }
-
-    }
-}
 
 

@@ -26,7 +26,6 @@ const ITEM_SPACING: (f32, f32) = (8.0, 8.0);
 const TOTAL_ITEM_SIZE: (f32, f32) = (ITEM_SIZE.0 + ITEM_SPACING.0, ITEM_SIZE.1 + ITEM_SPACING.1);
 
 
-
 #[derive(Debug, Clone)]
 pub enum Message {
     None,
@@ -45,6 +44,7 @@ impl From<MainMessage> for Message {
 
 pub struct TagExplorer {
     main: Main,
+    tags_cache: Vec<TagID>,
 }
 
 impl Application for TagExplorer {
@@ -57,6 +57,7 @@ impl Application for TagExplorer {
         (
             TagExplorer {
                 main: Main::default(),
+                tags_cache: Tag::get_all_tag_ids() .unwrap(),
             },
             Command::none(),
         )
@@ -90,12 +91,12 @@ impl Application for TagExplorer {
     }
 
     fn view(&self) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
+        // TODO remove this in the future
         // Tags list
-        let all_tags = Tag::get_all_tag_ids().unwrap(); // TODO cache these
-        let tags_list = scrollable(column(all_tags.into_iter().map(|id| {
+        let tags_list = scrollable(column(self.tags_cache.iter().map(|id| {
             let id_str = id.as_ref();
             button(text(format!("#{id_str}")))
-                .on_press( MainMessage::AddQueryTag(id).into() )
+                .on_press( MainMessage::AddQueryTag(id.clone()).into() )
                 .into()
         })))
         .width(100);
@@ -176,6 +177,19 @@ impl AsRef<PathBuf> for Item {
 }
 
 
+/// See [`Main::try_receive_results`]
+enum RecvResultsError {
+    /// Results successfully received
+    Ok,
+    /// Results were already full
+    Full,
+    /// Sender disconnected
+    Disconnected,
+    /// Nothing was sent
+    Empty,
+}
+
+
 struct Main {
     query: Query,
     items: Vec<Item>,
@@ -195,32 +209,46 @@ impl Main {
         Command::none()
     }
 
-    /// TODO return Result
-    fn try_receive_results(&mut self) {
+    fn try_receive_results(&mut self) -> Option<RecvResultsError> {
+        use std::sync::mpsc::TryRecvError;
+
         let Some(rx) = &mut self.receiver else {
-            return;
+            return None;
         };
 
         if self.items.len() >= MAX_RESULT_COUNT {
             self.receiver = None;
-            return;
+            return Some(RecvResultsError::Full);
         }
 
-        // TODO work on this btw
-        use std::sync::mpsc::TryRecvError;
+        // If there is no query, just append normally
+        // I didn't mean for it to rhyme, I'm just low on time
+        if !self.query.has_query() {
+            self.items.append(&mut rx.try_iter()
+                .take(MAX_RESULTS_PER_TICK)
+                .collect()
+            );
+
+            return Some(RecvResultsError::Ok);
+        }
+
+
         for _ in 0..MAX_RESULTS_PER_TICK {
             let item = match rx.try_recv() {
                 Ok(item) => item,
-                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Empty) => return Some(RecvResultsError::Empty),
                 Err(TryRecvError::Disconnected) => {
                     self.receiver = None;
-                    return
+                    return Some(RecvResultsError::Disconnected);
                 },
             };
 
+            // Insert
             let index = self.items.partition_point(|&Item(score, _)| score > item.0);
             self.items.insert(index, item);
         }
+
+        Some(RecvResultsError::Ok)
     }
 
     fn update(&mut self, message: MainMessage) -> Command<Message> {
@@ -361,7 +389,7 @@ impl Main {
     }
 
     pub fn update_query(&mut self) {
-        self.items.clear(); // TODO filter instead
+        self.items.clear(); // TODO filter instead?
         self.receiver = Some(self.query.search());
     }
 }
