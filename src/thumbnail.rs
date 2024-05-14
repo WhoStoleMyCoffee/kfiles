@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use crate::get_temp_dir;
 
-pub const MAX_CACHE_SIZE_BYTES: u64 = 100_000;
+pub const MAX_CACHE_SIZE_BYTES: u64 = 500_000;
 
 static CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 

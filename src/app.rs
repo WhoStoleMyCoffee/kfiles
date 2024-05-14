@@ -1,21 +1,26 @@
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
+use std::sync::OnceLock;
 use std::time::Duration;
 
+use iced::advanced::widget::Id;
+use iced::event::Status;
 use iced::widget::scrollable::Viewport;
 use iced::widget::{
     button, column, container, row, scrollable, text, text_input, Container,
 };
-use iced::{self, Length, Rectangle};
+use iced::{self, Color, Event, Length, Rectangle};
 use iced::{time, Application, Command, Theme};
-use iced_aw::Wrap;
+use iced_aw::{DropDown, Wrap};
 use rand::Rng;
 
 use crate::dir_entry::dir_entry;
+use crate::is_focused;
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 
+// TODO make these configurable
 const UPDATE_RATE_MS: u64 = 100;
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
 const MAX_RESULT_COUNT: usize = 256;
@@ -25,13 +30,14 @@ const ITEM_SIZE: (f32, f32) = (80.0, 120.0);
 const ITEM_SPACING: (f32, f32) = (8.0, 8.0);
 const TOTAL_ITEM_SIZE: (f32, f32) = (ITEM_SIZE.0 + ITEM_SPACING.0, ITEM_SIZE.1 + ITEM_SPACING.1);
 
+static TAGS_CACHE: OnceLock<Vec<TagID>> = OnceLock::new();
+
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    None,
     MainMessage(MainMessage),
     Tick,
-    WindowResized(f32, f32),
+    Event(Event, Status),
 }
 
 impl From<MainMessage> for Message {
@@ -42,9 +48,9 @@ impl From<MainMessage> for Message {
 
 
 
+// TODO make ids lazy static
 pub struct TagExplorer {
     main: Main,
-    tags_cache: Vec<TagID>,
 }
 
 impl Application for TagExplorer {
@@ -54,10 +60,12 @@ impl Application for TagExplorer {
     type Theme = Theme;
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
+        // TODO find better cache system
+        TAGS_CACHE.set( Tag::get_all_tag_ids().unwrap() ) .unwrap();
+
         (
             TagExplorer {
                 main: Main::default(),
-                tags_cache: Tag::get_all_tag_ids() .unwrap(),
             },
             Command::none(),
         )
@@ -70,41 +78,23 @@ impl Application for TagExplorer {
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
             Message::Tick => {
-                return self.main.tick();
+                self.main.tick()
             }
 
             Message::MainMessage(main_message) => {
-                return self.main.update(main_message);
+                self.main.update(main_message) .map(Message::MainMessage)
             }
 
-            Message::WindowResized(_width, _height) => {
-                return container::visible_bounds(container::Id::new("main_results"))
-                    .map(|rect|
-                        rect.map_or(Message::None, |rect| MainMessage::MainResultsResized(rect).into())
-                    );
+            Message::Event(event, status) => {
+                self.handle_event(event, status)
             }
-
-            Message::None => {}
         }
-
-        Command::none()
     }
 
     fn view(&self) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
-        // TODO remove this in the future
-        // Tags list
-        let tags_list = scrollable(column(self.tags_cache.iter().map(|id| {
-            let id_str = id.as_ref();
-            button(text(format!("#{id_str}")))
-                .on_press( MainMessage::AddQueryTag(id.clone()).into() )
-                .into()
-        })))
-        .width(100);
-
-        row![
-            tags_list,
+        container(
             self.main.view(),
-        ].into()
+        ).into()
     }
 
     fn theme(&self) -> Self::Theme {
@@ -112,42 +102,79 @@ impl Application for TagExplorer {
     }
 
     fn subscription(&self) -> iced::Subscription<Self::Message> {
-        let tick = time::every(Duration::from_millis(UPDATE_RATE_MS)).map(|_| Message::Tick);
-
-        use iced::{event, Event};
-        let events = event::listen_with(|event, status| match event {
-            Event::Keyboard(kb_event) => {
-                if status == event::Status::Captured {
-                    return None;
-                }
-                TagExplorer::unhandled_key_input(kb_event)
-            }
-            Event::Window(_id, iced::window::Event::Resized { width, height }) => {
-                Some(Message::WindowResized(width as f32, height as f32))
-            }
-            _ => None,
-        });
-
-        iced::Subscription::batch(vec![tick, events])
+        iced::Subscription::batch(vec![
+            time::every(Duration::from_millis(UPDATE_RATE_MS)).map(|_| Message::Tick),
+            iced::event::listen_with(|event, status|
+                Some(Message::Event(event, status))
+            ),
+        ])
     }
 }
 
 impl TagExplorer {
-    fn unhandled_key_input(event: iced::keyboard::Event) -> Option<Message> {
+    fn handle_event(&mut self, event: Event, status: Status) -> Command<Message> {
+        use iced::window::Event as WindowEvent;
+        use iced::mouse::Event as MouseEvent;
+
+        // Tldr: only update focuses on *captured* keyboard event and mouse pressed /
+        // released events
+        let mut do_update_focus = status == Status::Captured;
+
+        let event_command = match event {
+            // Ignored keyboard events
+            Event::Keyboard(event) if status == Status::Ignored => {
+                self.unhandled_key_input(event)
+            }
+
+            // Captured keyboard events
+            Event::Keyboard(_) => {
+                do_update_focus = true;
+                Command::none()
+            }
+
+            Event::Window(_, WindowEvent::Resized { .. }) => {
+                self.main.fetch_results_bounds() .map(|m| m.into())
+            }
+
+            Event::Mouse(MouseEvent::ButtonPressed(_) | MouseEvent::ButtonReleased(_)) => {
+                do_update_focus = true;
+                Command::none()
+            }
+
+            _ => Command::none()
+        };
+
+        let focused_command = if do_update_focus {
+            self.main.is_query_focused()
+                .map(|m| m.into())
+        } else {
+            Command::none()
+        };
+
+        Command::batch(vec![
+            event_command,
+            focused_command,
+        ])
+    }
+
+    fn unhandled_key_input(&mut self, event: iced::keyboard::Event) -> Command<Message> {
         use iced::keyboard::{Event, Key};
 
         let Event::KeyPressed { key, modifiers, .. } = event else {
-            return None;
+            return Command::none();
         };
 
         // "No modifiers, please"
         if !modifiers.is_empty() {
-            return None;
+            return Command::none();
         }
 
         match key.as_ref() {
-            Key::Character(ch) if FOCUS_QUERY_KEYS.contains(&ch) => Some(MainMessage::FocusQuery.into()),
-            _ => None,
+            Key::Character(ch) if FOCUS_QUERY_KEYS.contains(&ch) => {
+                self.main.focus_query() .map(Message::MainMessage)
+            }
+
+            _ => Command::none(),
         }
     }
 }
@@ -162,9 +189,10 @@ pub enum MainMessage {
     AddQueryTag(TagID),
     RemoveQueryTag(TagID),
     FocusQuery,
-    MainResultsScrolled(Viewport),
-    MainResultsResized(Rectangle),
+    ResultsScrolled(Viewport),
+    ResultsBoundsFetched(Option<Rectangle>),
     OpenPath(PathBuf),
+    QueryFocused(bool),
 }
 
 
@@ -197,7 +225,8 @@ struct Main {
     /// Tuple with the item index it's trying to build and the builder itself
     thumbnail_builder: (usize, ThumbnailBuilder),
     scroll: f32,
-    results_container_size: (f32, f32),
+    results_container_bounds: Option<Rectangle>,
+    is_query_focused: bool,
 }
 
 impl Main {
@@ -251,30 +280,41 @@ impl Main {
         Some(RecvResultsError::Ok)
     }
 
-    fn update(&mut self, message: MainMessage) -> Command<Message> {
+    fn focus_query(&self) -> Command<MainMessage> {
+        let id = text_input::Id::new("query_input");
+
+        return Command::batch(vec![
+            text_input::focus(id.clone()),
+            text_input::select_all(id),
+        ]);
+    }
+
+    fn is_query_focused(&self) -> Command<MainMessage> {
+        Command::widget( is_focused(Id::new("query_input")) )
+            .map(|is_focused| MainMessage::QueryFocused(is_focused) )
+    }
+
+    fn fetch_results_bounds(&self) -> Command<MainMessage> {
+        container::visible_bounds(container::Id::new("main_results"))
+            .map(|rect| MainMessage::ResultsBoundsFetched(rect))
+    }
+
+    fn update(&mut self, message: MainMessage) -> Command<MainMessage> {
         match message {
             MainMessage::FocusQuery => {
-                let id = text_input::Id::new("query_input");
-                return Command::batch(vec![
-                    text_input::focus(id.clone()),
-                    text_input::select_all(id),
-                ]);
+                return self.focus_query();
             }
 
             MainMessage::QueryTextChanged(new_text) => {
                 self.query.query = new_text;
-                self.update_query();
+                self.update_search();
             }
 
-            MainMessage::AddQueryTag(tag_id) => match tag_id.load() {
-                Ok(tag) => {
-                    if self.query.add_tag(tag) {
-                        self.update_query();
-                    }
-                }
-
-                Err(err) => {
-                    todo!()
+            MainMessage::AddQueryTag(tag_id) => {
+                let tag = tag_id.load() .unwrap();
+                if self.query.add_tag(tag) {
+                    self.query.query.clear();
+                    self.update_search();
                 }
             }
 
@@ -285,16 +325,20 @@ impl Main {
 
             MainMessage::RemoveQueryTag(tag_id) => {
                 if self.query.remove_tag(&tag_id) {
-                    self.update_query();
+                    self.update_search();
                 }
             }
 
-            MainMessage::MainResultsScrolled(viewport) => {
+            MainMessage::ResultsScrolled(viewport) => {
                 self.scroll = viewport.absolute_offset().y;
             }
 
-            MainMessage::MainResultsResized(rect) => {
-                self.results_container_size = (rect.width, rect.height);
+            MainMessage::ResultsBoundsFetched(rect) => {
+                self.results_container_bounds = rect;
+            }
+
+            MainMessage::QueryFocused(is_focused) => {
+                self.is_query_focused = is_focused;
             }
         }
 
@@ -303,35 +347,65 @@ impl Main {
 
     fn view(&self) -> Container<Message> {
         let query_input = column![
+            // Tags
             row(self.query.tags.iter().map(|tag| {
                 let id = &tag.id;
-                button(text(id.as_ref().as_str()).size(14))
+                button(text( format!("#{}", id.as_ref()) ).size(14))
                     .on_press(MainMessage::RemoveQueryTag(id.clone()).into())
                     .into()
             })),
+
+            // Text input
             text_input("Query...", &self.query.query)
                 .id(text_input::Id::new("query_input"))
                 .on_input(|text| MainMessage::QueryTextChanged(text).into())
         ];
 
-        use scrollable::{Direction, Properties};
-        let visible_range = self.get_visible_items_range();
-        let results = Wrap::with_elements(
-            self.items
-                .iter()
-                .enumerate()
-                .map(|(i, Item(_score, pb))| {
-                    dir_entry(&pb)
-                        .cull(!visible_range.contains(&i))
-                        .width(ITEM_SIZE.0)
-                        .height(ITEM_SIZE.1)
-                        .on_select( MainMessage::OpenPath( pb.clone() ).into() )
-                        .into()
-                })
-                .collect(),
+        // TODO Auto complete
+        use iced_aw::core::alignment::Alignment;
+        use iced::widget::container::Appearance;
+        let query_input = DropDown::new(
+            query_input,
+            container(scrollable(column(
+                TAGS_CACHE.get().unwrap() .iter()
+                    .map(|tag_id| {
+                        button(  text(format!("#{}", tag_id.as_ref()))  )
+                            .on_press(Message::MainMessage(MainMessage::AddQueryTag( tag_id.clone() )))
+                            .into()
+                    })
+                ))
+                .width(Length::Fill)
+            )
+            .max_height(200)
+            .style(Appearance::default().with_background(Color::new( 0.0, 0.0, 0.05, 0.5 )) ),
+            self.is_query_focused && self.query.has_query(),
         )
-        .spacing(ITEM_SPACING.0)
-        .line_spacing(ITEM_SPACING.1);
+        .alignment(Alignment::Bottom);
+
+        // Results
+        use scrollable::{Direction, Properties};
+        let results = match self.get_visible_items_range() {
+            Some(range) => {
+                Wrap::with_elements(
+                    self.items.iter().enumerate()
+                        .map(|(i, Item(_score, pb))| {
+                            dir_entry(&pb)
+                                .cull(!range.contains(&i))
+                                .width(ITEM_SIZE.0)
+                                .height(ITEM_SIZE.1)
+                                .on_select( MainMessage::OpenPath( pb.clone() ).into() )
+                                .into()
+                        })
+                        .collect(),
+                )
+                .spacing(ITEM_SPACING.0)
+                .line_spacing(ITEM_SPACING.1)
+            }
+
+            None => {
+                Wrap::new()
+            }
+        };
 
         container(column![
             query_input,
@@ -341,14 +415,14 @@ impl Main {
                     .direction(Direction::Vertical(Properties::default()))
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .on_scroll(|vp| MainMessage::MainResultsScrolled(vp).into())
+                    .on_scroll(|vp| MainMessage::ResultsScrolled(vp).into())
             )
             .id(container::Id::new("main_results")),
         ])
     }
 
     fn build_thumbnails(&mut self) {
-        let range = self.get_visible_items_range();
+        let Some(range) = self.get_visible_items_range() else { return };
         let (index, builder) = &mut self.thumbnail_builder;
 
         let Some(Item(_score, path)) = self.items.get(*index) else {
@@ -377,20 +451,23 @@ impl Main {
     }
 
     /// Get the range of items which are visible in the main view
-    fn get_visible_items_range(&self) -> std::ops::Range<usize> {
-        let items_per_row: usize = (self.results_container_size.0 / TOTAL_ITEM_SIZE.0) as usize;
+    fn get_visible_items_range(&self) -> Option<std::ops::Range<usize>> {
+        let Rectangle { width, height, .. } = self.results_container_bounds?;
+
+        let items_per_row: usize = (width / TOTAL_ITEM_SIZE.0) as usize;
         //          (        Which row do we start at?       ) * items per row
         let start = (self.scroll / TOTAL_ITEM_SIZE.1) as usize * items_per_row;
         let end = start
         //  + (           How many rows does the view span?                    ) * items per row
-            + ((self.results_container_size.1 / TOTAL_ITEM_SIZE.1) as usize + 2) * items_per_row;
+            + ((height / TOTAL_ITEM_SIZE.1) as usize + 2) * items_per_row;
 
-        start..end
+        Some(start..end)
     }
 
-    pub fn update_query(&mut self) {
+    pub fn update_search(&mut self) {
         self.items.clear(); // TODO filter instead?
         self.receiver = Some(self.query.search());
+        self.scroll = 0.0;
     }
 }
 
@@ -402,7 +479,13 @@ impl Default for Main {
             receiver: None,
             thumbnail_builder: (0, ThumbnailBuilder::new(4)),
             scroll: 0.0,
-            results_container_size: (1.0, 1.0),
+            results_container_bounds: None,
+            is_query_focused: false,
         }
     }
 }
+
+
+
+
+
