@@ -9,12 +9,16 @@ use iced::widget::scrollable::Viewport;
 use iced::widget::{
     button, column, container, row, scrollable, text, text_input, Container,
 };
-use iced::{self, Color, Event, Length, Rectangle};
+use iced::{self, Event, Length, Rectangle};
 use iced::{time, Application, Command, Theme};
-use iced_aw::{DropDown, SelectionList, Wrap};
+use iced_aw::Wrap;
 use rand::Rng;
 
-use crate::widget::*;
+use crate::widget::{
+    dir_entry::DirEntry,
+    fuzzy_input::FuzzyInput,
+    is_focused,
+};
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
@@ -225,7 +229,7 @@ struct Main {
     thumbnail_builder: (usize, ThumbnailBuilder),
     scroll: f32,
     results_container_bounds: Option<Rectangle>,
-    is_query_focused: bool,
+    is_query_focused: bool, // todo remove
 }
 
 impl Main {
@@ -345,6 +349,17 @@ impl Main {
     }
 
     fn view(&self) -> Container<Message> {
+        let fuzzy_input = FuzzyInput::new(
+            "Query...", 
+            &self.query.query,
+            &TAGS_CACHE.get().expect("Tags cache not initialized"),
+            Box::new(|tag_id| MainMessage::AddQueryTag(tag_id).into() ),
+        )
+        .text_input(|text_input| {
+            text_input.id(text_input::Id::new("query_input"))
+                .on_input(|text| MainMessage::QueryTextChanged(text).into() )
+        });
+
         let query_input = column![
             // Tags
             row(self.query.tags.iter().map(|tag| {
@@ -355,49 +370,9 @@ impl Main {
             })),
 
             // Text input
-            text_input("Query...", &self.query.query)
-                .id(text_input::Id::new("query_input"))
-                .on_input(|text| MainMessage::QueryTextChanged(text).into())
+            fuzzy_input,
         ];
 
-        // TODO Auto complete
-        use iced_aw::core::alignment::Alignment;
-        use iced::widget::container::Appearance;
-
-        let query_input = DropDown::new(
-            query_input,
-            container(SelectionList::new_with(
-                TAGS_CACHE.get().unwrap(),
-                |_i, tag_id| { Message::MainMessage(MainMessage::AddQueryTag(tag_id)) },
-                14.0,
-                4.0,
-                iced_aw::SelectionListStyles::default(),
-                Some(0),
-                iced::Font::default(),
-            ))
-            .max_height(200)
-            .style(Appearance::default().with_background(Color::new( 0.0, 0.0, 0.05, 0.75 )) ),
-            self.is_query_focused && self.query.has_query(),
-        )
-        .alignment(Alignment::Bottom);
-
-        // let query_input = DropDown::new(
-        //     query_input,
-        //     container(scrollable(column(
-        //         TAGS_CACHE.get().unwrap() .iter()
-        //             .map(|tag_id| {
-        //                 button(  text(format!("#{}", tag_id.as_ref()))  )
-        //                     .on_press(Message::MainMessage(MainMessage::AddQueryTag( tag_id.clone() )))
-        //                     .into()
-        //             })
-        //         ))
-        //         .width(Length::Fill)
-        //     )
-        //     .max_height(200)
-        //     .style(Appearance::default().with_background(Color::new( 0.0, 0.0, 0.05, 0.75 )) ),
-        //     self.is_query_focused && self.query.has_query(),
-        // )
-        // .alignment(Alignment::Bottom);
 
         // Results
         use scrollable::{Direction, Properties};
@@ -406,7 +381,7 @@ impl Main {
                 Wrap::with_elements(
                     self.items.iter().enumerate()
                         .map(|(i, Item(_score, pb))| {
-                            dir_entry(&pb)
+                            DirEntry::new(&pb)
                                 .cull(!range.contains(&i))
                                 .width(ITEM_SIZE.0)
                                 .height(ITEM_SIZE.1)

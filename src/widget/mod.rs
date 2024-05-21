@@ -1,20 +1,7 @@
-use iced::advanced::widget::{ Id, Operation, operation::Outcome };
-use std::path::Path;
+use iced::advanced::widget::{ operation::Outcome, Id, Operation };
 
 pub mod dir_entry;
-
-use dir_entry::DirEntry;
-
-
-pub fn dir_entry<Message, P>(path: P) -> DirEntry<Message>
-where
-    P: AsRef<Path>,
-    Message: Clone,
-{
-    DirEntry::new(path)
-}
-
-
+pub mod fuzzy_input;
 
 
 
