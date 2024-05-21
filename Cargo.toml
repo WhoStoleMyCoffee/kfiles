@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 iced = { version = "0.12.1", features = ["image", "lazy", "advanced"] }
-iced_aw = { version = "0.8.0", features = ["wrap"] }
+iced_aw = { version = "0.8.0", features = ["wrap", "selection_list"] }
 walkdir = "2.5.0"
 serde = { version = "1.0.195", features = ["derive"] }
 directories = "5.0.1"

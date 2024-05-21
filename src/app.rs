@@ -11,11 +11,10 @@ use iced::widget::{
 };
 use iced::{self, Color, Event, Length, Rectangle};
 use iced::{time, Application, Command, Theme};
-use iced_aw::{DropDown, Wrap};
+use iced_aw::{DropDown, SelectionList, Wrap};
 use rand::Rng;
 
-use crate::dir_entry::dir_entry;
-use crate::is_focused;
+use crate::widget::*;
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
@@ -364,23 +363,41 @@ impl Main {
         // TODO Auto complete
         use iced_aw::core::alignment::Alignment;
         use iced::widget::container::Appearance;
+
         let query_input = DropDown::new(
             query_input,
-            container(scrollable(column(
-                TAGS_CACHE.get().unwrap() .iter()
-                    .map(|tag_id| {
-                        button(  text(format!("#{}", tag_id.as_ref()))  )
-                            .on_press(Message::MainMessage(MainMessage::AddQueryTag( tag_id.clone() )))
-                            .into()
-                    })
-                ))
-                .width(Length::Fill)
-            )
+            container(SelectionList::new_with(
+                TAGS_CACHE.get().unwrap(),
+                |_i, tag_id| { Message::MainMessage(MainMessage::AddQueryTag(tag_id)) },
+                14.0,
+                4.0,
+                iced_aw::SelectionListStyles::default(),
+                Some(0),
+                iced::Font::default(),
+            ))
             .max_height(200)
-            .style(Appearance::default().with_background(Color::new( 0.0, 0.0, 0.05, 0.5 )) ),
+            .style(Appearance::default().with_background(Color::new( 0.0, 0.0, 0.05, 0.75 )) ),
             self.is_query_focused && self.query.has_query(),
         )
         .alignment(Alignment::Bottom);
+
+        // let query_input = DropDown::new(
+        //     query_input,
+        //     container(scrollable(column(
+        //         TAGS_CACHE.get().unwrap() .iter()
+        //             .map(|tag_id| {
+        //                 button(  text(format!("#{}", tag_id.as_ref()))  )
+        //                     .on_press(Message::MainMessage(MainMessage::AddQueryTag( tag_id.clone() )))
+        //                     .into()
+        //             })
+        //         ))
+        //         .width(Length::Fill)
+        //     )
+        //     .max_height(200)
+        //     .style(Appearance::default().with_background(Color::new( 0.0, 0.0, 0.05, 0.75 )) ),
+        //     self.is_query_focused && self.query.has_query(),
+        // )
+        // .alignment(Alignment::Bottom);
 
         // Results
         use scrollable::{Direction, Properties};

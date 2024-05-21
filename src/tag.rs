@@ -275,7 +275,7 @@ impl PartialEq<Tag> for TagID {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, Clone, Hash)]
 pub struct TagID(String);
 
 impl TagID {
@@ -348,7 +348,7 @@ impl Deref for TagID {
 
 impl Display for TagID {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TagID({})", self.0)
+        write!(f, "{}", self.0)
     }
 }
 

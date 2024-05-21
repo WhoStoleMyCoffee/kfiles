@@ -18,15 +18,6 @@ const HOVERED_COLOR: Color = Color {
 
 
 
-pub fn dir_entry<Message, P>(path: P) -> DirEntry<Message>
-where
-    P: AsRef<Path>,
-    Message: Clone,
-{
-    DirEntry::new(path)
-}
-
-
 #[derive(Debug, Clone)]
 pub enum Event {
     Hovered,
