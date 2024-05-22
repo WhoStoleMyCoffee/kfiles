@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+
 use iced::advanced::widget::Tree;
 use iced::advanced::{Layout, Widget};
 use iced::{mouse, widget, Element, Length, Rectangle, Size};
@@ -15,7 +17,29 @@ use iced::widget::{
     text_input, TextInput,
 };
 
+use crate::strmatch::{self, StringMatcher};
 
+
+/// [`TextInput`] extension widget that can fuzzy search from a list of options
+/// TODO make it so we can configure what matching algorithm to use
+/// ```
+/// let value = "Some text";
+/// let fuzzy_input = FuzzyInput::new(
+///     "Query...", 
+///     &value,
+///     &vec![
+///         "Item 1",
+///         "Item 2",
+///         "Item 3",
+///         "Bup time",
+///     ],
+///     |item| Message::ItemSelected(item),
+/// )
+/// .text_input(|text_input| {
+///     // Configure text input here...
+///     text_input.on_input(Message::TextInputChanged)
+/// });
+/// ```
 pub struct FuzzyInput<
     'a,
     T,
@@ -42,7 +66,7 @@ where
 
 impl<'a, T, Message, Theme, Renderer> FuzzyInput<'a, T, Message, Theme, Renderer>
 where
-    T: ToString + PartialEq + Clone,
+    T: ToString + PartialEq + Clone + 'static,
     Message: Clone,
     Theme: text_input::StyleSheet
         + menu::StyleSheet
@@ -82,6 +106,101 @@ where
     {
         self.on_hovered = Some(Box::new(f));
         self
+    }
+
+    /// Filters `self.options` and returns the results
+    /// Returns `None` if query is empty
+    fn filter(&self, query: &str) -> Option<Vec<T>> {
+        if query.is_empty() {
+            return None;
+        }
+
+        // let matcher = strmatch::Simple::new(query.to_string()) .case_insensitive();
+        let matcher = strmatch::Sublime::default() .with_query(query);
+
+        let mut matches: Vec<(&T, isize)> = self.options.iter()
+            .filter_map(|opt| {
+                matcher.score( &opt.to_string() ) .map(|score| (opt, score))
+            })
+            .collect();
+        matches.sort_by_key(|(_opt, score)| Reverse(*score));
+        Some(matches.iter()
+            .map(|(opt, _score)| (*opt).clone() )
+            .collect())
+    }
+
+    // TODO fn select(+1 or -1)
+    fn handle_event(
+        &mut self,
+        tree: &mut Tree,
+        event: &iced::Event,
+        _layout: advanced::Layout<'_>,
+        _cursor: advanced::mouse::Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn advanced::Clipboard,
+        shell: &mut advanced::Shell<'_, Message>,
+        _viewport: &iced::Rectangle,
+    ) -> Option<event::Status>
+    {
+        let state: &mut FuzzyState<T> = tree.state.downcast_mut();
+        if !state.is_expanded {
+            return None;
+        }
+
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = &event {
+            match key {
+                Key::Named(key::Named::ArrowUp) if modifiers.is_empty() => {
+                    self.move_selection(-1, state, Some(shell));
+                    return Some(event::Status::Captured);
+                }
+
+                Key::Named(key::Named::ArrowDown) if modifiers.is_empty() => {
+                    self.move_selection(1, state, Some(shell));
+                    return Some(event::Status::Captured);
+                }
+
+                Key::Named(key::Named::Enter) if modifiers.is_empty() => {
+                    let index = state.hovered_option?;
+
+                    let options = match &state.filtered_options {
+                        Some(options) => options,
+                        None => self.options,
+                    };
+
+                    shell.publish( (self.on_selected)( options[index].clone() ) );
+                    return Some(event::Status::Captured);
+                }
+
+                _ => {}
+            }
+        }
+
+        None
+    }
+
+    /// Selects the `current + relative`th item, and publishes a message if `shell` is set
+    fn move_selection(
+        &self,
+        relative: isize,
+        state: &mut FuzzyState<T>,
+        shell: Option< &mut advanced::Shell<'_, Message> >,
+    ) {
+        let options: &[T] = match &state.filtered_options {
+            Some(v) => v,
+            None => self.options,
+        };
+
+        let index = state.hovered_option
+            .and_then(|i| i.checked_add_signed(relative))
+            .map(|i| i % options.len())
+            .unwrap_or_else(|| if relative >= 0 { 0 } else { options.len() - 1 });
+
+        state.hovered_option = Some(index);
+
+        let Some(shell) = shell else { return; };
+        if let Some(on_hovered) = &self.on_hovered {
+            shell.publish( (on_hovered)( options[index].clone() ) );
+        }
     }
 }
 
@@ -178,83 +297,15 @@ where
         shell: &mut advanced::Shell<'_, Message>,
         viewport: &iced::Rectangle,
     ) -> advanced::graphics::core::event::Status {
+
+        self.handle_event(tree, &event, layout, cursor, renderer, clipboard, shell, viewport);
+
         let state: &mut FuzzyState<T> = tree.state.downcast_mut();
-
-        // man thats a disgusting amount of indentation
         if state.is_expanded {
-            match &event {
-                Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                    match key {
-                        Key::Named(key::Named::ArrowUp) if modifiers.is_empty() => {
-                            let options: &[T] = match &state.filtered_options {
-                                Some(v) => v,
-                                None => self.options,
-                            };
-                                
-
-                            let index = state.hovered_option.map_or(
-                                options.len() - 1,
-                                |i| if i == 0 { options.len() - 1 } else { i - 1 }
-                            );
-                            state.hovered_option = Some(index);
-
-                            if let Some(on_hovered) = &self.on_hovered {
-                                shell.publish( (on_hovered)( options[index].clone() ) );
-                            }
-                            
-                            return event::Status::Captured;
-                        }
-
-                        Key::Named(key::Named::ArrowDown) if modifiers.is_empty() => {
-                            let options: &[T] = match &state.filtered_options {
-                                Some(v) => v,
-                                None => self.options,
-                            };
-
-                            let index = state.hovered_option.map_or(0, |i| (i + 1) % options.len());
-                            state.hovered_option = Some(index);
-
-                            if let Some(on_hovered) = &self.on_hovered {
-                                shell.publish( (on_hovered)( options[index].clone() ) );
-                            }
-
-                            return event::Status::Captured;
-                        }
-
-                        Key::Named(key::Named::Enter) if modifiers.is_empty() => {
-                            if let Some(index) = state.hovered_option {
-                                let options = match &state.filtered_options {
-                                    Some(options) => options,
-                                    None => self.options,
-                                };
-
-                                shell.publish( (self.on_selected)( options[index].clone() ) );
-                                return event::Status::Captured;
-                            }
-                        }
-
-                        _ => {}
-                    }
-                }
-
-                _ => {}
-            }
-
             // Query changed
-            if self.query != state.query {
-                state.query = self.query.clone();
-
-                state.filtered_options = if self.query.is_empty() {
-                    None
-                } else {
-                    Some(self.options.iter()
-                         // TODO fuzzy match
-                        .filter(|opt| opt.to_string().to_lowercase() .contains( &self.query.to_lowercase() ) )
-                        .cloned()
-                        .collect()
-                    )
-                };
-
+            if state.query != self.query {
+                state.query.clone_from(&self.query);
+                state.filtered_options = self.filter(&self.query);
                 state.hovered_option = Some(0);
             }
         }

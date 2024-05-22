@@ -78,7 +78,7 @@ pub struct Simple {
 }
 
 impl Simple {
-    fn new(query: String) -> Self {
+    pub fn new(query: String) -> Self {
         Simple {
             query,
             case_insensitive: false,
@@ -148,6 +148,7 @@ struct Match {
 }
 
 
+// TODO idea: score /= target.len()
 /// Method that imitates the string matching algorithm used in Sublime
 #[derive(Debug, Clone)]
 pub struct Sublime {

@@ -3,7 +3,6 @@ use std::sync::mpsc::Receiver;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use iced::advanced::widget::Id;
 use iced::event::Status;
 use iced::widget::scrollable::Viewport;
 use iced::widget::{
@@ -17,7 +16,6 @@ use rand::Rng;
 use crate::widget::{
     dir_entry::DirEntry,
     fuzzy_input::FuzzyInput,
-    is_focused,
 };
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
@@ -117,47 +115,19 @@ impl Application for TagExplorer {
 impl TagExplorer {
     fn handle_event(&mut self, event: Event, status: Status) -> Command<Message> {
         use iced::window::Event as WindowEvent;
-        use iced::mouse::Event as MouseEvent;
 
-        // Tldr: only update focuses on *captured* keyboard event and mouse pressed /
-        // released events
-        let mut do_update_focus = status == Status::Captured;
-
-        let event_command = match event {
+        match event {
             // Ignored keyboard events
             Event::Keyboard(event) if status == Status::Ignored => {
                 self.unhandled_key_input(event)
-            }
-
-            // Captured keyboard events
-            Event::Keyboard(_) => {
-                do_update_focus = true;
-                Command::none()
             }
 
             Event::Window(_, WindowEvent::Resized { .. }) => {
                 self.main.fetch_results_bounds() .map(|m| m.into())
             }
 
-            Event::Mouse(MouseEvent::ButtonPressed(_) | MouseEvent::ButtonReleased(_)) => {
-                do_update_focus = true;
-                Command::none()
-            }
-
             _ => Command::none()
-        };
-
-        let focused_command = if do_update_focus {
-            self.main.is_query_focused()
-                .map(|m| m.into())
-        } else {
-            Command::none()
-        };
-
-        Command::batch(vec![
-            event_command,
-            focused_command,
-        ])
+        }
     }
 
     fn unhandled_key_input(&mut self, event: iced::keyboard::Event) -> Command<Message> {
@@ -195,7 +165,6 @@ pub enum MainMessage {
     ResultsScrolled(Viewport),
     ResultsBoundsFetched(Option<Rectangle>),
     OpenPath(PathBuf),
-    QueryFocused(bool),
 }
 
 
@@ -229,7 +198,6 @@ struct Main {
     thumbnail_builder: (usize, ThumbnailBuilder),
     scroll: f32,
     results_container_bounds: Option<Rectangle>,
-    is_query_focused: bool, // todo remove
 }
 
 impl Main {
@@ -286,20 +254,15 @@ impl Main {
     fn focus_query(&self) -> Command<MainMessage> {
         let id = text_input::Id::new("query_input");
 
-        return Command::batch(vec![
+        Command::batch(vec![
             text_input::focus(id.clone()),
             text_input::select_all(id),
-        ]);
-    }
-
-    fn is_query_focused(&self) -> Command<MainMessage> {
-        Command::widget( is_focused(Id::new("query_input")) )
-            .map(|is_focused| MainMessage::QueryFocused(is_focused) )
+        ])
     }
 
     fn fetch_results_bounds(&self) -> Command<MainMessage> {
         container::visible_bounds(container::Id::new("main_results"))
-            .map(|rect| MainMessage::ResultsBoundsFetched(rect))
+            .map(MainMessage::ResultsBoundsFetched)
     }
 
     fn update(&mut self, message: MainMessage) -> Command<MainMessage> {
@@ -339,10 +302,6 @@ impl Main {
             MainMessage::ResultsBoundsFetched(rect) => {
                 self.results_container_bounds = rect;
             }
-
-            MainMessage::QueryFocused(is_focused) => {
-                self.is_query_focused = is_focused;
-            }
         }
 
         Command::none()
@@ -352,8 +311,8 @@ impl Main {
         let fuzzy_input = FuzzyInput::new(
             "Query...", 
             &self.query.query,
-            &TAGS_CACHE.get().expect("Tags cache not initialized"),
-            Box::new(|tag_id| MainMessage::AddQueryTag(tag_id).into() ),
+            TAGS_CACHE.get().expect("Tags cache not initialized"),
+            |tag_id| MainMessage::AddQueryTag(tag_id).into(),
         )
         .text_input(|text_input| {
             text_input.id(text_input::Id::new("query_input"))
@@ -381,7 +340,7 @@ impl Main {
                 Wrap::with_elements(
                     self.items.iter().enumerate()
                         .map(|(i, Item(_score, pb))| {
-                            DirEntry::new(&pb)
+                            DirEntry::new(pb)
                                 .cull(!range.contains(&i))
                                 .width(ITEM_SIZE.0)
                                 .height(ITEM_SIZE.1)
@@ -472,7 +431,6 @@ impl Default for Main {
             thumbnail_builder: (0, ThumbnailBuilder::new(4)),
             scroll: 0.0,
             results_container_bounds: None,
-            is_query_focused: false,
         }
     }
 }
