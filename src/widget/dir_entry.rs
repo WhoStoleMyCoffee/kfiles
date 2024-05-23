@@ -46,7 +46,8 @@ pub struct DirEntry<Message: Clone> {
     do_cull: bool,
     width: Length,
     height: Length,
-    on_select: Option<Message>
+    on_select: Option<Message>,
+    on_hover: Option<Message>,
 }
 
 impl<Message: Clone> DirEntry<Message> {
@@ -59,6 +60,7 @@ impl<Message: Clone> DirEntry<Message> {
             width: Length::Shrink,
             height: Length::Shrink,
             on_select: None,
+            on_hover: None,
         }
     }
 
@@ -84,6 +86,14 @@ impl<Message: Clone> DirEntry<Message> {
         }
         self
     }
+
+    /// Does nothing if culled (See [`cull`])
+    pub fn on_hover(mut self, message: Message) -> Self {
+        if !self.do_cull {
+            self.on_hover = Some(message);
+        }
+        self
+    }
 }
 
 
@@ -99,6 +109,9 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
         match event {
             Event::Hovered => {
                 state.is_hovered = true;
+                if let Some(on_hover) = &self.on_hover {
+                    return Some(on_hover.clone());
+                }
             }
 
             Event::Unhovered => {
@@ -108,11 +121,13 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
             Event::Pressed => {
                 const DOUBLE_CLICK_MILLIS: u64 = 500;
 
+                let Some(on_select) = &self.on_select else { return None; };
                 if let Some(instant) = state.last_pressed.replace(Instant::now()) {
                     if instant.elapsed() < Duration::from_millis(DOUBLE_CLICK_MILLIS) {
-                        return self.on_select.clone();
+                        return Some(on_select.clone());
                     }
                 }
+
             }
         }
 

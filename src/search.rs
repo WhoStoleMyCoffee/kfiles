@@ -64,9 +64,6 @@ impl Query {
         !self.query.is_empty()
     }
 
-    /// TODO turn this into a Result?
-    /// TODO refactor
-    /// TODO change matcher depending on query input
     /// Begins the search.
     pub fn search(&self) -> Receiver<Item> {
         let (tx, rx) = mpsc::channel::<Item>();

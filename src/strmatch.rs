@@ -148,7 +148,6 @@ struct Match {
 }
 
 
-// TODO idea: score /= target.len()
 /// Method that imitates the string matching algorithm used in Sublime
 #[derive(Debug, Clone)]
 pub struct Sublime {

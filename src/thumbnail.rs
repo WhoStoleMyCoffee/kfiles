@@ -89,16 +89,22 @@ impl Thumbnail for PathBuf {
     }
 }
 
+
+
+
 type Worker = JoinHandle<Result<(), ThumbnailError>>;
-pub struct ThumbnailBuilder(Vec<Option<Worker>>);
+pub struct ThumbnailBuilder( Vec<Option<Worker>> );
 
 impl ThumbnailBuilder {
     pub fn new(thread_count: usize) -> Self {
         ThumbnailBuilder((0..thread_count).map(|_| None).collect())
     }
 
-    /// Returns whether the job was accepted
-    pub fn build_for_path(&mut self, path: &Path) -> bool {
+    /// Builds a thumbnail for `path` on a thread, replacing a previous worker in the pool
+    /// - `Ok(bool)` containing whether the job was accepted
+    /// - `Err(`[`ThumbnailError`]`)` containing any error that occured during the previous
+    ///   building process (of the replaced worker)
+    pub fn build_for_path(&mut self, path: &Path) -> Result<bool, ThumbnailError> {
         for worker_maybe in self.0.iter_mut() {
             let is_done = worker_maybe
                 .as_ref()
@@ -110,13 +116,13 @@ impl ThumbnailBuilder {
 
             let handle = ThumbnailBuilder::build(path);
             if let Some(old_worker) = worker_maybe.replace(handle) {
-                old_worker.join();
+                old_worker.join() .expect("Couldn't join thumbnail builder thread")?;
             }
 
-            return true;
+            return Ok(true);
         }
 
-        false
+        Ok(false)
     }
 
     fn build(path: &Path) -> Worker {
@@ -289,9 +295,10 @@ mod tests {
             }
 
             loop {
-                let accepted = builder.build_for_path(&pb);
-                if accepted {
-                    break;
+                match builder.build_for_path(&pb) {
+                    Ok(true) => break,
+                    Ok(false) => {},
+                    Err(_) => break,
                 }
             }
         }

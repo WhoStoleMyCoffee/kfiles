@@ -129,7 +129,6 @@ where
             .collect())
     }
 
-    // TODO fn select(+1 or -1)
     fn handle_event(
         &mut self,
         tree: &mut Tree,

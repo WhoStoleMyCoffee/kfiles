@@ -5,21 +5,16 @@ use std::time::Duration;
 
 use iced::event::Status;
 use iced::widget::scrollable::Viewport;
-use iced::widget::{
-    button, column, container, row, scrollable, text, text_input, Container,
-};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Column, Container};
 use iced::{self, Event, Length, Rectangle};
 use iced::{time, Application, Command, Theme};
 use iced_aw::Wrap;
 use rand::Rng;
 
-use crate::widget::{
-    dir_entry::DirEntry,
-    fuzzy_input::FuzzyInput,
-};
 use crate::search::Query;
 use crate::tag::{Tag, TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
+use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 
 // TODO make these configurable
 const UPDATE_RATE_MS: u64 = 100;
@@ -31,7 +26,12 @@ const ITEM_SIZE: (f32, f32) = (80.0, 120.0);
 const ITEM_SPACING: (f32, f32) = (8.0, 8.0);
 const TOTAL_ITEM_SIZE: (f32, f32) = (ITEM_SIZE.0 + ITEM_SPACING.0, ITEM_SIZE.1 + ITEM_SPACING.1);
 
+// Ids
+const QUERY_INPUT_ID: fn() -> text_input::Id = || { text_input::Id::new("query_input") };
+const MAIN_RESULTS_ID: fn() -> container::Id = || { container::Id::new("main_results") };
+
 static TAGS_CACHE: OnceLock<Vec<TagID>> = OnceLock::new();
+
 
 
 #[derive(Debug, Clone)]
@@ -47,9 +47,6 @@ impl From<MainMessage> for Message {
     }
 }
 
-
-
-// TODO make ids lazy static
 pub struct TagExplorer {
     main: Main,
 }
@@ -61,8 +58,8 @@ impl Application for TagExplorer {
     type Theme = Theme;
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        // TODO find better cache system
-        TAGS_CACHE.set( Tag::get_all_tag_ids().unwrap() ) .unwrap();
+        // TODO find better cache system some day
+        TAGS_CACHE.set(Tag::get_all_tag_ids().unwrap()).unwrap();
 
         (
             TagExplorer {
@@ -78,24 +75,18 @@ impl Application for TagExplorer {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::Tick => {
-                self.main.tick()
-            }
+            Message::Tick => self.main.tick(),
 
             Message::MainMessage(main_message) => {
-                self.main.update(main_message) .map(Message::MainMessage)
+                self.main.update(main_message).map(Message::MainMessage)
             }
 
-            Message::Event(event, status) => {
-                self.handle_event(event, status)
-            }
+            Message::Event(event, status) => self.handle_event(event, status),
         }
     }
 
     fn view(&self) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
-        container(
-            self.main.view(),
-        ).into()
+        container(self.main.view()).into()
     }
 
     fn theme(&self) -> Self::Theme {
@@ -105,9 +96,7 @@ impl Application for TagExplorer {
     fn subscription(&self) -> iced::Subscription<Self::Message> {
         iced::Subscription::batch(vec![
             time::every(Duration::from_millis(UPDATE_RATE_MS)).map(|_| Message::Tick),
-            iced::event::listen_with(|event, status|
-                Some(Message::Event(event, status))
-            ),
+            iced::event::listen_with(|event, status| Some(Message::Event(event, status))),
         ])
     }
 }
@@ -118,15 +107,13 @@ impl TagExplorer {
 
         match event {
             // Ignored keyboard events
-            Event::Keyboard(event) if status == Status::Ignored => {
-                self.unhandled_key_input(event)
-            }
+            Event::Keyboard(event) if status == Status::Ignored => self.unhandled_key_input(event),
 
             Event::Window(_, WindowEvent::Resized { .. }) => {
-                self.main.fetch_results_bounds() .map(|m| m.into())
+                self.main.fetch_results_bounds().map(|m| m.into())
             }
 
-            _ => Command::none()
+            _ => Command::none(),
         }
     }
 
@@ -144,17 +131,13 @@ impl TagExplorer {
 
         match key.as_ref() {
             Key::Character(ch) if FOCUS_QUERY_KEYS.contains(&ch) => {
-                self.main.focus_query() .map(Message::MainMessage)
+                self.main.focus_query().map(Message::MainMessage)
             }
 
             _ => Command::none(),
         }
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone)]
 pub enum MainMessage {
@@ -165,8 +148,8 @@ pub enum MainMessage {
     ResultsScrolled(Viewport),
     ResultsBoundsFetched(Option<Rectangle>),
     OpenPath(PathBuf),
+    EntryHovered(PathBuf),
 }
-
 
 pub struct Item(pub isize, pub PathBuf);
 
@@ -175,7 +158,6 @@ impl AsRef<PathBuf> for Item {
         &self.1
     }
 }
-
 
 /// See [`Main::try_receive_results`]
 enum RecvResultsError {
@@ -189,21 +171,20 @@ enum RecvResultsError {
     Empty,
 }
 
-
 struct Main {
     query: Query,
     items: Vec<Item>,
-    receiver: Option< Receiver<Item> >,
+    receiver: Option<Receiver<Item>>,
     /// Tuple with the item index it's trying to build and the builder itself
     thumbnail_builder: (usize, ThumbnailBuilder),
     scroll: f32,
     results_container_bounds: Option<Rectangle>,
+    hovered_path: Option<PathBuf>,
 }
 
 impl Main {
     fn tick(&mut self) -> Command<Message> {
         self.build_thumbnails();
-
         self.try_receive_results();
 
         Command::none()
@@ -216,6 +197,7 @@ impl Main {
             return None;
         };
 
+        // Already full
         if self.items.len() >= MAX_RESULT_COUNT {
             self.receiver = None;
             return Some(RecvResultsError::Full);
@@ -224,14 +206,11 @@ impl Main {
         // If there is no query, just append normally
         // I didn't mean for it to rhyme, I'm just low on time
         if !self.query.has_query() {
-            self.items.append(&mut rx.try_iter()
-                .take(MAX_RESULTS_PER_TICK)
-                .collect()
-            );
+            self.items
+                .append(&mut rx.try_iter().take(MAX_RESULTS_PER_TICK).collect());
 
             return Some(RecvResultsError::Ok);
         }
-
 
         for _ in 0..MAX_RESULTS_PER_TICK {
             let item = match rx.try_recv() {
@@ -240,7 +219,7 @@ impl Main {
                 Err(TryRecvError::Disconnected) => {
                     self.receiver = None;
                     return Some(RecvResultsError::Disconnected);
-                },
+                }
             };
 
             // Insert
@@ -252,8 +231,7 @@ impl Main {
     }
 
     fn focus_query(&self) -> Command<MainMessage> {
-        let id = text_input::Id::new("query_input");
-
+        let id = QUERY_INPUT_ID();
         Command::batch(vec![
             text_input::focus(id.clone()),
             text_input::select_all(id),
@@ -261,7 +239,7 @@ impl Main {
     }
 
     fn fetch_results_bounds(&self) -> Command<MainMessage> {
-        container::visible_bounds(container::Id::new("main_results"))
+        container::visible_bounds(MAIN_RESULTS_ID())
             .map(MainMessage::ResultsBoundsFetched)
     }
 
@@ -277,7 +255,7 @@ impl Main {
             }
 
             MainMessage::AddQueryTag(tag_id) => {
-                let tag = tag_id.load() .unwrap();
+                let tag = tag_id.load().unwrap();
                 if self.query.add_tag(tag) {
                     self.query.query.clear();
                     self.update_search();
@@ -286,7 +264,11 @@ impl Main {
 
             MainMessage::OpenPath(path) => {
                 println!("Opening path {}", path.display());
-                opener::open(&path) .unwrap();
+                opener::open(&path).unwrap();
+            }
+
+            MainMessage::EntryHovered(path) => {
+                self.hovered_path = Some(path);
             }
 
             MainMessage::RemoveQueryTag(tag_id) => {
@@ -308,72 +290,85 @@ impl Main {
     }
 
     fn view(&self) -> Container<Message> {
-        let fuzzy_input = FuzzyInput::new(
-            "Query...", 
-            &self.query.query,
-            TAGS_CACHE.get().expect("Tags cache not initialized"),
-            |tag_id| MainMessage::AddQueryTag(tag_id).into(),
-        )
-        .text_input(|text_input| {
-            text_input.id(text_input::Id::new("query_input"))
-                .on_input(|text| MainMessage::QueryTextChanged(text).into() )
-        });
+        use scrollable::{Direction, Properties};
 
-        let query_input = column![
+        let query_input = self.view_query_input();
+        let results = self.view_results();
+
+        container(
+            column![
+                query_input,
+                text("Results:"),
+                container(
+                    scrollable(results)
+                        .direction(Direction::Vertical(Properties::default()))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .on_scroll(|vp| MainMessage::ResultsScrolled(vp).into())
+                )
+                .id(MAIN_RESULTS_ID()),
+            ]
+            // Add hovered path text, if any
+            .push_maybe(self.hovered_path.as_ref().map(|pb|
+                text(pb.display().to_string().replace('\\', "/"))
+                    .size(12)
+            )),
+        )
+    }
+
+    fn view_query_input(&self) -> Column<Message> {
+        column![
             // Tags
             row(self.query.tags.iter().map(|tag| {
                 let id = &tag.id;
-                button(text( format!("#{}", id.as_ref()) ).size(14))
+                button(text(format!("#{}", id.as_ref())).size(14))
                     .on_press(MainMessage::RemoveQueryTag(id.clone()).into())
                     .into()
             })),
 
-            // Text input
-            fuzzy_input,
-        ];
-
-
-        // Results
-        use scrollable::{Direction, Properties};
-        let results = match self.get_visible_items_range() {
-            Some(range) => {
-                Wrap::with_elements(
-                    self.items.iter().enumerate()
-                        .map(|(i, Item(_score, pb))| {
-                            DirEntry::new(pb)
-                                .cull(!range.contains(&i))
-                                .width(ITEM_SIZE.0)
-                                .height(ITEM_SIZE.1)
-                                .on_select( MainMessage::OpenPath( pb.clone() ).into() )
-                                .into()
-                        })
-                        .collect(),
-                )
-                .spacing(ITEM_SPACING.0)
-                .line_spacing(ITEM_SPACING.1)
-            }
-
-            None => {
-                Wrap::new()
-            }
-        };
-
-        container(column![
-            query_input,
-            text("Results:"),
-            container(
-                scrollable(results)
-                    .direction(Direction::Vertical(Properties::default()))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .on_scroll(|vp| MainMessage::ResultsScrolled(vp).into())
+            // Fuzzy text input
+            FuzzyInput::new(
+                "Query...",
+                &self.query.query,
+                TAGS_CACHE.get().expect("Tags cache not initialized"),
+                |tag_id| MainMessage::AddQueryTag(tag_id).into(),
             )
-            .id(container::Id::new("main_results")),
-        ])
+            .text_input(|text_input| {
+                text_input
+                    .id(QUERY_INPUT_ID())
+                    .on_input(|text| MainMessage::QueryTextChanged(text).into())
+            }),
+        ]
+    }
+
+    fn view_results(&self) -> Wrap<Message, iced_aw::direction::Horizontal> {
+        match self.get_visible_items_range() {
+            Some(range) => Wrap::with_elements(
+                self.items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, Item(_score, pb))| {
+                        DirEntry::new(pb)
+                            .cull(!range.contains(&i))
+                            .width(ITEM_SIZE.0)
+                            .height(ITEM_SIZE.1)
+                            .on_select(MainMessage::OpenPath(pb.clone()).into())
+                            .on_hover(MainMessage::EntryHovered(pb.clone()).into())
+                            .into()
+                    })
+                    .collect(),
+            )
+            .spacing(ITEM_SPACING.0)
+            .line_spacing(ITEM_SPACING.1),
+
+            None => Wrap::new(),
+        }
     }
 
     fn build_thumbnails(&mut self) {
-        let Some(range) = self.get_visible_items_range() else { return };
+        let Some(range) = self.get_visible_items_range() else {
+            return;
+        };
         let (index, builder) = &mut self.thumbnail_builder;
 
         let Some(Item(_score, path)) = self.items.get(*index) else {
@@ -419,6 +414,7 @@ impl Main {
         self.items.clear(); // TODO filter instead?
         self.receiver = Some(self.query.search());
         self.scroll = 0.0;
+        self.hovered_path = None;
     }
 }
 
@@ -431,11 +427,7 @@ impl Default for Main {
             thumbnail_builder: (0, ThumbnailBuilder::new(4)),
             scroll: 0.0,
             results_container_bounds: None,
+            hovered_path: None,
         }
     }
 }
-
-
-
-
-
