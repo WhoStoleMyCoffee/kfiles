@@ -173,6 +173,7 @@ enum RecvResultsError {
 
 struct Main {
     query: Query,
+    query_text: String,
     items: Vec<Item>,
     receiver: Option<Receiver<Item>>,
     /// Tuple with the item index it's trying to build and the builder itself
@@ -205,9 +206,11 @@ impl Main {
 
         // If there is no query, just append normally
         // I didn't mean for it to rhyme, I'm just low on time
-        if !self.query.has_query() {
-            self.items
-                .append(&mut rx.try_iter().take(MAX_RESULTS_PER_TICK).collect());
+        if self.query.is_empty() {
+            self.items.append(&mut rx.try_iter()
+                .take(MAX_RESULTS_PER_TICK)
+                .collect()
+            );
 
             return Some(RecvResultsError::Ok);
         }
@@ -250,14 +253,18 @@ impl Main {
             }
 
             MainMessage::QueryTextChanged(new_text) => {
-                self.query.query = new_text;
-                self.update_search();
+                let has_changed = self.query.parse_query(&new_text);
+                self.query_text = new_text;
+                if has_changed {
+                    self.update_search();
+                }
             }
 
             MainMessage::AddQueryTag(tag_id) => {
                 let tag = tag_id.load().unwrap();
                 if self.query.add_tag(tag) {
-                    self.query.query.clear();
+                    self.query_text.clear();
+                    self.query.constraints.clear();
                     self.update_search();
                 }
             }
@@ -321,7 +328,7 @@ impl Main {
             // Tags
             row(self.query.tags.iter().map(|tag| {
                 let id = &tag.id;
-                button(text(format!("#{}", id.as_ref())).size(14))
+                button(text(id).size(14))
                     .on_press(MainMessage::RemoveQueryTag(id.clone()).into())
                     .into()
             })),
@@ -329,7 +336,7 @@ impl Main {
             // Fuzzy text input
             FuzzyInput::new(
                 "Query...",
-                &self.query.query,
+                &self.query_text,
                 TAGS_CACHE.get().expect("Tags cache not initialized"),
                 |tag_id| MainMessage::AddQueryTag(tag_id).into(),
             )
@@ -422,6 +429,7 @@ impl Default for Main {
     fn default() -> Self {
         Main {
             query: Query::empty(),
+            query_text: String::default(),
             items: Vec::new(),
             receiver: None,
             thumbnail_builder: (0, ThumbnailBuilder::new(4)),

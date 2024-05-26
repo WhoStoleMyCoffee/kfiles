@@ -349,7 +349,7 @@ impl Deref for TagID {
 impl Display for TagID {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "#{}", self.0)
     }
 }
 

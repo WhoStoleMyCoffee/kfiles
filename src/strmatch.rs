@@ -149,7 +149,7 @@ struct Match {
 
 
 /// Method that imitates the string matching algorithm used in Sublime
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sublime {
     pub bonus_consecutive: isize,
     pub bonus_word_start: isize,
