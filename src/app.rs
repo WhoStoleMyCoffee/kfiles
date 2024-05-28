@@ -142,8 +142,10 @@ impl TagExplorer {
 #[derive(Debug, Clone)]
 pub enum MainMessage {
     QueryTextChanged(String),
-    AddQueryTag(TagID),
-    RemoveQueryTag(TagID),
+    ToggleQueryTag {
+        tag_id: TagID,
+        clear_input: bool,
+    },
     FocusQuery,
     ResultsScrolled(Viewport),
     ResultsBoundsFetched(Option<Rectangle>),
@@ -260,14 +262,23 @@ impl Main {
                 }
             }
 
-            MainMessage::AddQueryTag(tag_id) => {
-                let tag = tag_id.load().unwrap();
-                if self.query.add_tag(tag) {
-                    self.query_text.clear();
-                    self.query.constraints.clear();
-                    self.update_search();
+            MainMessage::ToggleQueryTag { tag_id, clear_input } => {
+                let removed: bool = self.query.remove_tag(&tag_id);
+                // If not removed, then add it
+                if !removed {
+                    let tag: Tag = tag_id.load().unwrap();
+                    if self.query.add_tag(tag) {
+                        self.query.constraints.clear();
+                        self.update_search();
+                    }
                 }
+
+                if clear_input {
+                    self.query_text.clear();
+                }
+                self.update_search();
             }
+
 
             MainMessage::OpenPath(path) => {
                 println!("Opening path {}", path.display());
@@ -276,12 +287,6 @@ impl Main {
 
             MainMessage::EntryHovered(path) => {
                 self.hovered_path = Some(path);
-            }
-
-            MainMessage::RemoveQueryTag(tag_id) => {
-                if self.query.remove_tag(&tag_id) {
-                    self.update_search();
-                }
             }
 
             MainMessage::ResultsScrolled(viewport) => {
@@ -329,7 +334,10 @@ impl Main {
             row(self.query.tags.iter().map(|tag| {
                 let id = &tag.id;
                 button(text(id).size(14))
-                    .on_press(MainMessage::RemoveQueryTag(id.clone()).into())
+                    .on_press(MainMessage::ToggleQueryTag {
+                        tag_id: id.clone(),
+                        clear_input: false,
+                    }.into())
                     .into()
             })),
 
@@ -338,7 +346,10 @@ impl Main {
                 "Query...",
                 &self.query_text,
                 TAGS_CACHE.get().expect("Tags cache not initialized"),
-                |tag_id| MainMessage::AddQueryTag(tag_id).into(),
+                |tag_id| MainMessage::ToggleQueryTag {
+                    tag_id,
+                    clear_input: true,
+                }.into(),
             )
             .text_input(|text_input| {
                 text_input

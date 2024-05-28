@@ -1653,6 +1653,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "kfiles"
+version = "0.1.0"
+dependencies = [
+ "convert_case",
+ "directories",
+ "iced",
+ "iced_aw",
+ "image 0.25.1",
+ "opener",
+ "rand",
+ "regex",
+ "serde",
+ "thiserror",
+ "toml",
+ "walkdir",
+]
+
+[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3072,24 +3090,6 @@ dependencies = [
  "pkg-config",
  "toml",
  "version-compare",
-]
-
-[[package]]
-name = "tag-explorer"
-version = "0.1.0"
-dependencies = [
- "convert_case",
- "directories",
- "iced",
- "iced_aw",
- "image 0.25.1",
- "opener",
- "rand",
- "regex",
- "serde",
- "thiserror",
- "toml",
- "walkdir",
 ]
 
 [[package]]
