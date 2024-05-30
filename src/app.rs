@@ -196,9 +196,7 @@ impl Main {
     fn try_receive_results(&mut self) -> Option<RecvResultsError> {
         use std::sync::mpsc::TryRecvError;
 
-        let Some(rx) = &mut self.receiver else {
-            return None;
-        };
+        let rx = self.receiver.as_mut()?;
 
         // Already full
         if self.items.len() >= MAX_RESULT_COUNT {
@@ -209,6 +207,18 @@ impl Main {
         // If there is no query, just append normally
         // I didn't mean for it to rhyme, I'm just low on time
         if self.query.is_empty() {
+            // We `try_recv()` first before `try_iter()` to check if the sender has disconnected
+            // Because if it has, we also want to drop the receiver
+            let item = match rx.try_recv() {
+                Ok(item) => item,
+                Err(TryRecvError::Empty) => return Some(RecvResultsError::Empty),
+                Err(TryRecvError::Disconnected) => {
+                    self.receiver = None;
+                    return Some(RecvResultsError::Disconnected);
+                }
+            };
+
+            self.items.push(item);
             self.items.append(&mut rx.try_iter()
                 .take(MAX_RESULTS_PER_TICK)
                 .collect()
@@ -218,6 +228,8 @@ impl Main {
         }
 
         for _ in 0..MAX_RESULTS_PER_TICK {
+            // We do a loop of `try_recv()` insead of `try_iter()` for the same reasons
+            // same match statement as above...
             let item = match rx.try_recv() {
                 Ok(item) => item,
                 Err(TryRecvError::Empty) => return Some(RecvResultsError::Empty),
@@ -266,7 +278,7 @@ impl Main {
                 let removed: bool = self.query.remove_tag(&tag_id);
                 // If not removed, then add it
                 if !removed {
-                    let tag: Tag = tag_id.load().unwrap();
+                    let tag: Tag = tag_id.load() .unwrap();
                     if self.query.add_tag(tag) {
                         self.query.constraints.clear();
                         self.update_search();
@@ -282,7 +294,12 @@ impl Main {
 
             MainMessage::OpenPath(path) => {
                 println!("Opening path {}", path.display());
-                opener::open(&path).unwrap();
+
+                if let Err(err) = opener::open(&path) {
+                    eprintln!("Failed to open {}:\n\t{:?}\n\tRevealing in file explorer instead", &path.display(), err);
+                    opener::reveal(&path) .unwrap();
+                }
+
             }
 
             MainMessage::EntryHovered(path) => {
@@ -360,27 +377,34 @@ impl Main {
     }
 
     fn view_results(&self) -> Wrap<Message, iced_aw::direction::Horizontal> {
-        match self.get_visible_items_range() {
+        let mut wrap = match self.get_visible_items_range() {
             Some(range) => Wrap::with_elements(
-                self.items
-                    .iter()
-                    .enumerate()
-                    .map(|(i, Item(_score, pb))| {
-                        DirEntry::new(pb)
-                            .cull(!range.contains(&i))
-                            .width(ITEM_SIZE.0)
-                            .height(ITEM_SIZE.1)
-                            .on_select(MainMessage::OpenPath(pb.clone()).into())
-                            .on_hover(MainMessage::EntryHovered(pb.clone()).into())
-                            .into()
-                    })
-                    .collect(),
+                self.items.iter().enumerate()
+                .map(|(i, Item(_score, pb))| {
+                    DirEntry::new(pb)
+                        .cull(!range.contains(&i))
+                        .width(ITEM_SIZE.0)
+                        .height(ITEM_SIZE.1)
+                        .on_select(MainMessage::OpenPath(pb.clone()).into())
+                        .on_hover(MainMessage::EntryHovered(pb.clone()).into())
+                        .into()
+                })
+                .collect(),
             )
             .spacing(ITEM_SPACING.0)
             .line_spacing(ITEM_SPACING.1),
 
             None => Wrap::new(),
+        };
+
+        if self.receiver.is_some() {
+            wrap = wrap.push(iced_aw::Spinner::new()
+                .width(Length::Fixed(ITEM_SIZE.0))
+                .height(Length::Fixed(ITEM_SIZE.1))
+            );
         }
+
+        wrap
     }
 
     fn build_thumbnails(&mut self) {

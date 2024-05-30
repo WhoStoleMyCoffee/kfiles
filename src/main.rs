@@ -38,9 +38,12 @@ fn main() -> iced::Result {
 
 pub fn get_temp_dir() -> &'static PathBuf {
     TEMP_DIR.get_or_init(|| {
-        let pb = std::env::temp_dir().join(env!("CARGO_PKG_NAME"));
-        if !pb.exists() {
-            std::fs::create_dir_all(&pb).unwrap(); // handle this unwrap at some point lol
+        let pb: PathBuf = std::env::temp_dir().join(env!("CARGO_PKG_NAME"));
+        if pb.exists() {
+            return pb;
+        }
+        if let Err(err) = std::fs::create_dir_all(&pb) {
+            eprintln!("Failed to create temp directory: {:?}", err);
         }
         pb
     })

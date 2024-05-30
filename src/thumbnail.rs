@@ -146,8 +146,11 @@ impl Drop for ThumbnailBuilder {
 pub fn get_cache_dir() -> &'static PathBuf {
     CACHE_DIR.get_or_init(|| {
         let pb = get_temp_dir().join("thumbnails/");
-        if !pb.exists() {
-            create_dir(&pb).unwrap(); // handle this unwrap at some point lol
+        if pb.exists() {
+            return pb;
+        }
+        if let Err(err) = create_dir(&pb) {
+            eprintln!("Failed to create thumbnail cache dir: {:?}", err);
         }
         pb
     })
@@ -190,7 +193,7 @@ pub fn cache_size() -> io::Result<u64> {
 /// used ones will just be rebuilt when necessary.
 /// Returns how many bytes were trimmed
 pub fn trim_cache(max_size_bytes: u64) -> io::Result<u64> {
-    let size = cache_size().unwrap();
+    let size: u64 = cache_size()?;
     // No need to trim
     if size < max_size_bytes {
         return Ok(0);
@@ -204,7 +207,7 @@ pub fn trim_cache(max_size_bytes: u64) -> io::Result<u64> {
 /// used ones will just be rebuilt when necessary.
 /// Returns how many bytes were trimmed
 pub fn trim_cache_strict(max_size_bytes: u64) -> io::Result<u64> {
-    let original_size = cache_size().unwrap();
+    let original_size: u64 = cache_size()?;
     // No need to trim
     if original_size < max_size_bytes {
         return Ok(0);

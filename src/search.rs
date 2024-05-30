@@ -223,6 +223,7 @@ mod constraint {
             }
 
             let mut str: String = str.to_string();
+            // Contains constraint
             constraints.contains = Contains::parse(&mut str);
 
             let mut score_query: Vec<&str> = Vec::new();
@@ -230,18 +231,19 @@ mod constraint {
                 .map(|str| str.trim())
                 .filter(|str| !str.is_empty())
             {
+                // File type constraint
                 if let Some(c) = FileType::parse(arg) {
                     constraints.filetype = Some(c);
                     continue;
                 }
 
-                // --.ext -> File extension constraint
+                // File extension constraint
                 if let Some(c) = Extension::parse(arg) {
                     constraints.extensions.push(c);
                     continue;
                 }
 
-                // Everything else -> Score (aka fuzzy search)
+                // Everything else -> Score constraint (aka fuzzy search)
                 score_query.push(arg);
             }
 
@@ -297,18 +299,19 @@ mod constraint {
             // 3. AND contains
             // TODO maybe OR them? idk
             let pathstr = path.display().to_string() .replace('\\', "/");
-            if !self.contains.is_empty() {
-                if !self.contains.iter() .all(|c| c.matches(&pathstr)) {
-                    return None;
-                }
+            if !self.contains.is_empty() && !self.contains.iter() .all(|c| c.matches(&pathstr)) {
+                return None;
             }
+
+            let length_penalty: isize = pathstr.len() as isize;
             
             // 4. OR score
-            let Some(score) = &self.score else {
-                return Some(0);
+            let Some(score_constraint) = &self.score else {
+                return Some(-length_penalty);
             };
 
-            score.score(&pathstr)
+            score_constraint.score(&pathstr)
+                .map(|s| s - length_penalty)
         }
 
         pub fn is_empty(&self) -> bool {
@@ -345,7 +348,6 @@ mod constraint {
             }
         }
 
-        #[inline]
         fn score(&self, str: &str) -> Option<isize> {
             match (self.matcher.score(&str), self.inverted) {
                 (None, true) => Some(0),
@@ -364,22 +366,26 @@ mod constraint {
     }
 
     impl Contains {
+        /// Drains the parsed sections from the string
+        /// This makes it easier to deal with in [`ConstraintList::parse`]
         pub fn parse(str: &mut String) -> Vec<Contains> {
             static REGEX: OnceLock<Regex> = OnceLock::new();
 
             let re: &Regex = REGEX.get_or_init(||
-                Regex::new(r#"( |^)(?<invert>!)?"(?<inner>[^"]+)("( |$)|$)"#) .unwrap()
-               // ( |^)             Space or start
+                // TODO this could be improved
+                Regex::new(r#" ?(?<invert>!)?"(?<inner>[^"]+)("( |$)|$)"#)
+                    .unwrap() // Will never fail
                // (?<invert>!)?     Optional `!` to invert
                // "(?<inner>[^"]+)  Inner query
                // ("( |$)|$)        Closing quote or EOL
             );
 
-            let mut parsed = Vec::new();
+            let mut parsed: Vec<Contains> = Vec::new();
             let mut drain_ranges = Vec::new();
-            for cap in re.captures_iter(&str) {
-                let inner_match = cap.name("inner").unwrap();
-                let inner = inner_match.as_str();
+            // Parse
+            for cap in re.captures_iter(str) {
+                let inner_match = cap.name("inner") .unwrap(); // Should not fail
+                let inner: &str = inner_match.as_str();
                 let mut range = inner_match.range();
 
                 let inverted: bool = cap.name("invert").is_some();
@@ -394,6 +400,7 @@ mod constraint {
                 });
             }
 
+            // Drain captured ranges
             for r in drain_ranges.into_iter().rev() {
                 let start = r.start - 1;
                 let end = (r.end + 2).min(str.len());
@@ -426,7 +433,7 @@ mod constraint {
             let (str, inverted) = str.strip_prefix('!')
                 .map_or((str, false), |s| (s, true));
 
-            let ext = str.strip_prefix(".")?;
+            let ext = str.strip_prefix('.')?;
             if ext.is_empty() { return None; }
 
             Some(Extension {
@@ -586,7 +593,6 @@ mod constraint {
 
         #[test]
         fn test_parse() {
-
             // let mut str: String = "abc 'bla' --other 'all the rest" .to_string();
             let mut str: String = "what is love 'baby don't hurt me'" .to_string();
             eprintln!("str = {:?}", str);

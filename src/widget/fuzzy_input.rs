@@ -159,14 +159,14 @@ where
                 }
 
                 Key::Named(key::Named::Enter) if modifiers.is_empty() => {
-                    let index = state.hovered_option?;
+                    let index: usize = state.hovered_option?;
 
                     let options = match &state.filtered_options {
                         Some(options) => options,
                         None => self.options,
                     };
 
-                    shell.publish( (self.on_selected)( options[index].clone() ) );
+                    shell.publish( (self.on_selected)( options.get(index)? .clone() ) );
                     return Some(event::Status::Captured);
                 }
 

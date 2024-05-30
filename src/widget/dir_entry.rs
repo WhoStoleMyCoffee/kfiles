@@ -121,7 +121,7 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
             Event::Pressed => {
                 const DOUBLE_CLICK_MILLIS: u64 = 500;
 
-                let Some(on_select) = &self.on_select else { return None; };
+                let on_select = self.on_select.as_ref()?;
                 if let Some(instant) = state.last_pressed.replace(Instant::now()) {
                     if instant.elapsed() < Duration::from_millis(DOUBLE_CLICK_MILLIS) {
                         return Some(on_select.clone());

@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 iced = { version = "0.12.1", features = ["image", "lazy", "advanced"] }
-iced_aw = { version = "0.8.0", features = ["wrap", "selection_list"] }
+iced_aw = { version = "0.8.0", features = ["wrap", "selection_list", "spinner"] }
 walkdir = "2.5.0"
 serde = { version = "1.0.195", features = ["derive"] }
 directories = "5.0.1"
@@ -16,7 +16,7 @@ thiserror = "1.0.59"
 convert_case = "0.6.0"
 image = "0.25.1"
 rand = "0.8.5"
-opener = "0.7.0"
+opener = { version = "0.7.0", features = ["reveal"] }
 regex = "1.10.4"
 
 # anyhow
