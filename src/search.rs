@@ -4,7 +4,7 @@ use std::thread;
 
 use walkdir::{DirEntry, WalkDir};
 
-use crate::app::{ self, Item };
+use crate::app::mainscreen::Item;
 use crate::strmatch::Sublime;
 use crate::tag::{ Entries, Tag };
 
@@ -69,7 +69,7 @@ impl Searcher {
 }
 
 impl Iterator for Searcher {
-    type Item = app::Item;
+    type Item = Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.find_map(|pb| {
@@ -155,9 +155,9 @@ impl Query {
         );
 
         thread::spawn(move || {
-            let iter: Box<dyn Iterator<Item = app::Item>> = if constraints.is_empty() {
+            let iter: Box<dyn Iterator<Item = Item>> = if constraints.is_empty() {
                 Box::new(iter_entries(entries)
-                    .map(|pb| app::Item(0, pb) )
+                    .map(|pb| Item(0, pb) )
                 )
             } else {
                 Box::new( Searcher::new(entries, constraints) )

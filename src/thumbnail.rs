@@ -93,6 +93,8 @@ impl Thumbnail for PathBuf {
 
 
 type Worker = JoinHandle<Result<(), ThumbnailError>>;
+
+#[derive(Debug)]
 pub struct ThumbnailBuilder( Vec<Option<Worker>> );
 
 impl ThumbnailBuilder {

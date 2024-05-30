@@ -10,7 +10,7 @@ use toml;
 
 use serde::{Deserialize, Serialize};
 
-use crate::app::Item;
+use crate::app::mainscreen::Item;
 use crate::search;
 
 
