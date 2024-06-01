@@ -13,7 +13,7 @@ use crate::search::Query;
 use crate::tag::{Tag, TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
-use crate::app::{ Message, TAGS_CACHE };
+use crate::app::{ Message as AppMessage, TAGS_CACHE };
 
 // TODO make these configurable
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
@@ -30,7 +30,7 @@ const MAIN_RESULTS_ID: fn() -> container::Id = || { container::Id::new("main_res
 
 
 #[derive(Debug, Clone)]
-pub enum MainMessage {
+pub enum Message {
     QueryTextChanged(String),
     ToggleQueryTag {
         tag_id: TagID,
@@ -82,7 +82,7 @@ pub struct MainScreen {
 }
 
 impl MainScreen {
-    pub fn new() -> (Self, Command<Message>) {
+    pub fn new() -> (Self, Command<AppMessage>) {
         (
             MainScreen {
                 query: Query::empty(),
@@ -98,7 +98,7 @@ impl MainScreen {
         )
     }
 
-    pub fn tick(&mut self) -> Command<Message> {
+    pub fn tick(&mut self) -> Command<AppMessage> {
         self.build_thumbnails();
         self.try_receive_results();
 
@@ -159,7 +159,7 @@ impl MainScreen {
         Some(RecvResultsError::Ok)
     }
 
-    pub fn focus_query() -> Command<MainMessage> {
+    pub fn focus_query() -> Command<Message> {
         let id = QUERY_INPUT_ID();
         Command::batch(vec![
             text_input::focus(id.clone()),
@@ -167,18 +167,18 @@ impl MainScreen {
         ])
     }
 
-    pub fn fetch_results_bounds() -> Command<MainMessage> {
+    pub fn fetch_results_bounds() -> Command<Message> {
         container::visible_bounds(MAIN_RESULTS_ID())
-            .map(MainMessage::ResultsBoundsFetched)
+            .map(Message::ResultsBoundsFetched)
     }
 
-    pub fn update(&mut self, message: MainMessage) -> Command<Message> {
+    pub fn update(&mut self, message: Message) -> Command<AppMessage> {
         match message {
-            MainMessage::FocusQuery => {
+            Message::FocusQuery => {
                 return MainScreen::focus_query() .map(|m| m.into());
             }
 
-            MainMessage::QueryTextChanged(new_text) => {
+            Message::QueryTextChanged(new_text) => {
                 let has_changed = self.query.parse_query(&new_text);
                 self.query_text = new_text;
                 if has_changed {
@@ -186,7 +186,7 @@ impl MainScreen {
                 }
             }
 
-            MainMessage::ToggleQueryTag { tag_id, clear_input } => {
+            Message::ToggleQueryTag { tag_id, clear_input } => {
                 let removed: bool = self.query.remove_tag(&tag_id);
                 // If not removed, then add it
                 if !removed {
@@ -204,7 +204,7 @@ impl MainScreen {
             }
 
 
-            MainMessage::OpenPath(path) => {
+            Message::OpenPath(path) => {
                 println!("Opening path {}", path.display());
 
                 if let Err(err) = opener::open(&path) {
@@ -214,15 +214,15 @@ impl MainScreen {
 
             }
 
-            MainMessage::EntryHovered(path) => {
+            Message::EntryHovered(path) => {
                 self.hovered_path = Some(path);
             }
 
-            MainMessage::ResultsScrolled(viewport) => {
+            Message::ResultsScrolled(viewport) => {
                 self.scroll = viewport.absolute_offset().y;
             }
 
-            MainMessage::ResultsBoundsFetched(rect) => {
+            Message::ResultsBoundsFetched(rect) => {
                 self.results_container_bounds = rect;
             }
         }
@@ -230,7 +230,7 @@ impl MainScreen {
         Command::none()
     }
 
-    pub fn view(&self) -> Container<Message> {
+    pub fn view(&self) -> Container<AppMessage> {
         use scrollable::{Direction, Properties};
 
         let query_input = self.view_query_input();
@@ -239,7 +239,7 @@ impl MainScreen {
         container(
             column![
                 button("tags")
-                    .on_press(Message::SwitchToTagListScreen),
+                    .on_press(AppMessage::SwitchToTagListScreen),
                 query_input,
                 text("Results:"),
                 container(
@@ -247,7 +247,7 @@ impl MainScreen {
                         .direction(Direction::Vertical(Properties::default()))
                         .width(Length::Fill)
                         .height(Length::Fill)
-                        .on_scroll(|vp| MainMessage::ResultsScrolled(vp).into())
+                        .on_scroll(|vp| Message::ResultsScrolled(vp).into())
                 )
                 .id(MAIN_RESULTS_ID()),
             ]
@@ -259,13 +259,13 @@ impl MainScreen {
         )
     }
 
-    fn view_query_input(&self) -> Column<Message> {
+    fn view_query_input(&self) -> Column<AppMessage> {
         column![
             // Tags
             row(self.query.tags.iter().map(|tag| {
                 let id = &tag.id;
                 button(text(id).size(14))
-                    .on_press(MainMessage::ToggleQueryTag {
+                    .on_press(Message::ToggleQueryTag {
                         tag_id: id.clone(),
                         clear_input: false,
                     }.into())
@@ -277,7 +277,7 @@ impl MainScreen {
                 "Query...",
                 &self.query_text,
                 TAGS_CACHE.get().expect("Tags cache not initialized"),
-                |tag_id| MainMessage::ToggleQueryTag {
+                |tag_id| Message::ToggleQueryTag {
                     tag_id,
                     clear_input: true,
                 }.into(),
@@ -285,12 +285,12 @@ impl MainScreen {
             .text_input(|text_input| {
                 text_input
                     .id(QUERY_INPUT_ID())
-                    .on_input(|text| MainMessage::QueryTextChanged(text).into())
+                    .on_input(|text| Message::QueryTextChanged(text).into())
             }),
         ]
     }
 
-    fn view_results(&self) -> Wrap<Message, iced_aw::direction::Horizontal> {
+    fn view_results(&self) -> Wrap<AppMessage, iced_aw::direction::Horizontal> {
         let mut wrap = match self.get_visible_items_range() {
             Some(range) => Wrap::with_elements(
                 self.items.iter().enumerate()
@@ -299,8 +299,8 @@ impl MainScreen {
                         .cull(!range.contains(&i))
                         .width(ITEM_SIZE.0)
                         .height(ITEM_SIZE.1)
-                        .on_select(MainMessage::OpenPath(pb.clone()).into())
-                        .on_hover(MainMessage::EntryHovered(pb.clone()).into())
+                        .on_select(Message::OpenPath(pb.clone()).into())
+                        .on_hover(Message::EntryHovered(pb.clone()).into())
                         .into()
                 })
                 .collect(),
@@ -373,7 +373,7 @@ impl MainScreen {
         self.hovered_path = None;
     }
 
-    pub fn handle_event(&mut self, event: Event, status: Status) -> Command<Message> {
+    pub fn handle_event(&mut self, event: Event, status: Status) -> Command<AppMessage> {
         use iced::window::Event as WindowEvent;
         use iced::keyboard::{Event as KeyboardEvent, Key};
 

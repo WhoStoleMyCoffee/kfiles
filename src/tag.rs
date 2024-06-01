@@ -47,8 +47,8 @@ impl Tag {
     }
 
     /// Returns whether the base dir already existed
-    pub fn initiate_base_dir() -> io::Result<bool> {
-        let base_dir = Tag::get_base_dir();
+    pub fn initiate_save_dir() -> io::Result<bool> {
+        let base_dir = Tag::get_save_dir();
         if base_dir.exists() {
             return Ok(true);
         }
@@ -56,18 +56,18 @@ impl Tag {
         Ok(false)
     }
 
-    pub fn get_base_dir_or_create() -> io::Result<PathBuf> {
-        let base_dir = Tag::get_base_dir();
+    pub fn get_save_dir_or_create() -> io::Result<PathBuf> {
+        let base_dir = Tag::get_save_dir();
         if base_dir.exists() {
             return Ok(base_dir);
         }
-        Tag::initiate_base_dir().map(|_| base_dir)
+        Tag::initiate_save_dir().map(|_| base_dir)
     }
 
     /// Returns the base dir where all tags are stored
     #[cfg(not(test))]
     #[inline]
-    pub fn get_base_dir() -> PathBuf {
+    pub fn get_save_dir() -> PathBuf {
         const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
         directories::BaseDirs::new()
             .expect("could not get base dirs")
@@ -79,7 +79,7 @@ impl Tag {
     /// Returns the base dir where all tags are stored (for tests only)
     #[cfg(test)]
     #[inline]
-    pub fn get_base_dir() -> PathBuf {
+    pub fn get_save_dir() -> PathBuf {
         PathBuf::from("C:/Users/ddxte/Documents/Projects/tag-explorer/test_tags/")
     }
 
@@ -95,7 +95,7 @@ impl Tag {
 
     /// Get all existing tags as paths
     pub fn get_all_tags() -> io::Result<Vec<PathBuf>> {
-        Ok(read_dir(Tag::get_base_dir_or_create()?)?
+        Ok(read_dir(Tag::get_save_dir_or_create()?)?
             .flatten()
             .map(|de| de.path())
             .filter(|pb| pb.is_file())
@@ -116,7 +116,7 @@ impl Tag {
         P: AsRef<Path>,
     {
         if !path.as_ref().exists() {
-            return Err(AddEntryError::NonexistentPath(path.as_ref().to_path_buf()));
+            return Err(AddEntryError::NonexistentPath);
         }
 
         if self.contains(&path) {
@@ -170,6 +170,7 @@ impl Tag {
         entries
     }
 
+    /// Saves this [`Tag`] to the disk
     pub fn save(&self) -> Result<bool, SaveError> {
         let path = self.get_save_path();
 
@@ -291,7 +292,7 @@ impl TagID {
     }
 
     pub fn get_path(&self) -> PathBuf {
-        Tag::get_base_dir().join(format!("{}.toml", self.0))
+        Tag::get_save_dir().join(format!("{}.toml", self.0))
     }
 
     pub fn exists(&self) -> bool {
@@ -488,9 +489,9 @@ impl IntoIterator for Entries {
 
 #[derive(Debug, Error)]
 pub enum AddEntryError {
-    #[error("path '{}' does not exist", .0.display())]
-    NonexistentPath(PathBuf),
-    #[error("already exists")]
+    #[error("path does not exist")]
+    NonexistentPath,
+    #[error("already contained")]
     AlreadyContained,
 }
 
@@ -498,8 +499,10 @@ pub enum AddEntryError {
 pub enum LoadError {
     #[error("could not get tag name from file '{}'", .0.display())]
     InvalidName(PathBuf),
+
     #[error(transparent)]
     IO(#[from] io::Error),
+
     #[error("failed to parse: {0}")]
     ParseError(#[from] toml::de::Error),
 }

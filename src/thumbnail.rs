@@ -16,6 +16,8 @@ pub const MAX_CACHE_SIZE_BYTES: u64 = 500_000;
 
 static CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+
+
 #[derive(Debug, Error)]
 pub enum ThumbnailError {
     #[error(transparent)]
@@ -258,9 +260,9 @@ pub fn load_thumbnail_for_path(path: &Path) -> widget::Image<widget::image::Hand
     if cache_path.exists() {
         return widget::image(cache_path);
     } else if path.is_dir() {
-        return widget::image("assets/folder.png");
+        return widget::image("assets/icons/folder.png");
     }
-    widget::image("assets/file.png")
+    widget::image("assets/icons/file.png")
     // Custom file icons ...
 }
 

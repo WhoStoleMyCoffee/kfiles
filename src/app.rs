@@ -2,25 +2,25 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use iced::event::Status;
-use iced::widget::{container, Container};
-use iced::{self, Event};
+use iced::widget::container;
+use iced::{self, Element, Event};
 use iced::{time, Application, Command, Theme};
 
 use crate::tag::{Tag, TagID};
 
 pub mod mainscreen;
-pub mod taglist;
+pub mod taglistscreen;
 
-use mainscreen::{ MainMessage, MainScreen };
+use mainscreen::MainScreen;
 
-use self::taglist::{TagListMessage, TagListScreen};
+use self::taglistscreen::TagListScreen;
 
 const UPDATE_RATE_MS: u64 = 100;
 
 static TAGS_CACHE: OnceLock<Vec<TagID>> = OnceLock::new();
 
 
-
+// TODO Message::NotifyError
 #[derive(Debug, Clone)]
 pub enum Message {
     Tick,
@@ -36,9 +36,15 @@ impl From<ScreenMessage> for Message {
     }
 }
 
-impl From<MainMessage> for Message {
-    fn from(value: MainMessage) -> Self {
+impl From<mainscreen::Message> for Message {
+    fn from(value: mainscreen::Message) -> Self {
         Message::Screen(ScreenMessage::Main(value))
+    }
+}
+
+impl From<taglistscreen::Message> for Message {
+    fn from(value: taglistscreen::Message) -> Self {
+        Message::Screen(ScreenMessage::TagList(value))
     }
 }
 
@@ -74,23 +80,23 @@ impl Application for TagExplorer {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::Tick => return self.current_screen.tick(),
+            Message::Tick => self.current_screen.tick(),
 
             Message::Screen(screen_message) =>
-                return self.current_screen.update(screen_message),
+                self.current_screen.update(screen_message),
 
-            Message::Event(event, status) => return self.handle_event(event, status),
+            Message::Event(event, status) => self.handle_event(event, status),
 
             Message::SwitchToMainScreen => {
                 let (main_screen, command) = MainScreen::new();
                 self.current_screen = Screen::Main(main_screen);
-                return command;
+                command
             }
 
             Message::SwitchToTagListScreen => {
                 let (taglist_screen, command) = TagListScreen::new();
                 self.current_screen = Screen::TagList(taglist_screen);
-                return command;
+                command
             }
         }
     }
@@ -122,8 +128,8 @@ impl TagExplorer {
 
 #[derive(Debug, Clone)]
 pub enum ScreenMessage {
-    Main(MainMessage),
-    TagList(TagListMessage),
+    Main(mainscreen::Message),
+    TagList(taglistscreen::Message),
 }
 
 #[derive(Debug)]
@@ -151,10 +157,10 @@ impl Screen {
         }
     }
 
-    fn view(&self) -> Container<Message> {
+    fn view(&self) -> Element<Message> {
         match self {
-            Screen::Main(main) => main.view(),
-            Screen::TagList(taglist) => taglist.view(),
+            Screen::Main(main) => main.view().into(),
+            Screen::TagList(taglist) => taglist.view().into(),
         }
     }
 

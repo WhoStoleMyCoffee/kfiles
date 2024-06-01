@@ -2,6 +2,8 @@ use iced::advanced::widget::{ operation::Outcome, Id, Operation };
 
 pub mod dir_entry;
 pub mod fuzzy_input;
+pub mod tag_entry;
+pub mod context_menu;
 
 
 

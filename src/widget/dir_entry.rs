@@ -137,7 +137,7 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
     fn view(
         &self,
         state: &Self::State,
-    ) -> iced::advanced::graphics::core::Element<'_, Self::Event, iced::Theme, iced::Renderer> {
+    ) -> iced::Element<'_, Self::Event, iced::Theme, iced::Renderer> {
         if self.do_cull {
             return column![]
                 .width(self.width)
