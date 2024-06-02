@@ -26,7 +26,8 @@ type LoadTagsResult = Result< Vec<Tag>, Arc<tag::LoadError> >;
 pub enum Message {
     TagsLoaded(LoadTagsResult),
     OpenTagsDir,
-    AddEntry(TagID, PathBuf),
+    AddEntry(usize, PathBuf),
+    RemoveEntry(usize, PathBuf),
 }
 
 
@@ -77,20 +78,30 @@ impl TagListScreen {
                 Command::none()
             }
 
-            Message::AddEntry(tag_id, path) => {
+            Message::AddEntry(index, path) => {
                 let tag = match &mut self.tags {
-                    TagList::Loaded(tags) => tags.iter_mut().find(|t| t.id == tag_id),
+                    TagList::Loaded(tags) => tags.get_mut(index),
                     _ => return Command::none(),
                 };
-                let Some(tag) = tag else {
-                    return Command::none();
-                };
+                let Some(tag) = tag else { return Command::none(); };
                 
                 if let Err(err) = tag.add_entry(path) {
                     eprintln!("err = {:?}", err);
                 };
 
                 Command::none()
+            }
+
+            Message::RemoveEntry(index, path) => {
+                let tag = match &mut self.tags {
+                    TagList::Loaded(tags) => tags.get_mut(index),
+                    _ => return Command::none(),
+                };
+                let Some(tag) = tag else { return Command::none(); };
+
+                tag.remove_entry(&path);
+
+                return Command::none();
             }
         }
     }
@@ -112,6 +123,7 @@ impl TagListScreen {
     }
 
     fn view_list(&self) -> Container<AppMessage> {
+        // Get tags or display whatever
         let tags: &Vec<TagEntry> = match &self.tags {
             TagList::Loaded(tags) => tags,
 
@@ -134,15 +146,16 @@ impl TagListScreen {
             }
         };
 
-        // CONTENTS
+        // Contents
         container(
             scrollable(
-                column(tags.iter()
-                    .map(|t| {
-                        let tag_entry = TagEntryWidget::new(t)
-                            .on_add_entry(|pb| Message::AddEntry(t.id.clone(), pb).into());
-                        tag_entry.into()
-                    })
+                column(tags.iter().enumerate()
+                    .map(|(i, t)|
+                        TagEntryWidget::new(t)
+                            .on_add_entry(move |pb| Message::AddEntry(i, pb).into())
+                            .on_remove_entry(move |pb| Message::RemoveEntry(i, pb).into())
+                            .into()
+                    )
                 )
                 .width(Length::Fill)
                 .padding(12.0)

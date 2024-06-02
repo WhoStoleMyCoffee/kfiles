@@ -29,6 +29,13 @@ const TOP_BAR_APPEARANCE: fn() -> Appearance = || {
     })
 };
 
+const ENTRY_COLOR: Color = Color {
+    r: 0.6,
+    g: 0.6,
+    b: 0.7,
+    a: 1.0
+};
+
 
 
 
@@ -38,6 +45,7 @@ pub enum Event {
     AddEntryPressed,
     AddEntryFilePressed,
     AddEntryFolderPressed,
+    RemoveEntry(usize),
 }
 
 #[derive(Debug, Default)]
@@ -50,6 +58,7 @@ pub struct State {
 pub struct TagEntry<'a, Message: Clone> {
     tag: &'a Tag,
     on_add_entry: Option<Box<dyn Fn(PathBuf) -> Message + 'a>>,
+    on_remove_entry: Option<Box<dyn Fn(PathBuf) -> Message + 'a>>,
 }
 
 impl<'a, Message: Clone> TagEntry<'a, Message> {
@@ -57,6 +66,7 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
         TagEntry::<Message> {
             tag,
             on_add_entry: None,
+            on_remove_entry: None,
         }
     }
 
@@ -64,6 +74,13 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
         where F: Fn(PathBuf) -> Message + 'a
     {
         self.on_add_entry = Some(Box::new(f));
+        self
+    }
+
+    pub fn on_remove_entry<F>(mut self, f: F) -> Self
+        where F: Fn(PathBuf) -> Message + 'a
+    {
+        self.on_remove_entry = Some(Box::new(f));
         self
     }
 
@@ -80,13 +97,18 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
             .left_click_release_activated())
         };
 
+        let enable_remove: bool = self.on_remove_entry.is_some();
+
         column(
-            self.tag.get_entries().iter()
-                .map(|pb| {
-                    text(pb.display())
-                        .style(Color::new(0.6, 0.6, 0.7, 1.0))
-                        .into()
-                })
+            self.tag.get_entries().iter().enumerate()
+                .map(|(i, pb)| row![
+                        text(pb.display()) .style(ENTRY_COLOR)
+                    ]
+                    .push_maybe(enable_remove.then(||
+                        button(">:0") .on_press(Event::RemoveEntry(i)) 
+                    ))
+                    .into()
+                )
         )
         .push_maybe(add_entry_button)
         .spacing(8.0)
@@ -127,6 +149,13 @@ impl<'a, Message: Clone> Component<Message> for TagEntry<'a, Message> {
                     .pick_file()?;
                 Some(on_add_entry(pick))
             }
+
+            Event::RemoveEntry(index) => {
+                let on_remove_entry = self.on_remove_entry.as_ref()?;
+                let path = self.tag.get_entries().get(index)?;
+                Some(on_remove_entry(path.clone()))
+            }
+
         }
     }
 

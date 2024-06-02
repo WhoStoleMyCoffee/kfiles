@@ -128,6 +128,7 @@ impl Tag {
 
     /// Try to remove `path` from the entries
     /// Returns whether it was successful
+    /// TODO make it work with parent dirs
     pub fn remove_entry<P>(&mut self, path: &P) -> bool
     where
         P: PartialEq<PathBuf>,
@@ -171,16 +172,16 @@ impl Tag {
     }
 
     /// Saves this [`Tag`] to the disk
-    pub fn save(&self) -> Result<bool, SaveError> {
+    pub fn save(&self) -> Result<(), SaveError> {
         let path = self.get_save_path();
 
         if !self.entries.is_empty() {
             self.save_to_path(path)?;
-            return Ok(true);
+            return Ok(());
         } else if path.exists() {
             remove_file(path)?;
         }
-        Ok(false)
+        Ok(())
     }
 
     pub fn load(id: &TagID) -> Result<Tag, LoadError> {
@@ -218,7 +219,7 @@ impl Tag {
             .as_ref()
             .file_stem()
             .and_then(|osstr| osstr.to_str())
-            .ok_or_else(|| LoadError::InvalidName(path.as_ref().to_path_buf()))?;
+            .ok_or(LoadError::InvalidName)?;
         tag.id = TagID(file_name.to_string());
 
         tag.entries.retain(|pb| pb.exists());
@@ -497,8 +498,8 @@ pub enum AddEntryError {
 
 #[derive(Debug, Error)]
 pub enum LoadError {
-    #[error("could not get tag name from file '{}'", .0.display())]
-    InvalidName(PathBuf),
+    #[error("could not get tag name from file")]
+    InvalidName,
 
     #[error(transparent)]
     IO(#[from] io::Error),
