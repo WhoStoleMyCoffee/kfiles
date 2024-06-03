@@ -166,14 +166,6 @@ fn hash_path(path: &Path) -> u64 {
     s.finish()
 }
 
-// TODO return Result?
-// pub fn is_file_supported(path: &Path) -> Result<bool, ImageError> {
-//     match ImageFormat::from_path(path) {
-//         Ok(_) => Ok(true),
-//         Err(ImageError::Unsupported(_)) => Ok(false),
-//         Err(err) => Err(err),
-//     }
-// }
 pub fn is_file_supported(path: &Path) -> bool {
     ImageFormat::from_path(path).is_ok()
 }

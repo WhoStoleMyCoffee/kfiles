@@ -445,7 +445,8 @@ mod constraint {
         #[inline]
         fn matches(&self, extension:  &OsStr) -> bool {
             // The `!=` basically negates it
-            (self.extension == extension.to_ascii_lowercase()) != self.inverted
+            self.extension.eq_ignore_ascii_case(extension) != self.inverted
+            // (self.extension == extension.to_ascii_lowercase()) != self.inverted
         }
     }
 
@@ -480,7 +481,7 @@ mod constraint {
 
         #[test]
         fn parsing() {
-            let c = ConstraintList::parse("score --.rs --.png");
+            let c = ConstraintList::parse("score .rs .png");
             dbg!(&c.score);
             assert!(c.score.is_some());
             assert_eq!(c.contains, vec![]);
@@ -491,7 +492,7 @@ mod constraint {
             assert_eq!(c.filetype, None);
 
 
-            let c = ConstraintList::parse("score \"contains\" --.txt -f --wot");
+            let c = ConstraintList::parse("score \"contains\" .txt -f --wot");
             dbg!(&c.score);
             assert!(c.score.is_some());
             assert_eq!(c.contains, vec![
@@ -504,7 +505,7 @@ mod constraint {
 
 
             // Invalid queryies
-            let c = ConstraintList::parse("\"\" --.");
+            let c = ConstraintList::parse("\"\"");
             dbg!(&c.score);
             assert!(c.score.is_some());
             assert_eq!(c.contains, vec![]);
@@ -542,7 +543,7 @@ mod constraint {
                 &Path::new("C:/Users/ddxte/Pictures/bread.JPG"),
             ]);
 
-            a("--.png --.JPG", &vec![
+            a(".png .jpg", &vec![
                 &Path::new("C:/Users/ddxte/Pictures/art stuff/dino_cool.png"),
                 &Path::new("C:/Users/ddxte/Pictures/rendererwoooow.png"),
                 &Path::new("C:/Users/ddxte/Pictures/bread.JPG"),
@@ -557,7 +558,7 @@ mod constraint {
                 &Path::new("C:/Users/ddxte/Pictures/rendererwoooow.png"),
             ]);
 
-            a("as \"dino\" --.ase -f", &vec![
+            a("as \"dino\" .ase -f", &vec![
                 &Path::new("C:/Users/ddxte/Pictures/art stuff/tankinsands/dino.ase"),
             ]);
 
@@ -570,24 +571,24 @@ mod constraint {
             let pics = Path::new("C:/Users/ddxte/Pictures/");
             let bread = Path::new("C:/Users/ddxte/Pictures/bread.JPG");
 
-            let c = ConstraintList::parse("!'dino'");
+            let c = ConstraintList::parse("!\"dino\"");
             assert_eq!( c.score(tisdino), None );
-            assert_eq!( c.score(pics), Some(0) );
+            assert_eq!( c.score(pics), Some(-24) ); // pics is 24 chars long
 
             let c = ConstraintList::parse("!dino");
             assert_eq!( c.score(tisdino), None );
-            assert_eq!( c.score(pics), Some(0) );
+            assert_eq!( c.score(pics), Some(-24) ); // again
 
-            let c = ConstraintList::parse("!--.png");
+            let c = ConstraintList::parse("!.png");
             assert_eq!( c.score(dinocool), None );
-            assert_eq!( c.score(bread), Some(0) );
+            assert_eq!( c.score(bread), Some(-33) ); // bread is 33 chars long
             assert_eq!( c.score(pics), None );
 
-            let c = ConstraintList::parse("!--.png !--.ase");
+            let c = ConstraintList::parse("!.png !.ase");
             assert_eq!( c.score(dinocool), None );
             assert_eq!( c.score(tisdino), None );
             assert_eq!( c.score(pics), None );
-            assert_eq!( c.score(bread), Some(0) );
+            assert_eq!( c.score(bread), Some(-33) );
 
         }
 

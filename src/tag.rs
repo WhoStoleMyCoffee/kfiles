@@ -46,43 +46,6 @@ impl Tag {
         self
     }
 
-    /// Returns whether the base dir already existed
-    pub fn initiate_save_dir() -> io::Result<bool> {
-        let base_dir = Tag::get_save_dir();
-        if base_dir.exists() {
-            return Ok(true);
-        }
-        create_dir_all(&base_dir)?;
-        Ok(false)
-    }
-
-    pub fn get_save_dir_or_create() -> io::Result<PathBuf> {
-        let base_dir = Tag::get_save_dir();
-        if base_dir.exists() {
-            return Ok(base_dir);
-        }
-        Tag::initiate_save_dir().map(|_| base_dir)
-    }
-
-    /// Returns the base dir where all tags are stored
-    #[cfg(not(test))]
-    #[inline]
-    pub fn get_save_dir() -> PathBuf {
-        const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
-        directories::BaseDirs::new()
-            .expect("could not get base dirs")
-            .config_dir()
-            .to_path_buf()
-            .join(APP_NAME.to_string() + "/tags/")
-    }
-
-    /// Returns the base dir where all tags are stored (for tests only)
-    #[cfg(test)]
-    #[inline]
-    pub fn get_save_dir() -> PathBuf {
-        PathBuf::from("C:/Users/ddxte/Documents/Projects/tag-explorer/test_tags/")
-    }
-
     #[inline]
     pub fn get_save_path(&self) -> PathBuf {
         self.id.get_path()
@@ -91,23 +54,6 @@ impl Tag {
     #[inline]
     pub fn exists(&self) -> bool {
         self.id.exists()
-    }
-
-    /// Get all existing tags as paths
-    pub fn get_all_tags() -> io::Result<Vec<PathBuf>> {
-        Ok(read_dir(Tag::get_save_dir_or_create()?)?
-            .flatten()
-            .map(|de| de.path())
-            .filter(|pb| pb.is_file())
-            .collect())
-    }
-
-    /// Get all existing tag ids
-    pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
-        Ok(Tag::get_all_tags()?
-            .iter()
-            .filter_map(|pb| TagID::try_from(pb.as_path()).ok())
-            .collect())
     }
 
     /// Add an entry to this [`Tag`]
@@ -119,16 +65,15 @@ impl Tag {
             return Err(AddEntryError::NonexistentPath);
         }
 
-        if self.contains(&path) {
+        if self.entries.contains(&path) {
             return Err(AddEntryError::AlreadyContained);
         }
         self.entries.push(path.as_ref().to_path_buf());
         Ok(())
     }
 
-    /// Try to remove `path` from the entries
+    /// Remove `path` from this tag's entries
     /// Returns whether it was successful
-    /// TODO make it work with parent dirs
     pub fn remove_entry<P>(&mut self, path: &P) -> bool
     where
         P: PartialEq<PathBuf>,
@@ -142,16 +87,52 @@ impl Tag {
         false
     }
 
-    /// Returns whether the given path is tagged with this [`Tag`]
-    pub fn contains<P>(&self, path: P) -> bool
+    /// Remove `path` and all its subpaths from this tag's entries
+    /// Returns the removed paths
+    pub fn remove_entry_all<P>(&mut self, path: &P) -> Vec<PathBuf>
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref();
-        self.entries.as_ref() .iter().any(|p| path.starts_with(p))
+        let path: &Path = path.as_ref();
+
+        let mut removed: Vec<PathBuf> = Vec::new();
+        self.entries.retain(|pb| {
+            if pb.starts_with(path) {
+                removed.push(pb.clone());
+                true
+            } else {
+                false
+            }
+        });
+        removed
     }
 
-    /// Get all entries under this [`Tag`], including all subtags
+    /// Returns whether the given path is tagged with this [`Tag`], EXCLUDING subtags
+    /// This is the same as doing
+    /// ```
+    /// tag.entries.contains(path)
+    /// ```
+    #[inline]
+    pub fn contains<P>(&self, path: P) -> bool
+    where P: AsRef<Path>,
+    {
+        self.entries.contains(path)
+    }
+
+    /// Returns whether the given path is tagged with this [`Tag`], INCLUDING subtags
+    /// This is the same as doing
+    /// ```
+    /// tag.get_all_entries().contains(path)
+    /// ```
+    #[inline]
+    pub fn all_contains<P>(&self, path: P) -> bool
+    where P: AsRef<Path>,
+    {
+        self.get_all_entries().contains(path)
+    }
+
+    /// Get all entries under this [`Tag`], INCLUDING all subtags
+    /// If you want to simply get the entries without subtags, please use [`Tag::entries`] directly
     /// TODO what if there's a cyclic dependency?
     pub fn get_all_entries(&self) -> Entries {
         let mut entries = self.entries.clone();
@@ -168,14 +149,7 @@ impl Tag {
     /// Saves this [`Tag`] to the disk
     pub fn save(&self) -> Result<(), SaveError> {
         let path = self.get_save_path();
-
-        if !self.entries.is_empty() {
-            self.save_to_path(path)?;
-            return Ok(());
-        } else if path.exists() {
-            remove_file(path)?;
-        }
-        Ok(())
+        self.save_to_path(path)
     }
 
     pub fn load(id: &TagID) -> Result<Tag, LoadError> {
@@ -287,7 +261,7 @@ impl TagID {
     }
 
     pub fn get_path(&self) -> PathBuf {
-        Tag::get_save_dir().join(format!("{}.toml", self.0))
+        get_save_dir().join(format!("{}.toml", self.0))
     }
 
     pub fn exists(&self) -> bool {
@@ -533,6 +507,68 @@ pub enum SaveError {
 
 
 
+
+/// Returns whether the base dir already existed
+pub fn initiate_save_dir() -> io::Result<bool> {
+    let base_dir = get_save_dir();
+    if base_dir.exists() {
+        return Ok(true);
+    }
+    create_dir_all(&base_dir)?;
+    Ok(false)
+}
+
+pub fn get_save_dir_or_create() -> io::Result<PathBuf> {
+    let base_dir = get_save_dir();
+    if base_dir.exists() {
+        return Ok(base_dir);
+    }
+    initiate_save_dir().map(|_| base_dir)
+}
+
+/// Returns the base dir where all tags are stored
+#[cfg(not(test))]
+#[inline]
+pub fn get_save_dir() -> PathBuf {
+    const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
+    directories::BaseDirs::new()
+        .expect("could not get base dirs")
+        .config_dir()
+        .to_path_buf()
+        .join(APP_NAME.to_string() + "/tags/")
+}
+
+/// Returns the base dir where all tags are stored (for tests only)
+#[cfg(test)]
+#[inline]
+pub fn get_save_dir() -> PathBuf {
+    PathBuf::from("C:/Users/ddxte/Documents/Projects/tag-explorer/test_tags/")
+}
+
+/// Get all existing tags as paths
+pub fn get_all_tags() -> io::Result<Vec<PathBuf>> {
+    Ok(read_dir(get_save_dir_or_create()?)?
+        .flatten()
+        .map(|de| de.path())
+        .filter(|pb| pb.is_file())
+        .collect())
+}
+
+/// Get all existing tag ids
+pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
+    Ok(get_all_tags()?
+        .iter()
+        .filter_map(|pb| TagID::try_from(pb.as_path()).ok())
+        .collect())
+}
+
+
+
+
+
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -572,25 +608,6 @@ mod tests {
 
         tag.remove_entry(&Path::new("C:/Users/ddxte/Documents/"));
         assert!(tag.entries.is_empty());
-    }
-
-    #[test]
-    fn save_empty() {
-        let tag_id = TagID::from("empty tag");
-
-        println!("Saving normally...");
-        let mut tag = Tag::create(tag_id.clone());
-        tag.add_entry("C:/Users/ddxte/Documents/").unwrap();
-        tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
-        tag.save().unwrap();
-
-        assert!(Tag::get_all_tag_ids().unwrap().contains(&tag_id));
-
-        println!("Saving empty...");
-        let tag = Tag::create(tag_id.clone());
-        tag.save().unwrap();
-
-        assert!(!Tag::get_all_tag_ids().unwrap().contains(&tag_id));
     }
 
     #[test]

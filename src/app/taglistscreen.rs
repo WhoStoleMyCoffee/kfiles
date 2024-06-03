@@ -9,7 +9,7 @@ use iced::{Color, Command, Event, Length};
 use iced_aw::spinner;
 
 use crate::app::Message as AppMessage;
-use crate::tag::{ self, Entries, Tag, TagID };
+use crate::tag::{ self, Entries, Tag };
 use crate::widget::tag_entry::TagEntry as TagEntryWidget;
 
 const ERROR_COLOR: Color = Color {
@@ -72,7 +72,7 @@ impl TagListScreen {
             }
 
             Message::OpenTagsDir => {
-                let path: PathBuf = Tag::get_save_dir();
+                let path: PathBuf = tag::get_save_dir();
                 opener::open(path) .unwrap();
             }
 
@@ -142,10 +142,11 @@ impl TagListScreen {
             }
 
             TagList::Failed(err_maybe) => {
-                let error_message: String = match err_maybe {
-                    Some(err) => format!("Failed to load tags:\n{err}"),
-                    None => "TODO error message".to_string(),
-                };
+                let error_message: String = err_maybe.as_ref().map_or(
+                    "Reason unknown. Arc::into_inner() returned None".to_string(),
+                    |err| err.to_string(),
+                );
+                let error_message = format!("Failed to load tags:\n{}", error_message);
 
                 return container(text(error_message)
                     .style(ERROR_COLOR)
@@ -160,9 +161,9 @@ impl TagListScreen {
                     TagEntryWidget::new(t)
                         .editable(
                             t.editing_content.as_ref(),
+                            move |a| Message::TagEditActionPerformed(i, a).into(),
                             move |e| Message::TagEntryChanged(i, e).into(),
                             move || Message::TagStartEdit(i).into(),
-                            Box::new(move |a| Message::TagEditActionPerformed(i, a).into()),
                         )
                         .into()
                 })
@@ -178,12 +179,12 @@ impl TagListScreen {
         Command::none()
     }
 
-    fn get_tag_at_index(&self, index: usize) -> Option<&TagEntry> {
+    /* fn get_tag_at_index(&self, index: usize) -> Option<&TagEntry> {
         match &self.tags {
             TagList::Loaded(tags) => tags.get(index),
             _ => None,
         }
-    }
+    } */
     
     fn get_tag_at_index_mut(&mut self, index: usize) -> Option<&mut TagEntry> {
         match &mut self.tags {
@@ -196,7 +197,7 @@ impl TagListScreen {
 
 
 async fn load_tags() -> LoadTagsResult {
-    Tag::get_all_tags()
+    tag::get_all_tags()
         .map_err(|err| Arc::new(tag::LoadError::from(err)) )?
         .into_iter()
         .map(|path| Tag::load_from_path(path) .map_err(Arc::new) )
@@ -207,11 +208,13 @@ async fn load_tags() -> LoadTagsResult {
 
 
 
+/// Entry for a [`Tag`] used in tandum with the [`crate::widget::tag_entry::TagEntry`] widget
 #[derive(Debug)]
-/// TODO documentation
 struct TagEntry {
+    /// The contained tag
     tag: Tag,
     is_dirty: bool,
+    /// The content of the text edit, if the user is editing the tag's entries
     editing_content: Option<Content>,
 }
 

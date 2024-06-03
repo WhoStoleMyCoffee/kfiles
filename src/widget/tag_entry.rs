@@ -60,16 +60,22 @@ pub struct State {
 
 
 
-pub struct TagEntry<'a, Message: Clone> {
+pub struct TagEntry<'a, Message: Clone, ActionPerformedFn> {
     tag: &'a Tag,
-    editing_content: Option<&'a Content>,
-    on_entries_changed:         Option<Box<dyn Fn(Entries) -> Message + 'a>>,
-    on_start_edit:              Option<Box<dyn Fn() -> Message + 'a>>,
-    on_end_edit:                Option<Box<dyn Fn() -> Message + 'a>>,
-    on_editor_action_performed: Option<Box<dyn Fn(text_editor::Action) -> Message + 'a>>,
+    editing_content: Option<(
+        &'a Content,
+        ActionPerformedFn,
+    )>,
+    on_entries_changed: Option<Box<dyn Fn(Entries) -> Message + 'a>>,
+    on_start_edit:      Option<Box<dyn Fn() -> Message + 'a>>,
+    on_end_edit:        Option<Box<dyn Fn() -> Message + 'a>>,
 }
 
-impl<'a, Message: Clone> TagEntry<'a, Message> {
+impl<'a, Message, ActionPerformedFn> TagEntry<'a, Message, ActionPerformedFn>
+where
+    Message: Clone,
+    ActionPerformedFn: Fn(text_editor::Action) -> Message + 'a,
+{
     pub fn new(tag: &'a Tag) -> Self {
         TagEntry {
             tag,
@@ -77,21 +83,31 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
             on_entries_changed: None,
             on_start_edit: None,
             on_end_edit: None,
-            on_editor_action_performed: None,
         }
     }
 
     pub fn editable(
         mut self,
         content: Option<&'a Content>,
+        on_editor_action_performed: ActionPerformedFn,
         on_entries_changed: impl Fn(Entries) -> Message + 'a,
         on_start_edit: impl Fn() -> Message + 'a,
-        on_editor_action_performed: impl Fn(text_editor::Action) -> Message + 'a,
     ) -> Self {
-        self.editing_content = content;
+
+        self.editing_content = content.map(|c| (
+            c,
+            on_editor_action_performed,
+        ));
+
+        // self.on_editor_action_performed = if content.is_some() {
+        //     Some(Box::new(on_editor_action_performed))
+        // } else {
+        //     None 
+        // };
+        // self.editing_content = content;
+
         self.on_entries_changed = Some(Box::new(on_entries_changed));
         self.on_start_edit = Some(Box::new(on_start_edit));
-        self.on_editor_action_performed = Some(Box::new(on_editor_action_performed));
         self
     }
 
@@ -117,7 +133,7 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
         };
 
         let contents = match self.editing_content {
-            Some(content) => column![
+            Some((content, _)) => column![
                 text_editor(content)
                     .on_action(Event::EditActionPerformed)
             ],
@@ -137,7 +153,11 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
 }
 
 
-impl<'a, Message: Clone> Component<Message> for TagEntry<'a, Message> {
+impl<'a, Message, ActionPerformedFn> Component<Message> for TagEntry<'a, Message, ActionPerformedFn>
+where
+    Message: Clone,
+    ActionPerformedFn: Fn(text_editor::Action) -> Message + 'a,
+{
     type State = State;
     type Event = Event;
 
@@ -176,7 +196,7 @@ impl<'a, Message: Clone> Component<Message> for TagEntry<'a, Message> {
 
             Event::ToggleEdit => {
                 match &self.editing_content {
-                    Some(content) => {
+                    Some((content, _)) => {
                         let on_entries_changed = self.on_entries_changed.as_ref()?;
                         let entries = tag::Entries::from_list(&content.text());
                         Some(on_entries_changed(entries))
@@ -190,7 +210,8 @@ impl<'a, Message: Clone> Component<Message> for TagEntry<'a, Message> {
             }
 
             Event::EditActionPerformed(action) => {
-                let on_editor_action_performed = self.on_editor_action_performed.as_ref()?;
+                let on_editor_action_performed = self.editing_content.as_ref()
+                    .map(|(_, on_action)| on_action)?;
                 Some(on_editor_action_performed(action))
             }
 
@@ -227,11 +248,12 @@ impl<'a, Message: Clone> Component<Message> for TagEntry<'a, Message> {
     }
 }
 
-impl<'a, Message> From<TagEntry<'a, Message>> for Element<'a, Message>
+impl<'a, Message, AF> From<TagEntry<'a, Message, AF>> for Element<'a, Message>
 where
-    Message: 'a + Clone
+    Message: 'a + Clone,
+    AF: Fn(text_editor::Action) -> Message + 'a,
 {
-    fn from(dir_entry: TagEntry<'a, Message>) -> Self {
+    fn from(dir_entry: TagEntry<'a, Message, AF>) -> Self {
         component(dir_entry)
     }
 }

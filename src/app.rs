@@ -6,7 +6,7 @@ use iced::widget::container;
 use iced::{self, Element, Event};
 use iced::{time, Application, Command, Theme};
 
-use crate::tag::{Tag, TagID};
+use crate::tag::{self, TagID};
 
 pub mod mainscreen;
 pub mod taglistscreen;
@@ -62,7 +62,15 @@ impl Application for TagExplorer {
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
         // TODO find better cache system some day
-        TAGS_CACHE.set(Tag::get_all_tag_ids().unwrap()).unwrap();
+        TAGS_CACHE.set({
+            match tag::get_all_tag_ids() {
+                Ok(v) => v,
+                Err(err) => {
+                    println!("ERROR failed to load tags: {err}");
+                    Vec::new()
+                }
+            }
+        }).unwrap();
 
         let (main_screen, command) = MainScreen::new();
 
