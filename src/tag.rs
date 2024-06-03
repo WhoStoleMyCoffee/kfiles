@@ -19,7 +19,7 @@ pub struct Tag {
     #[serde(skip)]
     pub id: TagID,
 
-    entries: Entries,
+    pub entries: Entries,
 
     /// All tags that are tagged with this tag
     /// E.g. tag `"pictures"` could have `subtags = [ "trip", "cats" ]`
@@ -149,12 +149,6 @@ impl Tag {
     {
         let path = path.as_ref();
         self.entries.as_ref() .iter().any(|p| path.starts_with(p))
-    }
-
-    /// Get entries under this [`Tag`], NOT including all subtags
-    #[inline]
-    pub fn get_entries(&self) -> &Vec<PathBuf> {
-        &self.entries
     }
 
     /// Get all entries under this [`Tag`], including all subtags
@@ -439,10 +433,26 @@ impl Entries {
     /// Same as [`search::iter_entries`]
     /// If you want to simply iterate over the paths defining this [`Entries`], please do
     /// `entries.as_ref().iter()`
-    #[inline(always)]
+    #[inline]
     pub fn iter(self) -> Box<dyn Iterator<Item = PathBuf>> {
         search::iter_entries(self)
     }
+
+    pub fn to_list(&self) -> String {
+        let v: Vec<String> = self.0.iter()
+            .map(|pb| pb.display().to_string())
+            .collect();
+        v.join("\n")
+    }
+
+    pub fn from_list(str: &str) -> Self {
+        Entries::from(str.lines()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| PathBuf::from(s))
+            .collect::<Vec<PathBuf>>())
+    }
+
 }
 
 impl AsRef<Vec<PathBuf>> for Entries {
@@ -485,6 +495,9 @@ impl IntoIterator for Entries {
         self.0.into_iter()
     }
 }
+
+
+
 
 
 
@@ -540,7 +553,7 @@ mod tests {
         // let tag2 = Tag::load( &TagID::parse("test") ).unwrap();
         let tag2 = Tag::load(&tag_id).unwrap();
 
-        assert_eq!(tag.get_entries(), tag2.get_entries());
+        assert_eq!(tag.entries.as_ref(), tag2.entries.as_ref());
     }
 
     #[test]
@@ -555,10 +568,10 @@ mod tests {
         // Adding already tagged dir
         let add_err = tag.add_entry("C:/Users/ddxte/Documents/Projects/music_tools.exe");
         assert!(matches!(add_err, Err(AddEntryError::AlreadyContained)));
-        assert_eq!(tag.get_entries().len(), 1);
+        assert_eq!(tag.entries.len(), 1);
 
         tag.remove_entry(&Path::new("C:/Users/ddxte/Documents/"));
-        assert!(tag.get_entries().is_empty());
+        assert!(tag.entries.is_empty());
     }
 
     #[test]
@@ -684,5 +697,24 @@ mod tests {
         ]);
         assert!(c.is_subset(&expected));
         assert!(HashSet::from_iter(b.and(&a)).is_subset(&c));
+    }
+
+    #[test]
+    fn test_entries_str() {
+        let entries = Entries::from(vec![
+            PathBuf::from("C:/Users/ddxte/Documents/Projects/"),
+            PathBuf::from("C:/Users/ddxte/Pictures/"),
+            PathBuf::from("C:/Users/ddxte/Videos/"),
+            PathBuf::from("C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"),
+        ]);
+
+        let list = entries.to_list();
+        assert_eq!(list, r#"C:/Users/ddxte/Documents/Projects/
+C:/Users/ddxte/Pictures/
+C:/Users/ddxte/Videos/
+C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
+
+        let entries2 = Entries::from_list(&list);
+        assert_eq!(entries.as_ref(), entries2.as_ref());
     }
 }

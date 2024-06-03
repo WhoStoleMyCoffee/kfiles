@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 
+use iced::widget::text_editor::Content;
 use iced::{Color, Element, Length};
-use iced::widget::{ button, column, component, container, row, text, Column, Component };
+use iced::widget::{ button, column, component, container, row, text, Column,
+    Component, Row, text_editor
+};
 use iced::widget::container::Appearance;
 use rfd::FileDialog;
 
 
-use crate::tag::Tag;
+use crate::tag::{self, Entries, Tag};
 
 use super::context_menu::ContextMenu;
 
@@ -45,7 +48,8 @@ pub enum Event {
     AddEntryPressed,
     AddEntryFilePressed,
     AddEntryFolderPressed,
-    RemoveEntry(usize),
+    ToggleEdit,
+    EditActionPerformed(text_editor::Action),
 }
 
 #[derive(Debug, Default)]
@@ -55,37 +59,52 @@ pub struct State {
 
 
 
+
 pub struct TagEntry<'a, Message: Clone> {
     tag: &'a Tag,
-    on_add_entry: Option<Box<dyn Fn(PathBuf) -> Message + 'a>>,
-    on_remove_entry: Option<Box<dyn Fn(PathBuf) -> Message + 'a>>,
+    editing_content: Option<&'a Content>,
+    on_entries_changed:         Option<Box<dyn Fn(Entries) -> Message + 'a>>,
+    on_start_edit:              Option<Box<dyn Fn() -> Message + 'a>>,
+    on_end_edit:                Option<Box<dyn Fn() -> Message + 'a>>,
+    on_editor_action_performed: Option<Box<dyn Fn(text_editor::Action) -> Message + 'a>>,
 }
 
 impl<'a, Message: Clone> TagEntry<'a, Message> {
     pub fn new(tag: &'a Tag) -> Self {
-        TagEntry::<Message> {
+        TagEntry {
             tag,
-            on_add_entry: None,
-            on_remove_entry: None,
+            editing_content: None,
+            on_entries_changed: None,
+            on_start_edit: None,
+            on_end_edit: None,
+            on_editor_action_performed: None,
         }
     }
 
-    pub fn on_add_entry<F>(mut self, f: F) -> Self
-        where F: Fn(PathBuf) -> Message + 'a
-    {
-        self.on_add_entry = Some(Box::new(f));
+    pub fn editable(
+        mut self,
+        content: Option<&'a Content>,
+        on_entries_changed: impl Fn(Entries) -> Message + 'a,
+        on_start_edit: impl Fn() -> Message + 'a,
+        on_editor_action_performed: impl Fn(text_editor::Action) -> Message + 'a,
+    ) -> Self {
+        self.editing_content = content;
+        self.on_entries_changed = Some(Box::new(on_entries_changed));
+        self.on_start_edit = Some(Box::new(on_start_edit));
+        self.on_editor_action_performed = Some(Box::new(on_editor_action_performed));
         self
     }
 
-    pub fn on_remove_entry<F>(mut self, f: F) -> Self
-        where F: Fn(PathBuf) -> Message + 'a
+    pub fn on_end_edit<F>(mut self, f: F) -> Self
+        where F: Fn() -> Message + 'a,
     {
-        self.on_remove_entry = Some(Box::new(f));
+        self.on_end_edit = Some(Box::new(f));
         self
     }
 
     fn view_contents(&self, _state: &State) -> Column<Event> {
-        let add_entry_button = if self.on_add_entry.is_none() { None } else {
+        // Add entry button only if we listen for entry changes
+        let add_entry_button = if self.on_entries_changed.is_none() { None } else {
             Some(ContextMenu::new(
                 button("+") .on_press(Event::AddEntryPressed),
                 || column![
@@ -97,20 +116,21 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
             .left_click_release_activated())
         };
 
-        let enable_remove: bool = self.on_remove_entry.is_some();
+        let contents = match self.editing_content {
+            Some(content) => column![
+                text_editor(content)
+                    .on_action(Event::EditActionPerformed)
+            ],
+            None => column(
+                self.tag.entries.as_ref().iter()
+                    .map(|pb| text(pb.display()) .style(ENTRY_COLOR) .into())
+            ),
+        };
 
-        column(
-            self.tag.get_entries().iter().enumerate()
-                .map(|(i, pb)| row![
-                        text(pb.display()) .style(ENTRY_COLOR)
-                    ]
-                    .push_maybe(enable_remove.then(||
-                        button(">:0") .on_press(Event::RemoveEntry(i)) 
-                    ))
-                    .into()
-                )
+        contents.push(Row::new()
+            .push(button("e").on_press(Event::ToggleEdit) )
+            .push_maybe(add_entry_button)
         )
-        .push_maybe(add_entry_button)
         .spacing(8.0)
         .padding([0, 24])
     }
@@ -135,28 +155,47 @@ impl<'a, Message: Clone> Component<Message> for TagEntry<'a, Message> {
             Event::AddEntryPressed => None,
 
             Event::AddEntryFolderPressed => {
-                let on_add_entry = self.on_add_entry.as_ref()?;
-                let pick = FileDialog::new()
+                let on_entries_changed = self.on_entries_changed.as_ref()?;
+                let pick: PathBuf = FileDialog::new()
                     .set_directory("C:/Users/ddxte/")
                     .pick_folder()?;
-                Some(on_add_entry(pick))
+                let mut entries: Entries = self.tag.entries.clone();
+                entries.push(pick);
+                Some(on_entries_changed(entries))
             }
 
             Event::AddEntryFilePressed => {
-                let on_add_entry = self.on_add_entry.as_ref()?;
+                let on_entries_changed = self.on_entries_changed.as_ref()?;
                 let pick = FileDialog::new()
                     .set_directory("C:/Users/ddxte/")
                     .pick_file()?;
-                Some(on_add_entry(pick))
+                let mut entries = self.tag.entries.clone();
+                entries.push(pick);
+                Some(on_entries_changed(entries))
             }
 
-            Event::RemoveEntry(index) => {
-                let on_remove_entry = self.on_remove_entry.as_ref()?;
-                let path = self.tag.get_entries().get(index)?;
-                Some(on_remove_entry(path.clone()))
+            Event::ToggleEdit => {
+                match &self.editing_content {
+                    Some(content) => {
+                        let on_entries_changed = self.on_entries_changed.as_ref()?;
+                        let entries = tag::Entries::from_list(&content.text());
+                        Some(on_entries_changed(entries))
+                    },
+                    None => {
+                        let on_start_edit = self.on_start_edit.as_ref()?;
+                        Some(on_start_edit())
+                    },
+                }
+
+            }
+
+            Event::EditActionPerformed(action) => {
+                let on_editor_action_performed = self.on_editor_action_performed.as_ref()?;
+                Some(on_editor_action_performed(action))
             }
 
         }
+
     }
 
     fn view(
