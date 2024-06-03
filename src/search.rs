@@ -183,7 +183,7 @@ mod constraint {
     use std::{ffi::{OsStr, OsString}, path::Path, sync::OnceLock};
     use regex::Regex;
 
-    use crate::strmatch::{StringMatcher, Sublime};
+    use crate::{strmatch::{StringMatcher, Sublime}, ToPrettyString};
 
 
     /// Constraint list for file searching, given a query (see [`ConstraintList::parse()`] )
@@ -298,7 +298,7 @@ mod constraint {
 
             // 3. AND contains
             // TODO maybe OR them? idk
-            let pathstr = path.display().to_string() .replace('\\', "/");
+            let pathstr = path.to_pretty_string();
             if !self.contains.is_empty() && !self.contains.iter() .all(|c| c.matches(&pathstr)) {
                 return None;
             }

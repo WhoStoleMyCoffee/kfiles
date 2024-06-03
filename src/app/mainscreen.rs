@@ -14,6 +14,7 @@ use crate::tag::{Tag, TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{ Message as AppMessage, TAGS_CACHE };
+use crate::ToPrettyString;
 
 // TODO make these configurable
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
@@ -208,7 +209,7 @@ impl MainScreen {
                 println!("Opening path {}", path.display());
 
                 if let Err(err) = opener::open(&path) {
-                    eprintln!("Failed to open {}:\n\t{:?}\n\tRevealing in file explorer instead", &path.display(), err);
+                    println!("Failed to open {}:\n\t{:?}\n\tRevealing in file explorer instead", &path.display(), err);
                     opener::reveal(&path) .unwrap();
                 }
 
@@ -253,7 +254,7 @@ impl MainScreen {
             ]
             // Add hovered path text, if any
             .push_maybe(self.hovered_path.as_ref().map(|pb|
-                text(pb.display().to_string().replace('\\', "/"))
+                text(pb.to_pretty_string())
                     .size(12)
             )),
         )

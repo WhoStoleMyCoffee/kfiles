@@ -10,6 +10,7 @@ use rfd::FileDialog;
 
 
 use crate::tag::{self, Entries, Tag};
+use crate::ToPrettyString;
 
 use super::context_menu::ContextMenu;
 
@@ -139,7 +140,7 @@ where
             ],
             None => column(
                 self.tag.entries.as_ref().iter()
-                    .map(|pb| text(pb.display()) .style(ENTRY_COLOR) .into())
+                    .map(|pb| text(pb.to_pretty_string()) .style(ENTRY_COLOR) .into())
             ),
         };
 

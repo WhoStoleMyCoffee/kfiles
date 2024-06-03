@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::OnceLock};
+use std::{path::{Path, PathBuf}, sync::OnceLock};
 
 use iced::{ Application, Settings};
 
@@ -47,6 +47,27 @@ pub fn get_temp_dir() -> &'static PathBuf {
         }
         pb
     })
+}
+
+
+
+
+trait ToPrettyString {
+    fn to_pretty_string(&self) -> String;
+}
+
+impl ToPrettyString for Path {
+    fn to_pretty_string(&self) -> String {
+        self.display()
+            .to_string()
+            .replace('\\', "/")
+    }
+}
+
+impl ToPrettyString for PathBuf {
+    fn to_pretty_string(&self) -> String {
+        self.as_path().to_pretty_string()
+    }
 }
 
 

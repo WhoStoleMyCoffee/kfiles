@@ -11,7 +11,7 @@ use toml;
 use serde::{Deserialize, Serialize};
 
 use crate::app::mainscreen::Item;
-use crate::search;
+use crate::{search, ToPrettyString};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -414,7 +414,7 @@ impl Entries {
 
     pub fn to_list(&self) -> String {
         let v: Vec<String> = self.0.iter()
-            .map(|pb| pb.display().to_string())
+            .map(|pb| pb.to_pretty_string())
             .collect();
         v.join("\n")
     }
