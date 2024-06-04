@@ -2,8 +2,8 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use iced::event::Status;
-use iced::widget::container;
-use iced::{self, Element, Event};
+use iced::widget::{self, container};
+use iced::{self, Color, Element, Event};
 use iced::{time, Application, Command, Theme};
 
 use crate::tag::{self, TagID};
@@ -20,6 +20,7 @@ const UPDATE_RATE_MS: u64 = 100;
 static TAGS_CACHE: OnceLock<Vec<TagID>> = OnceLock::new();
 
 
+
 // TODO Message::NotifyError
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -28,6 +29,7 @@ pub enum Message {
     Screen(ScreenMessage),
     SwitchToMainScreen,
     SwitchToTagListScreen,
+    IconsFontLoaded(Result<(), iced::font::Error>),
 }
 
 impl From<ScreenMessage> for Message {
@@ -78,7 +80,10 @@ impl Application for TagExplorer {
             TagExplorer {
                 current_screen: Screen::Main(main_screen),
             },
-            command,
+            Command::batch(vec![
+                iced::font::load(iced_aw::BOOTSTRAP_FONT_BYTES).map(Message::IconsFontLoaded),
+                command
+            ]),
         )
     }
 
@@ -105,6 +110,15 @@ impl Application for TagExplorer {
                 let (taglist_screen, command) = TagListScreen::new();
                 self.current_screen = Screen::TagList(taglist_screen);
                 command
+            }
+
+            Message::IconsFontLoaded(res) => {
+                if let Err(err) = res {
+                    println!("ERROR Failed to load icons font: {err:?}");
+                } else {
+                    println!("INFO: Icons font loaded");
+                }
+                Command::none()
             }
         }
     }

@@ -252,9 +252,9 @@ pub fn load_thumbnail_for_path(path: &Path) -> widget::Image<widget::image::Hand
     if cache_path.exists() {
         return widget::image(cache_path);
     } else if path.is_dir() {
-        return widget::image("assets/icons/folder.png");
+        return widget::image("assets/file_icons/folder.png");
     }
-    widget::image("assets/icons/file.png")
+    widget::image("assets/file_icons/file.png")
     // Custom file icons ...
 }
 

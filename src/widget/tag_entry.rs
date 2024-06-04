@@ -6,6 +6,7 @@ use iced::widget::{ button, column, component, container, row, text, Column,
     Component, Row, text_editor
 };
 use iced::widget::container::Appearance;
+use iced_aw::Bootstrap;
 use rfd::FileDialog;
 
 
@@ -13,6 +14,8 @@ use crate::tag::{self, Entries, Tag};
 use crate::ToPrettyString;
 
 use super::context_menu::ContextMenu;
+use super::{simple_icon_button, theme};
+use crate::icon;
 
 
 const CONTAINER_APPEARANCE: fn() -> Appearance = || {
@@ -120,23 +123,9 @@ where
     }
 
     fn view_contents(&self, _state: &State) -> Column<Event> {
-        // Add entry button only if we listen for entry changes
-        let add_entry_button = if self.on_entries_changed.is_none() { None } else {
-            Some(ContextMenu::new(
-                button("+") .on_press(Event::AddEntryPressed),
-                || column![
-                    button("Add folder") .on_press(Event::AddEntryFolderPressed),
-                    button("Add file") .on_press(Event::AddEntryFilePressed),
-                ].into(),
-            )
-            .offset([12.0, 12.0])
-            .left_click_release_activated())
-        };
-
         let contents = match self.editing_content {
             Some((content, _)) => column![
-                text_editor(content)
-                    .on_action(Event::EditActionPerformed)
+                text_editor(content) .on_action(Event::EditActionPerformed)
             ],
             None => column(
                 self.tag.entries.as_ref().iter()
@@ -144,12 +133,32 @@ where
             ),
         };
 
-        contents.push(Row::new()
-            .push(button("e").on_press(Event::ToggleEdit) )
-            .push_maybe(add_entry_button)
-        )
-        .spacing(8.0)
-        .padding([0, 24])
+        let bottom_row = if self.editing_content.is_some() {
+            row![
+                button(icon!(Bootstrap::FloppyFill)) .on_press(Event::ToggleEdit)
+            ]
+        } else {
+            row![
+                simple_icon_button(Bootstrap::PencilSquare) .on_press(Event::ToggleEdit),
+            ]
+            // Add entry button only if we listen for entry changes
+            .push_maybe(self.on_entries_changed.is_some().then(|| {
+                ContextMenu::new(
+                    simple_icon_button(Bootstrap::FolderPlus) .on_press(Event::AddEntryPressed),
+                    || column![
+                        button("Add folder") .on_press(Event::AddEntryFolderPressed),
+                        button("Add file") .on_press(Event::AddEntryFilePressed),
+                    ].into(),
+                )
+                .offset([12.0, 12.0])
+                .left_click_release_activated()
+            }))
+        };
+
+        contents
+            .push(bottom_row)
+            .spacing(8.0)
+            .padding([0, 24])
     }
 }
 
@@ -226,8 +235,15 @@ where
     ) -> iced::Element<'_, Self::Event, iced::Theme, iced::Renderer> {
 
         let top_bar = container(row![
-            button( if state.is_expanded { "V" } else { ">" } )
-                .on_press(Event::ToggleExpand),
+            // Dropdown icon
+            simple_icon_button(if state.is_expanded {
+                Bootstrap::CaretDownFill
+            } else {
+                Bootstrap::CaretRight
+            })
+            .on_press(Event::ToggleExpand),
+
+            // Tag id
             text(&self.tag.id),
         ])
         .style( TOP_BAR_APPEARANCE() )

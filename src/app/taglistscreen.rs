@@ -6,10 +6,13 @@ use iced::event::Status;
 use iced::widget::text_editor::{self, Content};
 use iced::widget::{button, column, container, row, scrollable, text, Column, Container};
 use iced::{Color, Command, Event, Length};
+
 use iced_aw::spinner;
+use iced_aw::Bootstrap;
 
 use crate::app::Message as AppMessage;
 use crate::tag::{ self, Entries, Tag };
+use crate::widget::simple_icon_button;
 use crate::widget::tag_entry::TagEntry as TagEntryWidget;
 
 const ERROR_COLOR: Color = Color {
@@ -65,7 +68,7 @@ impl TagListScreen {
             Message::TagsLoaded(result) => {
                 self.tags = match result {
                     Ok(tags) => TagList::Loaded(tags.into_iter()
-                        .map(|t| TagEntry::from(t))
+                        .map(TagEntry::from)
                         .collect()),
                     Err(err) => TagList::Failed( Arc::into_inner(err) ),
                 };
@@ -94,8 +97,6 @@ impl TagListScreen {
 
                 let text: String = tag.entries.to_list();
                 tag.editing_content = Some(Content::with_text(&text));
-
-                println!("Index {index} started editing");
             }
 
             Message::TagEditActionPerformed(index, action) => {
@@ -120,7 +121,10 @@ impl TagListScreen {
 
         column![
             row![
-                button("<") .on_press(AppMessage::SwitchToMainScreen),
+                // Back arrow
+                simple_icon_button(Bootstrap::ArrowLeft)
+                    .on_press(AppMessage::SwitchToMainScreen),
+
                 text("Tags List") .size(24),
                 Space::with_width(Length::Fill),
                 button("Open save directory") .on_press(Message::OpenTagsDir.into())

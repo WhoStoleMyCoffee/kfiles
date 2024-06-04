@@ -423,7 +423,7 @@ impl Entries {
         Entries::from(str.lines()
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
-            .map(|s| PathBuf::from(s))
+            .map(PathBuf::from)
             .collect::<Vec<PathBuf>>())
     }
 
