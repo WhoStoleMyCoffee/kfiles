@@ -260,12 +260,20 @@ impl TagID {
         TagID(value.as_ref().to_case(Case::Kebab))
     }
 
+    pub fn unique(mut self) -> Self {
+        todo!()
+    }
+
     pub fn get_path(&self) -> PathBuf {
         get_save_dir().join(format!("{}.toml", self.0))
     }
 
     pub fn exists(&self) -> bool {
         self.get_path().exists()
+    }
+
+    pub fn make_unique(&mut self) {
+        todo!()
     }
 
     #[inline]

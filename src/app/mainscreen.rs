@@ -10,11 +10,12 @@ use iced_aw::Wrap;
 use rand::Rng;
 
 use crate::search::Query;
-use crate::tag::{Tag, TagID};
+use crate::tag::{self, Tag, TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
-use crate::app::{ Message as AppMessage, TAGS_CACHE };
+use crate::app::Message as AppMessage;
 use crate::ToPrettyString;
+
 
 // TODO make these configurable
 const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
@@ -80,6 +81,7 @@ pub struct MainScreen {
     scroll: f32,
     results_container_bounds: Option<Rectangle>,
     hovered_path: Option<PathBuf>,
+    tags_cache: Vec<TagID>,
 }
 
 impl MainScreen {
@@ -94,6 +96,8 @@ impl MainScreen {
                 scroll: 0.0,
                 results_container_bounds: None,
                 hovered_path: None,
+                // TODO error handling
+                tags_cache: tag::get_all_tag_ids() .unwrap(),
             },
             MainScreen::fetch_results_bounds() .map(|m| m.into()),
         )
@@ -277,7 +281,7 @@ impl MainScreen {
             FuzzyInput::new(
                 "Query...",
                 &self.query_text,
-                TAGS_CACHE.get().expect("Tags cache not initialized"),
+                &self.tags_cache,
                 |tag_id| Message::ToggleQueryTag {
                     tag_id,
                     clear_input: true,

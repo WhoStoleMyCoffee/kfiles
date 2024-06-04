@@ -2,8 +2,8 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use iced::event::Status;
-use iced::widget::{self, container};
-use iced::{self, Color, Element, Event};
+use iced::widget::container;
+use iced::{self, Element, Event};
 use iced::{time, Application, Command, Theme};
 
 use crate::tag::{self, TagID};
@@ -16,9 +16,6 @@ use mainscreen::MainScreen;
 use self::taglistscreen::TagListScreen;
 
 const UPDATE_RATE_MS: u64 = 100;
-
-static TAGS_CACHE: OnceLock<Vec<TagID>> = OnceLock::new();
-
 
 
 // TODO Message::NotifyError
@@ -63,17 +60,6 @@ impl Application for TagExplorer {
     type Theme = Theme;
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        // TODO find better cache system some day
-        TAGS_CACHE.set({
-            match tag::get_all_tag_ids() {
-                Ok(v) => v,
-                Err(err) => {
-                    println!("ERROR failed to load tags: {err}");
-                    Vec::new()
-                }
-            }
-        }).unwrap();
-
         let (main_screen, command) = MainScreen::new();
 
         (

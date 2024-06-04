@@ -2,20 +2,17 @@ use std::path::PathBuf;
 
 use iced::widget::text_editor::Content;
 use iced::{Color, Element, Length};
-use iced::widget::{ button, column, component, container, row, text, Column,
-    Component, Row, text_editor
+use iced::widget::{ button, column, component, container, horizontal_space, row, text, text_editor, Column, Component
 };
 use iced::widget::container::Appearance;
 use iced_aw::Bootstrap;
 use rfd::FileDialog;
 
-
 use crate::tag::{self, Entries, Tag};
 use crate::ToPrettyString;
 
 use super::context_menu::ContextMenu;
-use super::{simple_icon_button, theme};
-use crate::icon;
+use crate::{ icon, icon_button };
 
 
 const CONTAINER_APPEARANCE: fn() -> Appearance = || {
@@ -48,13 +45,16 @@ const ENTRY_COLOR: Color = Color {
 
 #[derive(Debug, Clone)]
 pub enum Event {
+    Empty,
     ToggleExpand,
-    AddEntryPressed,
     AddEntryFilePressed,
     AddEntryFolderPressed,
     ToggleEdit,
     EditActionPerformed(text_editor::Action),
+    Delete,
 }
+
+pub enum TagOperation {}
 
 #[derive(Debug, Default)]
 pub struct State {
@@ -73,6 +73,7 @@ pub struct TagEntry<'a, Message: Clone, ActionPerformedFn> {
     on_entries_changed: Option<Box<dyn Fn(Entries) -> Message + 'a>>,
     on_start_edit:      Option<Box<dyn Fn() -> Message + 'a>>,
     on_end_edit:        Option<Box<dyn Fn() -> Message + 'a>>,
+    on_delete: Option<Message>,
 }
 
 impl<'a, Message, ActionPerformedFn> TagEntry<'a, Message, ActionPerformedFn>
@@ -87,6 +88,7 @@ where
             on_entries_changed: None,
             on_start_edit: None,
             on_end_edit: None,
+            on_delete: None,
         }
     }
 
@@ -97,19 +99,7 @@ where
         on_entries_changed: impl Fn(Entries) -> Message + 'a,
         on_start_edit: impl Fn() -> Message + 'a,
     ) -> Self {
-
-        self.editing_content = content.map(|c| (
-            c,
-            on_editor_action_performed,
-        ));
-
-        // self.on_editor_action_performed = if content.is_some() {
-        //     Some(Box::new(on_editor_action_performed))
-        // } else {
-        //     None 
-        // };
-        // self.editing_content = content;
-
+        self.editing_content = content.map(|c| (c, on_editor_action_performed));
         self.on_entries_changed = Some(Box::new(on_entries_changed));
         self.on_start_edit = Some(Box::new(on_start_edit));
         self
@@ -119,6 +109,11 @@ where
         where F: Fn() -> Message + 'a,
     {
         self.on_end_edit = Some(Box::new(f));
+        self
+    }
+
+    pub fn on_delete(mut self, message: Message) -> Self {
+        self.on_delete = Some(message);
         self
     }
 
@@ -139,12 +134,12 @@ where
             ]
         } else {
             row![
-                simple_icon_button(Bootstrap::PencilSquare) .on_press(Event::ToggleEdit),
+                icon_button!(icon = Bootstrap::PencilSquare) .on_press(Event::ToggleEdit),
             ]
             // Add entry button only if we listen for entry changes
             .push_maybe(self.on_entries_changed.is_some().then(|| {
                 ContextMenu::new(
-                    simple_icon_button(Bootstrap::FolderPlus) .on_press(Event::AddEntryPressed),
+                    icon_button!(icon = Bootstrap::FolderPlus) .on_press(Event::Empty),
                     || column![
                         button("Add folder") .on_press(Event::AddEntryFolderPressed),
                         button("Add file") .on_press(Event::AddEntryFilePressed),
@@ -182,7 +177,7 @@ where
                 None
             }
 
-            Event::AddEntryPressed => None,
+            Event::Empty => None,
 
             Event::AddEntryFolderPressed => {
                 let on_entries_changed = self.on_entries_changed.as_ref()?;
@@ -225,6 +220,10 @@ where
                 Some(on_editor_action_performed(action))
             }
 
+            Event::Delete => {
+                self.on_delete.clone()
+            }
+
         }
 
     }
@@ -236,7 +235,7 @@ where
 
         let top_bar = container(row![
             // Dropdown icon
-            simple_icon_button(if state.is_expanded {
+            icon_button!(icon = if state.is_expanded {
                 Bootstrap::CaretDownFill
             } else {
                 Bootstrap::CaretRight
@@ -245,6 +244,17 @@ where
 
             // Tag id
             text(&self.tag.id),
+
+            horizontal_space(),
+
+            ContextMenu::new(
+                icon_button!(icon = Bootstrap::ThreeDots) .on_press(Event::Empty),
+                || column![
+                    icon_button!(icon!(Bootstrap::TrashFill, Color::new(0.9, 0.1, 0.0, 1.0)), "Delete")
+                        .on_press(Event::Delete),
+                ].into()
+            )
+            .left_click_release_activated(),
         ])
         .style( TOP_BAR_APPEARANCE() )
         .width(Length::Fill)

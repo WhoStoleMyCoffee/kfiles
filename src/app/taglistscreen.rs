@@ -1,19 +1,20 @@
+use std::fs;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::event::Status;
 use iced::widget::text_editor::{self, Content};
-use iced::widget::{button, column, container, row, scrollable, text, Column, Container};
+use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, Column, Container};
 use iced::{Color, Command, Event, Length};
 
 use iced_aw::spinner;
 use iced_aw::Bootstrap;
 
 use crate::app::Message as AppMessage;
-use crate::tag::{ self, Entries, Tag };
-use crate::widget::simple_icon_button;
+use crate::tag::{ self, Entries, Tag, TagID };
 use crate::widget::tag_entry::TagEntry as TagEntryWidget;
+use crate::{ icon_button, icon };
 
 const ERROR_COLOR: Color = Color {
     r: 0.9,
@@ -21,6 +22,9 @@ const ERROR_COLOR: Color = Color {
     b: 0.1,
     a: 1.0,
 };
+
+// Ids
+const LIST_SCROLLABLE_ID: fn() -> scrollable::Id = || { scrollable::Id::new("tag_list") };
 
 
 type LoadTagsResult = Result< Vec<Tag>, Arc<tag::LoadError> >;
@@ -30,9 +34,11 @@ type LoadTagsResult = Result< Vec<Tag>, Arc<tag::LoadError> >;
 pub enum Message {
     TagsLoaded(LoadTagsResult),
     OpenTagsDir,
-    TagEntryChanged(usize, Entries),
+    TagEntriesChanged(usize, Entries),
     TagStartEdit(usize),
     TagEditActionPerformed(usize, text_editor::Action),
+    CreateTag,
+    DeleteTag(usize),
 }
 
 
@@ -79,7 +85,7 @@ impl TagListScreen {
                 opener::open(path) .unwrap();
             }
 
-            Message::TagEntryChanged(index, entries) => {
+            Message::TagEntriesChanged(index, entries) => {
                 // Get tag at `index` or return Command::none()
                 let Some(tag) = self.get_tag_at_index_mut(index) else {
                     return Command::none(); 
@@ -109,26 +115,54 @@ impl TagListScreen {
                 };
                 editing_content.perform(action);
             }
+
+            Message::CreateTag => {
+                let TagList::Loaded(tag_list) = &mut self.tags else {
+                    return Command::none();
+                };
+
+                let new_tag_id = TagID::new("new-tag");
+                let mut tag = TagEntry::from(Tag::create(new_tag_id));
+                tag.save() .unwrap(); // TODO error handling
+                tag.is_dirty = true;
+                tag_list.push(tag);
+
+                return scrollable::snap_to(
+                    LIST_SCROLLABLE_ID(),
+                    scrollable::RelativeOffset { x: 0.0, y: 1.0, }
+                )
+            }
+
+            Message::DeleteTag(index) => {
+                let TagList::Loaded(tag_list) = &mut self.tags else {
+                    return Command::none();
+                };
+                if index >= tag_list.len() { return Command::none(); }
+
+                let tag = tag_list.remove(index);
+                let path = tag.get_save_path();
+                fs::remove_file(path) .unwrap();
+            }
         }
         
         Command::none()
     }
 
     pub fn view(&self) -> Column<AppMessage> {
-        use iced::widget::Space;
-
         let list = self.view_list();
 
         column![
             row![
                 // Back arrow
-                simple_icon_button(Bootstrap::ArrowLeft)
+                icon_button!(icon = Bootstrap::ArrowLeft)
                     .on_press(AppMessage::SwitchToMainScreen),
-
                 text("Tags List") .size(24),
-                Space::with_width(Length::Fill),
+                horizontal_space(),
                 button("Open save directory") .on_press(Message::OpenTagsDir.into())
             ],
+
+            button("New tag") .on_press(Message::CreateTag.into()),
+
             list
         ]
     }
@@ -159,23 +193,27 @@ impl TagListScreen {
         };
 
         // Contents
-        container(scrollable(
-            column(tags.iter().enumerate()
-                .map(|(i, t)| {
-                    TagEntryWidget::new(t)
-                        .editable(
-                            t.editing_content.as_ref(),
-                            move |a| Message::TagEditActionPerformed(i, a).into(),
-                            move |e| Message::TagEntryChanged(i, e).into(),
-                            move || Message::TagStartEdit(i).into(),
-                        )
-                        .into()
-                })
+        container(
+            scrollable(
+                column(tags.iter().enumerate()
+                    .map(|(i, t)| {
+                        TagEntryWidget::new(t)
+                            .editable(
+                                t.editing_content.as_ref(),
+                                move |a| Message::TagEditActionPerformed(i, a).into(),
+                                move |e| Message::TagEntriesChanged(i, e).into(),
+                                move || Message::TagStartEdit(i).into(),
+                            )
+                            .on_delete(Message::DeleteTag(i).into())
+                            .into()
+                    })
+                )
+                .width(Length::Fill)
+                .padding(12.0)
+                .spacing(12.0)
             )
-            .width(Length::Fill)
-            .padding(12.0)
-            .spacing(12.0)
-        ))
+            .id(LIST_SCROLLABLE_ID())
+        )
 
     }
 
