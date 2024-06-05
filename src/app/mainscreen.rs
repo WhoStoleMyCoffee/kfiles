@@ -354,7 +354,10 @@ impl MainScreen {
         }
 
         // Build
-        builder.build_for_path(path);
+        if let Err(err) = builder.build_for_path(path) {
+            println!("TODO error handling for thumbnail building");
+            println!("Failed to build thumbnail for {}: {}", path.display(), err);
+        }
     }
 
     /// Get the range of items which are visible in the main view

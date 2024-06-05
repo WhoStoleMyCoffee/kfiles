@@ -1,5 +1,4 @@
-use iced::{advanced::widget::{ operation::Outcome, Id, Operation }, widget::{self, button, Text}, Color, Vector};
-use iced_aw::Bootstrap;
+use iced::advanced::widget::{ operation::Outcome, Id, Operation };
 
 pub mod dir_entry;
 pub mod fuzzy_input;
@@ -7,9 +6,11 @@ pub mod tag_entry;
 pub mod context_menu;
 
 
-/// `icon!(Bootstrap)`
-/// `icon!(Bootstrap, light)` for light text
-/// `icon!(Bootstrap, iced::Color)`
+/// ```
+/// icon!(`Bootstrap`)
+/// icon!(`Bootstrap`, light) // For light text
+/// icon!(`Bootstrap`, `Color`)
+/// ```
 #[macro_export]
 macro_rules! icon {
     ($i:expr) => {
@@ -36,24 +37,29 @@ macro_rules! icon {
 }
 
 
+/// ```
+/// icon_button!(icon = `Bootstrap`)
+/// icon_button!(inner)
+/// icon_button!(inner, text)
+/// ```
 #[macro_export]
 macro_rules! icon_button {
     (icon = $icon:expr) => {
         iced::widget::button(icon!($icon, light))
-            .style( iced::theme::Button::custom(crate::widget::theme::Simple) )
+            .style( iced::theme::Button::custom($crate::widget::theme::Simple) )
     };
 
-    ($icon:expr) => {
-        iced::widget::button($icon)
-            .style( iced::theme::Button::custom(crate::widget::theme::Simple) )
+    ($inner:expr) => {
+        iced::widget::button($inner)
+            .style( iced::theme::Button::custom($crate::widget::theme::Simple) )
     };
 
-    ($icon:expr, $text:expr) => {
+    ($inner:expr, $text:expr) => {
         iced::widget::button(iced::widget::row![
-            $icon,
+            $inner,
             iced::widget::text($text) .style(iced::Color::new(0.8, 0.84, 0.95, 1.0)),
         ])
-            .style( iced::theme::Button::custom(crate::widget::theme::Simple) )
+            .style( iced::theme::Button::custom($crate::widget::theme::Simple) )
     };
 }
 

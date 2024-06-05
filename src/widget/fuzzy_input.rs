@@ -129,6 +129,7 @@ where
             .collect())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn handle_event(
         &mut self,
         tree: &mut Tree,

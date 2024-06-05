@@ -1,12 +1,9 @@
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use iced::event::Status;
 use iced::widget::container;
 use iced::{self, Element, Event};
 use iced::{time, Application, Command, Theme};
-
-use crate::tag::{self, TagID};
 
 pub mod mainscreen;
 pub mod taglistscreen;

@@ -156,6 +156,16 @@ impl Tag {
         Tag::load_from_path(id.get_path())
     }
 
+    pub fn rename(&mut self, new_id: TagID) -> std::io::Result<()> {
+        let path: PathBuf = self.id.get_path();
+        if path.exists() {
+            remove_file(path)?;
+        }
+
+        self.id = new_id;
+        Ok(())
+    }
+
     pub fn save_to_path<P>(&self, path: P) -> Result<(), SaveError>
     where
         P: AsRef<Path>,

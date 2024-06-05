@@ -4,8 +4,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::event::Status;
+use iced::keyboard::key::Named;
 use iced::widget::text_editor::{self, Content};
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, Column, Container};
+use iced::widget::{self, button, column, container, horizontal_space, row, scrollable, text, Column, Container};
 use iced::{Color, Command, Event, Length};
 
 use iced_aw::spinner;
@@ -13,7 +14,7 @@ use iced_aw::Bootstrap;
 
 use crate::app::Message as AppMessage;
 use crate::tag::{ self, Entries, Tag, TagID };
-use crate::widget::tag_entry::TagEntry as TagEntryWidget;
+use crate::widget::tag_entry::{self, TagEntry as TagEntryWidget};
 use crate::{ icon_button, icon };
 
 const ERROR_COLOR: Color = Color {
@@ -39,6 +40,9 @@ pub enum Message {
     TagEditActionPerformed(usize, text_editor::Action),
     CreateTag,
     DeleteTag(usize),
+    TagStartRename(usize),
+    TagRenameInput(String),
+    TagSubmitRename,
 }
 
 
@@ -54,6 +58,7 @@ enum TagList {
 #[derive(Debug)]
 pub struct TagListScreen {
     tags: TagList,
+    renaming_tag: Option<(usize, String)>,
 }
 
 impl TagListScreen {
@@ -61,6 +66,7 @@ impl TagListScreen {
         (
             TagListScreen {
                 tags: TagList::Loading,
+                renaming_tag: None,
             },
             Command::perform(
                 load_tags(),
@@ -93,6 +99,7 @@ impl TagListScreen {
 
                 tag.editing_content = None;
                 tag.entries = entries;
+                tag.save() .unwrap();
             }
 
             Message::TagStartEdit(index) => {
@@ -137,11 +144,53 @@ impl TagListScreen {
                 let TagList::Loaded(tag_list) = &mut self.tags else {
                     return Command::none();
                 };
-                if index >= tag_list.len() { return Command::none(); }
+                if index >= tag_list.len() {
+                    return Command::none();
+                }
 
-                let tag = tag_list.remove(index);
+                let tag: TagEntry = tag_list.remove(index);
                 let path = tag.get_save_path();
-                fs::remove_file(path) .unwrap();
+                drop(tag); // ok byee
+                if path.exists() {
+                    fs::remove_file(path) .unwrap();
+                }
+            }
+
+            Message::TagStartRename(index) => {
+                let Some(tag) = self.get_tag_at_index(index) else {
+                    return Command::none();
+                };
+
+                self.renaming_tag = Some((
+                    index,
+                    tag.id.as_ref().clone(),
+                ));
+
+                return widget::text_input::focus( tag_entry::RENAME_INPUT_ID() );
+            }
+
+            Message::TagRenameInput(input) => {
+                let Some((_, str)) = &mut self.renaming_tag else {
+                    return Command::none();
+                };
+                *str = input;
+            }
+
+            Message::TagSubmitRename => {
+                let Some((i, str)) = &self.renaming_tag else {
+                    return Command::none();
+                };
+                let tag_id = TagID::parse(str);
+
+                let Some(tag) = self.get_tag_at_index_mut(*i) else {
+                    return Command::none();
+                };
+
+                // TODO error handling
+                tag.rename(tag_id) .unwrap();
+                tag.save() .unwrap();
+
+                self.renaming_tag = None;
             }
         }
         
@@ -196,17 +245,26 @@ impl TagListScreen {
         container(
             scrollable(
                 column(tags.iter().enumerate()
-                    .map(|(i, t)| {
+                   .map(|(index, t)| 
+                        // TODO man i dont like this
                         TagEntryWidget::new(t)
                             .editable(
                                 t.editing_content.as_ref(),
-                                move |a| Message::TagEditActionPerformed(i, a).into(),
-                                move |e| Message::TagEntriesChanged(i, e).into(),
-                                move || Message::TagStartEdit(i).into(),
+                                Box::new(move |a| Message::TagEditActionPerformed(index, a).into()),
+                                move |e| Message::TagEntriesChanged(index, e).into(),
+                                move || Message::TagStartEdit(index).into(),
                             )
-                            .on_delete(Message::DeleteTag(i).into())
+                            .on_delete(Message::DeleteTag(index).into())
+                            .renamable(
+                                self.renaming_tag.as_ref()
+                                .filter(|(i, _)| *i == index)
+                                .map(|(_, s)| s),
+                                Box::new(|s| Message::TagRenameInput(s).into()),
+                                Message::TagStartRename(index).into(),
+                                Message::TagSubmitRename.into(),
+                            )
                             .into()
-                    })
+                    )
                 )
                 .width(Length::Fill)
                 .padding(12.0)
@@ -217,16 +275,42 @@ impl TagListScreen {
 
     }
 
-    pub fn handle_event(&mut self, _event: Event, _status: Status) -> Command<AppMessage> {
+    pub fn handle_event(&mut self, event: Event, status: Status) -> Command<AppMessage> {
+        use iced::keyboard::{Event as KeyboardEvent, Key};
+
+        if status != Status::Ignored {
+            return Command::none();
+        }
+
+        let Event::Keyboard(KeyboardEvent::KeyPressed { key, modifiers, .. }) = event else {
+            return Command::none();
+        };
+
+        // Esc to cancel whatever
+        if key == Key::Named(Named::Escape) && modifiers.is_empty() {
+            // Cancel renaming tag
+            if self.renaming_tag.is_some() {
+                self.renaming_tag = None;
+            }
+            // Cancel all editing entries
+            else if let TagList::Loaded(tags) = &mut self.tags {
+                for te in tags.iter_mut() {
+                    te.editing_content = None;
+                }
+            }
+
+            return Command::none();
+        }
+
         Command::none()
     }
 
-    /* fn get_tag_at_index(&self, index: usize) -> Option<&TagEntry> {
+    fn get_tag_at_index(&self, index: usize) -> Option<&TagEntry> {
         match &self.tags {
             TagList::Loaded(tags) => tags.get(index),
             _ => None,
         }
-    } */
+    }
     
     fn get_tag_at_index_mut(&mut self, index: usize) -> Option<&mut TagEntry> {
         match &mut self.tags {
@@ -259,13 +343,6 @@ struct TagEntry {
     /// The content of the text edit, if the user is editing the tag's entries
     editing_content: Option<Content>,
 }
-
-/* impl TagEntry {
-    #[inline]
-    fn is_dirty(&self) -> bool {
-        self.is_dirty
-    }
-} */
 
 impl From<Tag> for TagEntry {
     fn from(tag: Tag) -> Self {
