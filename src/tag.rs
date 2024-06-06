@@ -10,7 +10,7 @@ use toml;
 
 use serde::{Deserialize, Serialize};
 
-use crate::app::mainscreen::Item;
+use crate::app::main_screen::Item;
 use crate::{search, ToPrettyString};
 
 
@@ -58,18 +58,9 @@ impl Tag {
 
     /// Add an entry to this [`Tag`]
     pub fn add_entry<P>(&mut self, path: P) -> Result<(), AddEntryError>
-    where
-        P: AsRef<Path>,
+    where P: AsRef<Path>
     {
-        if !path.as_ref().exists() {
-            return Err(AddEntryError::NonexistentPath);
-        }
-
-        if self.entries.contains(&path) {
-            return Err(AddEntryError::AlreadyContained);
-        }
-        self.entries.push(path.as_ref().to_path_buf());
-        Ok(())
+        self.entries.push(path)
     }
 
     /// Remove `path` from this tag's entries
@@ -156,7 +147,11 @@ impl Tag {
         Tag::load_from_path(id.get_path())
     }
 
+    /// Also removes the old file
     pub fn rename(&mut self, new_id: TagID) -> std::io::Result<()> {
+        if new_id == self.id {
+            return Ok(());
+        }
         let path: PathBuf = self.id.get_path();
         if path.exists() {
             remove_file(path)?;
@@ -351,6 +346,22 @@ impl Entries {
         Entries::default()
     }
 
+    pub fn push<P>(&mut self, path: P) -> Result<(), AddEntryError>
+    where P: AsRef<Path>
+    {
+        if !path.as_ref().exists() {
+            return Err(AddEntryError::NonexistentPath);
+        }
+
+        if self.contains(&path) {
+            return Err(AddEntryError::AlreadyContained);
+        }
+
+        self.0.push(path.as_ref().to_path_buf());
+
+        Ok(())
+    }
+
     /// Create a new [`Entries`] that's a union of all `entries`, which means that
     /// it contains all of their paths
     pub fn union_of<I>(entries: I) -> Entries
@@ -430,14 +441,14 @@ impl Entries {
         search::iter_entries(self)
     }
 
-    pub fn to_list(&self) -> String {
+    pub fn to_string_list(&self) -> String {
         let v: Vec<String> = self.0.iter()
             .map(|pb| pb.to_pretty_string())
             .collect();
         v.join("\n")
     }
 
-    pub fn from_list(str: &str) -> Self {
+    pub fn from_string_list(str: &str) -> Self {
         Entries::from(str.lines()
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
@@ -743,13 +754,13 @@ mod tests {
             PathBuf::from("C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"),
         ]);
 
-        let list = entries.to_list();
+        let list = entries.to_string_list();
         assert_eq!(list, r#"C:/Users/ddxte/Documents/Projects/
 C:/Users/ddxte/Pictures/
 C:/Users/ddxte/Videos/
 C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
 
-        let entries2 = Entries::from_list(&list);
+        let entries2 = Entries::from_string_list(&list);
         assert_eq!(entries.as_ref(), entries2.as_ref());
     }
 }

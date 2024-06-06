@@ -45,6 +45,13 @@ pub enum Message {
     EntryHovered(PathBuf),
 }
 
+impl From<Message> for AppMessage {
+    fn from(value: Message) -> AppMessage {
+        AppMessage::Screen(super::ScreenMessage::Main(value))
+    }
+}
+
+
 
 
 

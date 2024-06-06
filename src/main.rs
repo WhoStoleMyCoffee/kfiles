@@ -71,3 +71,124 @@ impl ToPrettyString for PathBuf {
 }
 
 
+
+
+
+
+mod fs {
+    use std::{cmp::Ordering, path::PathBuf, thread, time::{Duration, Instant, SystemTime}};
+
+    pub struct Timeout;
+
+    pub trait Watcher {
+        type Error;
+
+        /// idk how works lmao
+        fn wait(&self, timeout: Duration) -> Result<(), Self::Error>;
+    }
+
+
+    pub struct DeletionWatcher {
+        pub path: PathBuf,
+        pub check_interval: Duration,
+    }
+
+    impl Watcher for DeletionWatcher {
+        type Error = Timeout;
+
+        fn wait(&self, timeout: Duration) -> Result<(), Self::Error> {
+            let start = Instant::now();
+
+            loop {
+                if !self.path.exists() {
+                    return Ok(());
+                }
+                if start.elapsed() >= timeout {
+                    return Err(Timeout);
+                }
+
+                std::thread::sleep(self.check_interval);
+            }
+        }
+    }
+
+    pub struct CreationWatcher {
+        pub path: PathBuf,
+        pub check_interval: Duration,
+    }
+
+    impl Watcher for CreationWatcher {
+        type Error = Timeout;
+
+        fn wait(&self, timeout: Duration) -> Result<(), Self::Error> {
+            let start = Instant::now();
+
+            loop {
+                if self.path.exists() {
+                    return Ok(());
+                }
+                if start.elapsed() >= timeout {
+                    return Err(Timeout);
+                }
+
+                std::thread::sleep(self.check_interval);
+            }
+        }
+    }
+
+
+    /// TODO proofread this
+    pub struct ModificationWatcher {
+        pub path: PathBuf,
+        pub check_interval: Duration,
+        pub since: SystemTime,
+    }
+
+    impl Watcher for ModificationWatcher {
+        type Error = ();
+
+        /// TODO proofread this
+        fn wait(&self, timeout: Duration) -> Result<(), Self::Error> {
+            let start = Instant::now();
+
+            loop {
+                std::thread::sleep(self.check_interval);
+
+                let Some(modified) = self.path.metadata().ok()
+                    .and_then(|m| m.modified().ok())
+                else {
+                    return Err(());
+                };
+
+                if modified >= self.since {
+                    return Ok(());
+                }
+                if start.elapsed() >= timeout {
+                    return Err(());
+                }
+
+            }
+        }
+    }
+
+
+
+    // TODO delete this at some point
+    #[test]
+    fn test_systime() {
+        let a = SystemTime::now();
+        thread::sleep(Duration::from_millis(2000));
+        let b = SystemTime::now();
+
+        assert_eq!(
+            a.cmp(&b),
+            Ordering::Less
+        );
+
+        assert_eq!(
+            b.cmp(&a),
+            Ordering::Greater
+        );
+    }
+
+}

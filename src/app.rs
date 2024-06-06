@@ -5,12 +5,16 @@ use iced::widget::container;
 use iced::{self, Element, Event};
 use iced::{time, Application, Command, Theme};
 
-pub mod mainscreen;
-pub mod taglistscreen;
+pub mod main_screen;
+pub mod tag_list_screen;
+pub mod tag_edit_screen;
 
-use mainscreen::MainScreen;
+use main_screen::MainScreen;
 
-use self::taglistscreen::TagListScreen;
+use crate::tag::Tag;
+
+use self::tag_edit_screen::TagEditScreen;
+use self::tag_list_screen::TagListScreen;
 
 const UPDATE_RATE_MS: u64 = 100;
 
@@ -18,12 +22,16 @@ const UPDATE_RATE_MS: u64 = 100;
 // TODO Message::NotifyError
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// Does nothing.
+    /// Useful for widgets that are interactable but don't really do anything on their own
+    Empty,
     Tick,
     Event(Event, Status),
     Screen(ScreenMessage),
+    IconsFontLoaded(Result<(), iced::font::Error>),
     SwitchToMainScreen,
     SwitchToTagListScreen,
-    IconsFontLoaded(Result<(), iced::font::Error>),
+    SwitchToTagEditScreen(Tag),
 }
 
 impl From<ScreenMessage> for Message {
@@ -32,17 +40,6 @@ impl From<ScreenMessage> for Message {
     }
 }
 
-impl From<mainscreen::Message> for Message {
-    fn from(value: mainscreen::Message) -> Self {
-        Message::Screen(ScreenMessage::Main(value))
-    }
-}
-
-impl From<taglistscreen::Message> for Message {
-    fn from(value: taglistscreen::Message) -> Self {
-        Message::Screen(ScreenMessage::TagList(value))
-    }
-}
 
 
 
@@ -76,24 +73,14 @@ impl Application for TagExplorer {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
+            Message::Empty => Command::none(),
+
             Message::Tick => self.current_screen.tick(),
 
             Message::Screen(screen_message) =>
                 self.current_screen.update(screen_message),
 
             Message::Event(event, status) => self.handle_event(event, status),
-
-            Message::SwitchToMainScreen => {
-                let (main_screen, command) = MainScreen::new();
-                self.current_screen = Screen::Main(main_screen);
-                command
-            }
-
-            Message::SwitchToTagListScreen => {
-                let (taglist_screen, command) = TagListScreen::new();
-                self.current_screen = Screen::TagList(taglist_screen);
-                command
-            }
 
             Message::IconsFontLoaded(res) => {
                 if let Err(err) = res {
@@ -102,6 +89,24 @@ impl Application for TagExplorer {
                     println!("INFO: Icons font loaded");
                 }
                 Command::none()
+            }
+
+            Message::SwitchToMainScreen => {
+                let (main_screen, command) = MainScreen::new();
+                self.current_screen = Screen::Main(main_screen);
+                command
+            }
+
+            Message::SwitchToTagListScreen => {
+                let (tag_list_screen, command) = TagListScreen::new();
+                self.current_screen = Screen::TagList(tag_list_screen);
+                command
+            }
+
+            Message::SwitchToTagEditScreen(tag) => {
+                let (tag_edit_screen, command) = TagEditScreen::new(tag);
+                self.current_screen = Screen::TagEdit(tag_edit_screen);
+                command
             }
         }
     }
@@ -133,14 +138,16 @@ impl TagExplorer {
 
 #[derive(Debug, Clone)]
 pub enum ScreenMessage {
-    Main(mainscreen::Message),
-    TagList(taglistscreen::Message),
+    Main(main_screen::Message),
+    TagList(tag_list_screen::Message),
+    TagEdit(tag_edit_screen::Message),
 }
 
 #[derive(Debug)]
 enum Screen {
     Main(MainScreen),
     TagList(TagListScreen),
+    TagEdit(TagEditScreen),
     // Settings,
 }
 
@@ -153,26 +160,36 @@ impl Screen {
     }
 
     fn update(&mut self, message: ScreenMessage) -> Command<Message> {
-        match (self, message) {
-            (Screen::Main(main), ScreenMessage::Main(message)) =>
-                main.update(message),
-            (Screen::TagList(taglist), ScreenMessage::TagList(message)) =>
-                taglist.update(message),
-            _ => Command::none(),
+        match message {
+            ScreenMessage::Main(message) => if let Screen::Main(main) = self {
+                return main.update(message);
+            },
+
+            ScreenMessage::TagList(message) => if let Screen::TagList(tag_list) = self {
+                return tag_list.update(message);
+            }
+
+            ScreenMessage::TagEdit(message) => if let Screen::TagEdit(tag_edit) = self {
+                return tag_edit.update(message);
+            }
         }
+
+        Command::none()
     }
 
     fn view(&self) -> Element<Message> {
         match self {
             Screen::Main(main) => main.view().into(),
-            Screen::TagList(taglist) => taglist.view().into(),
+            Screen::TagList(tag_list) => tag_list.view().into(),
+            Screen::TagEdit(tag_edit) => tag_edit.view().into(),
         }
     }
 
     fn handle_event(&mut self, event: Event, status: Status) -> Command<Message> {
         match self {
             Screen::Main(main) => main.handle_event(event, status),
-            Screen::TagList(taglist) => taglist.handle_event(event, status),
+            Screen::TagList(tag_list) => tag_list.handle_event(event, status),
+            Screen::TagEdit(tag_edit) => tag_edit.handle_event(event, status),
         }
     }
 }

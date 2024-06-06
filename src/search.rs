@@ -4,7 +4,7 @@ use std::thread;
 
 use walkdir::{DirEntry, WalkDir};
 
-use crate::app::mainscreen::Item;
+use crate::app::main_screen::Item;
 use crate::strmatch::Sublime;
 use crate::tag::{ Entries, Tag };
 
