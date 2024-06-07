@@ -134,7 +134,7 @@ impl TagEditScreen {
                         self.save();
                     },
                     Err(err) => {
-                        println!("{err}");
+                        println!("Error while adding file: {err}");
                     },
                 }
             }
@@ -149,7 +149,7 @@ impl TagEditScreen {
                         self.save();
                     },
                     Err(err) => {
-                        println!("Error while adding entry: {err}");
+                        println!("Error while adding folder: {err}");
                     },
                 }
             }
@@ -164,21 +164,29 @@ impl TagEditScreen {
                     return Command::none();
                 };
 
+                let old_path = self.tag.get_save_path();
                 let new_tag = TagID::parse(&content);
-                if new_tag == self.tag.id { // ID hasn't changed
-                    return Command::none();
+                let new_path = new_tag.get_path();
+
+                match self.tag.rename(new_tag) {
+                    // Renaming was successful
+                    Ok(true) => {
+                        self.is_loading = true;
+                        self.save();
+
+                        return Command::perform(
+                            wait_for_path_rename(old_path, new_path),
+                            |_| Message::StopLoadingMate.into(),
+                        );
+                    }
+                    // Nothing has changed
+                    Ok(false) => {}
+                    Err(err) => {
+                        println!("Error renaming tag: {err:?}");
+                    }
                 }
 
-                self.is_loading = true;
-                let old_path = self.tag.get_save_path();
-                self.tag.rename(new_tag) .unwrap();
-                let new_path = self.tag.get_save_path();
-                self.save();
-
-                return Command::perform(
-                    wait_for_path_rename(old_path, new_path),
-                    |_| Message::StopLoadingMate.into(),
-                );
+                return Command::none();
             }
 
             Message::CancelRename => {

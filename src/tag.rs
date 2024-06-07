@@ -60,7 +60,7 @@ impl Tag {
     pub fn add_entry<P>(&mut self, path: P) -> Result<(), AddEntryError>
     where P: AsRef<Path>
     {
-        self.entries.push(path)
+        self.entries.push(path.as_ref())
     }
 
     /// Remove `path` from this tag's entries
@@ -140,7 +140,19 @@ impl Tag {
     /// Saves this [`Tag`] to the disk
     pub fn save(&self) -> Result<(), SaveError> {
         let path = self.get_save_path();
-        self.save_to_path(path)
+        if self.id.is_empty() {
+            return Err(SaveError::NoID);
+        }
+
+        let string = toml::to_string_pretty(self)?;
+
+        if !path.exists() {
+            let dir = path.parent().expect("could not get parent dir");
+            create_dir_all(dir)?;
+        }
+
+        File::create(path)?.write_all(string.as_bytes())?;
+        Ok(())
     }
 
     pub fn load(id: &TagID) -> Result<Tag, LoadError> {
@@ -148,36 +160,26 @@ impl Tag {
     }
 
     /// Also removes the old file
-    pub fn rename(&mut self, new_id: TagID) -> std::io::Result<()> {
+    /// Returns bool:
+    /// - `true` if the renaming was successful
+    /// - `false` if there was no change
+    pub fn rename(&mut self, new_id: TagID) -> Result<bool, RenameError> {
         if new_id == self.id {
-            return Ok(());
+            return Ok(false);
         }
+
+        let new_path: PathBuf = new_id.get_path();
+        if new_path.exists() {
+            return Err(RenameError::AlreadyExists);
+        }
+
         let path: PathBuf = self.id.get_path();
         if path.exists() {
             remove_file(path)?;
         }
 
         self.id = new_id;
-        Ok(())
-    }
-
-    pub fn save_to_path<P>(&self, path: P) -> Result<(), SaveError>
-    where
-        P: AsRef<Path>,
-    {
-        if self.id.is_empty() {
-            return Err(SaveError::NoID);
-        }
-
-        let string = toml::to_string_pretty(self)?;
-
-        if !path.as_ref().exists() {
-            let dir = path.as_ref().parent().expect("could not get parent dir");
-            create_dir_all(dir)?;
-        }
-
-        File::create(path)?.write_all(string.as_bytes())?;
-        Ok(())
+        Ok(true)
     }
 
     pub fn load_from_path<P>(path: P) -> Result<Tag, LoadError>
@@ -346,10 +348,9 @@ impl Entries {
         Entries::default()
     }
 
-    pub fn push<P>(&mut self, path: P) -> Result<(), AddEntryError>
-    where P: AsRef<Path>
+    pub fn push(&mut self, path: &Path) -> Result<(), AddEntryError>
     {
-        if !path.as_ref().exists() {
+        if !path.exists() {
             return Err(AddEntryError::NonexistentPath);
         }
 
@@ -357,7 +358,10 @@ impl Entries {
             return Err(AddEntryError::AlreadyContained);
         }
 
-        self.0.push(path.as_ref().to_path_buf());
+        self.0.retain(|pb|
+            !pb.starts_with(path)
+        );
+        self.0.push(path.to_path_buf());
 
         Ok(())
     }
@@ -365,8 +369,7 @@ impl Entries {
     /// Create a new [`Entries`] that's a union of all `entries`, which means that
     /// it contains all of their paths
     pub fn union_of<I>(entries: I) -> Entries
-    where
-        I: IntoIterator<Item = Entries>
+    where I: IntoIterator<Item = Entries>
     {
         entries.into_iter()
             .reduce(|acc, e| acc.or(&e))
@@ -513,13 +516,19 @@ pub enum AddEntryError {
 }
 
 #[derive(Debug, Error)]
-pub enum LoadError {
-    #[error("could not get tag name from file")]
-    InvalidName,
-
+pub enum RenameError {
+    #[error("tag already exists")]
+    AlreadyExists,
     #[error(transparent)]
     IO(#[from] io::Error),
+}
 
+#[derive(Debug, Error)]
+pub enum LoadError {
+    #[error("invalid file name")]
+    InvalidName,
+    #[error(transparent)]
+    IO(#[from] io::Error),
     #[error("failed to parse: {0}")]
     ParseError(#[from] toml::de::Error),
 }
@@ -614,8 +623,6 @@ mod tests {
         tag.save().unwrap();
 
         println!("Loading...");
-        // let tag2 = Tag::load( &"test".into() ).unwrap();
-        // let tag2 = Tag::load( &TagID::parse("test") ).unwrap();
         let tag2 = Tag::load(&tag_id).unwrap();
 
         assert_eq!(tag.entries.as_ref(), tag2.entries.as_ref());
@@ -700,18 +707,39 @@ mod tests {
 
     #[test]
     fn tagid() {
-        println!("Testing conversion");
         let id_string = "test tagYeah";
         let id = TagID::parse(id_string);
         assert_eq!("test-tag-yeah", id.as_ref()); // Conversion
 
-        println!("Testing eq");
         assert_eq!("test-tag-yeah", *id); // PartialEq
         assert_eq!(id, id); // Eq
     }
-
+    
     #[test]
     fn entries() {
+        let mut e = Entries::new();
+        e.push(Path::new("C:/Users/ddxte/Documents/")) .unwrap();
+        e.push(Path::new("C:/Users/ddxte/Videos/")) .unwrap();
+
+        assert_eq!(e.as_ref(), &[
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Videos/"),
+        ]);
+
+        assert!(matches!(
+            e.push(Path::new("C:/Users/ddxte/Videos/Voicelines")),
+            Err(AddEntryError::AlreadyContained),
+        ));
+
+        e.push(Path::new("C:/Users/ddxte/")) .unwrap();
+        assert_eq!(e.as_ref(), &[
+            PathBuf::from("C:/Users/ddxte/"),
+        ]);
+    }
+
+
+    #[test]
+    fn entries_operations() {
         let a = Entries::from(vec![
             PathBuf::from("C:/Users/ddxte/Documents/"),
             PathBuf::from("C:/Users/ddxte/Pictures/bread.jpg"),
@@ -724,7 +752,7 @@ mod tests {
             PathBuf::from("C:/Users/ddxte/Music/"),
         ]);
 
-        println!("Testing or");
+        // OR
         let c = HashSet::from_iter(a.or(&b));
         let expected: HashSet<PathBuf> = HashSet::from_iter(vec![
             PathBuf::from("C:/Users/ddxte/Documents/"),
@@ -734,7 +762,7 @@ mod tests {
         assert!(c.is_subset(&expected));
         assert!(HashSet::from_iter(b.or(&a)).is_subset(&c));
 
-        println!("Testing and");
+        // AND
         let c = HashSet::from_iter(a.and(&b));
         let expected: HashSet<PathBuf> = HashSet::from_iter(vec![
             PathBuf::from("C:/Users/ddxte/Documents/TankInSands/"),
@@ -746,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn test_entries_str() {
+    fn entries_string_list() {
         let entries = Entries::from(vec![
             PathBuf::from("C:/Users/ddxte/Documents/Projects/"),
             PathBuf::from("C:/Users/ddxte/Pictures/"),
