@@ -54,7 +54,6 @@ enum TagList {
 #[derive(Debug)]
 pub struct TagListScreen {
     tags: TagList,
-    renaming_tag: Option<(usize, String)>,
 }
 
 impl TagListScreen {
@@ -62,7 +61,6 @@ impl TagListScreen {
         (
             TagListScreen {
                 tags: TagList::Loading,
-                renaming_tag: None,
             },
             Command::perform(
                 load_tags(),
@@ -91,7 +89,7 @@ impl TagListScreen {
                     return Command::none();
                 };
 
-                let new_tag_id = TagID::new("new-tag");
+                let new_tag_id = TagID::new("new-tag") .make_unique_in(tag_list);
                 let tag = Tag::create(new_tag_id);
                 tag.save() .unwrap(); // TODO error handling
                 tag_list.push(tag);
@@ -157,7 +155,7 @@ impl TagListScreen {
                 column(tags.iter().map(|t| 
                     // aaa i dont like the cloning
                     TagEntryWidget::new(t)
-                        .on_edit_pressed(AppMessage::SwitchToTagEditScreen( t.clone() ))
+                        .on_edit_pressed(AppMessage::SwitchToTagEditScreen(t.clone()))
                         .into()
                 ))
                 .width(Length::Fill)
@@ -172,21 +170,6 @@ impl TagListScreen {
     pub fn handle_event(&mut self, _event: Event, _status: Status) -> Command<AppMessage> {
         Command::none()
     }
-
-    fn get_tag_at_index(&self, index: usize) -> Option<&Tag> {
-        match &self.tags {
-            TagList::Loaded(tags) => tags.get(index),
-            _ => None,
-        }
-    }
-    
-    fn get_tag_at_index_mut(&mut self, index: usize) -> Option<&mut Tag> {
-        match &mut self.tags {
-            TagList::Loaded(tags) => tags.get_mut(index),
-            _ => None,
-        }
-    }
-
 }
 
 

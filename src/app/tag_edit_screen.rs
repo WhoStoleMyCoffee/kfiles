@@ -12,7 +12,7 @@ use iced_aw::{Bootstrap, Spinner};
 use rfd::FileDialog;
 
 use crate::app::Message as AppMessage;
-use crate::tag::{ Entries, Tag, TagID };
+use crate::tag::{ self, Entries, Tag, TagID };
 use crate::widget::context_menu::ContextMenu;
 use crate::widget::tag_entry;
 use crate::{ icon, icon_button, ToPrettyString };
@@ -117,7 +117,7 @@ impl TagEditScreen {
                 };
 
                 self.tag.entries = Entries::from_string_list(&content.text());
-                self.save();
+                self.tag.save() .unwrap(); // TODO error handling
             }
 
             Message::CancelEntriesEdit => {
@@ -131,7 +131,7 @@ impl TagEditScreen {
 
                 match self.tag.add_entry(pick) {
                     Ok(()) => {
-                        self.save();
+                        self.tag.save() .unwrap(); // TODO error handling
                     },
                     Err(err) => {
                         println!("Error while adding file: {err}");
@@ -146,7 +146,7 @@ impl TagEditScreen {
 
                 match self.tag.add_entry(pick) {
                     Ok(()) => {
-                        self.save();
+                        self.tag.save() .unwrap(); // TODO error handling
                     },
                     Err(err) => {
                         println!("Error while adding folder: {err}");
@@ -164,29 +164,8 @@ impl TagEditScreen {
                     return Command::none();
                 };
 
-                let old_path = self.tag.get_save_path();
-                let new_tag = TagID::parse(&content);
-                let new_path = new_tag.get_path();
-
-                match self.tag.rename(new_tag) {
-                    // Renaming was successful
-                    Ok(true) => {
-                        self.is_loading = true;
-                        self.save();
-
-                        return Command::perform(
-                            wait_for_path_rename(old_path, new_path),
-                            |_| Message::StopLoadingMate.into(),
-                        );
-                    }
-                    // Nothing has changed
-                    Ok(false) => {}
-                    Err(err) => {
-                        println!("Error renaming tag: {err:?}");
-                    }
-                }
-
-                return Command::none();
+                let new_id = TagID::parse(&content);
+                return self.rename(new_id);
             }
 
             Message::CancelRename => {
@@ -336,8 +315,43 @@ impl TagEditScreen {
         Command::none()
     }
 
-    fn save(&self) {
-        self.tag.save() .unwrap(); // TODO error handling
+    /// Rename the inner tag to `new_id`
+    /// This function is technically recursive, but there will be no infinite recursion because we
+    /// make the tag unique
+    /// There will be *at most* 1 recursive call in case the tag already exists, and that's it
+    fn rename(&mut self, new_id: TagID) -> Command<AppMessage> {
+        let old_path = self.tag.get_save_path();
+        let new_path = new_id.get_path();
+
+        // TODO error handling
+        match self.tag.rename(&new_id) {
+            // Renaming was successful
+            Ok(true) => {
+                self.is_loading = true;
+                self.tag.save() .unwrap(); // TODO error handling
+
+                return Command::perform(
+                    wait_for_path_rename(old_path, new_path),
+                    |_| Message::StopLoadingMate.into(),
+                );
+            }
+            // Nothing has changed
+            Ok(false) => {
+                println!("nothing's changed")
+            }
+            Err(err) => match err {
+                crate::tag::RenameError::AlreadyExists => {
+                    println!("Tag already exists");
+                    let tags = tag::get_all_tag_ids() .unwrap();
+                    // There will be no infinite recursion because we make the tag unique
+                    return self.rename(new_id.make_unique_in(&tags))
+                }
+                crate::tag::RenameError::IO(err) => {
+                    println!("Error renaming tag: {err:?}");
+                }
+            }
+        }
+        return Command::none();
     }
 
 }

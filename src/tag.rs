@@ -163,8 +163,8 @@ impl Tag {
     /// Returns bool:
     /// - `true` if the renaming was successful
     /// - `false` if there was no change
-    pub fn rename(&mut self, new_id: TagID) -> Result<bool, RenameError> {
-        if new_id == self.id {
+    pub fn rename(&mut self, new_id: &TagID) -> Result<bool, RenameError> {
+        if *new_id == self.id {
             return Ok(false);
         }
 
@@ -178,7 +178,7 @@ impl Tag {
             remove_file(path)?;
         }
 
-        self.id = new_id;
+        self.id.clone_from(new_id);
         Ok(true)
     }
 
@@ -267,8 +267,24 @@ impl TagID {
         TagID(value.as_ref().to_case(Case::Kebab))
     }
 
-    pub fn unique(mut self) -> Self {
-        todo!()
+    pub fn make_unique_in<T>(mut self, tags: &[T]) -> Self
+    where T: PartialEq<TagID>
+    {
+        let mut count: u32 = 0;
+        let mut new_id = self.clone();
+
+        loop {
+            // We have a duplicate
+            if tags.iter().any(|t| *t == new_id) {
+                count += 1;
+                new_id = TagID(format!("{}-{}", self.0, count));
+            } else {
+                break;
+            }
+        }
+
+        self = new_id;
+        self
     }
 
     pub fn get_path(&self) -> PathBuf {
@@ -706,13 +722,26 @@ mod tests {
     }
 
     #[test]
-    fn tagid() {
+    fn tag_id() {
         let id_string = "test tagYeah";
         let id = TagID::parse(id_string);
         assert_eq!("test-tag-yeah", id.as_ref()); // Conversion
 
         assert_eq!("test-tag-yeah", *id); // PartialEq
         assert_eq!(id, id); // Eq
+    }
+
+    #[test]
+    fn tag_id_unique() {
+        let ids = vec![
+            TagID::new("new-tag"),
+            TagID::new("new-tag-1"),
+            TagID::new("new-tag-2"),
+        ];
+        let id = TagID::new("new-tag")
+            .make_unique_in(&ids);
+
+        assert_eq!(id.as_ref(), "new-tag-3");
     }
     
     #[test]
