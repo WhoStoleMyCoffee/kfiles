@@ -5,7 +5,7 @@ use std::time::Duration;
 use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::widget::text_editor::{Action, Content};
-use iced::widget::{self, button, column, container, horizontal_space, row, text, text_editor, text_input, Column, Row};
+use iced::widget::{self, button, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, vertical_space, Column, Row};
 use iced::{Alignment, Color, Command, Event, Length};
 
 use iced_aw::{Bootstrap, Spinner};
@@ -18,6 +18,8 @@ use crate::widget::context_menu::ContextMenu;
 use crate::widget::tag_entry;
 use crate::{ icon, send_message, simple_button, ToPrettyString };
 
+use super::theme;
+
 
 pub const RENAME_INPUT_ID: fn() -> widget::text_input::Id = || { widget::text_input::Id::new("tag_rename_input") };
 const DANGER_COLOR: Color = Color {
@@ -27,6 +29,10 @@ const DANGER_COLOR: Color = Color {
     a: 1.0,
 };
 
+// IDs
+const MAIN_SCROLLABLE_ID: fn() -> scrollable::Id = || {
+    scrollable::Id::new("tag_edit_scrollable") 
+};
 
 
 #[derive(Debug, Clone)]
@@ -74,7 +80,10 @@ impl TagEditScreen {
                 renaming_content: None,
                 is_loading: false,
             },
-            Command::none(),
+            scrollable::snap_to(
+                MAIN_SCROLLABLE_ID(),
+                scrollable::RelativeOffset::START,
+            )
         )
     }
 
@@ -132,17 +141,27 @@ impl TagEditScreen {
             }
 
             Message::AddFile => {
+                use tag::AddEntryError;
+
                 let Some(pick) = FileDialog::new().pick_file() else {
                     return Command::none();
                 };
 
-                if let Err(err) = self.tag.add_entry(&pick) {
-                    let pathstr: String = pick.to_pretty_string();
-                    return send_message!(error_message(
-                        format!("Failed to add entry {}:\n{}", pathstr, err)
-                    ));
-                } else {
-                    return self.save();
+                match self.tag.add_entry(&pick) {
+                    Ok(()) => return self.save(),
+                    Err(AddEntryError::AlreadyContained) => {
+                        let pathstr: String = pick.to_pretty_string();
+                        return send_message!(AppMessage::Notify(Notification::new(
+                            notification::Type::Warning,
+                            format!("Entry \"{}\" is already contained", pathstr)
+                        )));
+                    }
+                    Err(err) => {
+                        let pathstr: String = pick.to_pretty_string();
+                        return send_message!(error_message(
+                            format!("Failed to add entry \"{}\":\n{}", pathstr, err)
+                        ));
+                    }
                 }
 
             }
@@ -164,7 +183,10 @@ impl TagEditScreen {
 
             Message::StartRename => {
                 self.renaming_content = Some(self.tag.id.as_ref().clone());
-                return widget::text_input::focus(RENAME_INPUT_ID())
+                return Command::batch(vec![
+                    widget::text_input::focus(RENAME_INPUT_ID()),
+                    widget::text_input::select_all(RENAME_INPUT_ID()),
+                ]);
             },
 
             Message::EndRename => {
@@ -172,7 +194,7 @@ impl TagEditScreen {
                     return Command::none();
                 };
 
-                let new_id = TagID::parse(&content);
+                let new_id = TagID::parse(content);
                 return self.rename(new_id);
             }
 
@@ -192,24 +214,39 @@ impl TagEditScreen {
     }
 
     fn view_entries(&self) -> Column<AppMessage> {
-        let content = match &self.entries_editing_content {
+        let content = column![
+            text("Entries:").size(24)
+        ]
+        .spacing(8.0)
+        .padding([0, 24]);
+
+        // The actual entries
+        let content = content.push(match &self.entries_editing_content {
             Some(c) => column![
-                text_editor(&c)
+                text_editor(c)
                     .on_action(|a| Message::EntriesEditActionPerformed(a).into()),
             ],
             None => column(
                 self.tag.entries.as_ref().iter()
-                    .map(|pb| text(pb.to_pretty_string())
-                         .style(tag_entry::ENTRY_COLOR)
-                         .into()
-                    )
+                    .map(|pb| {
+                        let row = Row::new()
+                            .push( text(pb.to_pretty_string()).style(tag_entry::ENTRY_COLOR) )
+                            .spacing(8);
+                        if pb.exists() {
+                            return row.into();
+                        }
+                        return row.extend(vec![
+                            horizontal_space().width(64).into(),
+                            icon!(Bootstrap::ExclamationCircleFill, theme::ERROR_COLOR).into(),
+                            text("Path doesn't exist") .style(theme::ERROR_COLOR).into(),
+                        ])
+                        .into()
+                    })
             ),
-        }
-        .spacing(8.0)
-        .padding([0, 24]);
+        });
 
         // Bottom row
-        content.push(if self.entries_editing_content.is_some() {
+        let bottom_row = if self.entries_editing_content.is_some() {
             row![
                 button(icon!(Bootstrap::FloppyFill))
                     .on_press(Message::EndEntriesEdit.into()),
@@ -232,13 +269,18 @@ impl TagEditScreen {
                 )
                 .left_click_release_activated(),
             ]
-        })
+        };
+
+        content
+            .push(bottom_row)
+            .push(vertical_space().height(64))
+
     }
 
     fn view_label(&self) -> Row<AppMessage> {
         match &self.renaming_content {
             Some(content) => row![
-                text_input("Tag name", &content)
+                text_input("Tag name", content)
                     .id(RENAME_INPUT_ID())
                     .on_input(|str| Message::RenameInput(str).into())
                     .on_submit(Message::EndRename.into()),
@@ -249,7 +291,7 @@ impl TagEditScreen {
             ],
             None => row![
                 text(&self.tag.id)
-                    .size(24),
+                    .size(32),
                 simple_button!(icon = Bootstrap::Pen)
                     .on_press_maybe((!self.is_loading).then_some(Message::StartRename.into())),
             ],
@@ -287,14 +329,24 @@ impl TagEditScreen {
         .height(Length::Fill);
 
         if self.is_loading {
-            col.push(
+            return col.push(
                 container(Spinner::new() .width(64).height(64))
                     .width(Length::Fill)
                     .center_x()
-            )
-        } else {
-            col.push( self.view_entries() )
+            );
         }
+        use scrollable::{Direction, Properties};
+
+        col.extend(vec![
+                   horizontal_rule(1).into(),
+                   scrollable(self.view_entries())
+                   .id(MAIN_SCROLLABLE_ID())
+                   .direction(Direction::Both {
+                       vertical: Properties::default(),
+                       horizontal: Properties::default() .width(4).scroller_width(4),
+                   })
+                   .into(),
+        ])
     }
 
     pub fn handle_event(&mut self, event: Event, status: Status) -> Command<AppMessage> {
@@ -354,10 +406,7 @@ impl TagEditScreen {
             }
 
             // Nothing has changed
-            Ok(false) => {
-                // TODO delete this
-                println!("nothing's changed")
-            }
+            Ok(false) => {}
 
             Err(err) => match err {
                 // Already exists; make name unique and try again
@@ -373,13 +422,10 @@ impl TagEditScreen {
 
                     return Command::batch(vec![
                         // Already exists warning
-                        send_message!(AppMessage::Notify(
-                            Notification::new(
-                                notification::Type::Warning,
-                                format!("Tag \"{}\" already exists", id)
-                            )
-                            .with_lifetime(Duration::from_secs(10))
-                        )),
+                        send_message!(AppMessage::Notify(Notification::new(
+                            notification::Type::Warning,
+                            format!("Tag \"{}\" already exists", id)
+                        ))),
 
                         // There will be no infinite recursion because we make the tag unique
                         self.rename(new_id.make_unique_in(&tags)) 
@@ -394,7 +440,7 @@ impl TagEditScreen {
             }
         }
 
-        return Command::none();
+        Command::none()
     }
 
     /// Save the current tag to disk and notify any errors via [`Command`]

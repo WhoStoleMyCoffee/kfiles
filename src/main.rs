@@ -76,7 +76,7 @@ impl ToPrettyString for PathBuf {
 
 
 mod fs {
-    use std::{cmp::Ordering, path::PathBuf, thread, time::{Duration, Instant, SystemTime}};
+    use std::{path::PathBuf, time::{Duration, Instant, SystemTime}};
 
     pub struct Timeout;
 
@@ -170,25 +170,4 @@ mod fs {
             }
         }
     }
-
-
-
-    // TODO delete this at some point
-    #[test]
-    fn test_systime() {
-        let a = SystemTime::now();
-        thread::sleep(Duration::from_millis(2000));
-        let b = SystemTime::now();
-
-        assert_eq!(
-            a.cmp(&b),
-            Ordering::Less
-        );
-
-        assert_eq!(
-            b.cmp(&a),
-            Ordering::Greater
-        );
-    }
-
 }

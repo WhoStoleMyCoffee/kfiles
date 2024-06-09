@@ -198,7 +198,6 @@ impl Tag {
             .ok_or(LoadError::InvalidName)?;
         tag.id = TagID(file_name.to_string());
 
-        tag.entries.retain(|pb| pb.exists());
         tag.subtags.retain(|tag_id| tag_id.exists());
 
         Ok(tag)
@@ -371,7 +370,7 @@ impl Entries {
             return Err(AddEntryError::NonexistentPath);
         }
 
-        if self.contains(&path) {
+        if self.contains(path) {
             return Err(AddEntryError::AlreadyContained);
         }
 

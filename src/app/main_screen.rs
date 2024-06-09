@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
 
 use iced::event::Status;
 use iced::widget::scrollable::Viewport;
@@ -246,13 +245,10 @@ impl MainScreen {
                 };
 
                 let pathstr: String = path.to_pretty_string();
-                let mut command = send_message!(AppMessage::Notify(
-                    Notification::new(
-                        notification::Type::Info,
-                        format!("Failed to open {}:\n{}\nRevealing in file explorer instead", pathstr, err)
-                    )
-                    .with_lifetime(Duration::from_secs(10))
-                ));
+                let mut command = send_message!(AppMessage::Notify(Notification::new(
+                    notification::Type::Info,
+                    format!("Failed to open \"{}\":\n{}\nRevealing in file explorer instead", pathstr, err)
+                )));
 
                 if let Err(err) = opener::reveal(&path) {
                     let pathstr: String = path.to_pretty_string();

@@ -1,9 +1,9 @@
 use iced::widget::{column, component, row, Component, Text};
-use iced::{Alignment, Color, Element, Length};
+use iced::{Alignment, Element, Length};
 use iced_aw::{card, Bootstrap};
 
 use crate::app::notification::Notification;
-use crate::{app, icon, simple_button};
+use crate::{icon, simple_button};
 
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -49,8 +49,8 @@ impl<'a, Message: Clone> NotificationCard<'a, Message> {
 
 
     pub fn from_notification(value: &'a Notification) -> Self {
-        let mut nc = NotificationCard::new(&value.get_title(), &value.content);
-        nc.icon = value.get_icon() .clone();
+        let mut nc = NotificationCard::new(value.get_title(), &value.content);
+        nc.icon.clone_from(&value.get_icon());
         nc
     }
 
@@ -84,11 +84,7 @@ impl<'a, Message: Clone> Component<Message> for NotificationCard<'a, Message> {
     fn update(&mut self, state: &mut Self::State, event: Self::Event) -> Option<Message> {
         match event {
             Event::Close => {
-                if let Some(message) = &self.on_close {
-                    Some(message.clone())
-                } else {
-                    None
-                }
+                self.on_close.clone()
             }
 
             Event::ToggleExpand => {

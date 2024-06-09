@@ -1,9 +1,10 @@
 use iced::{Alignment, Color, Element, Length};
-use iced::widget::{ column, component, container, horizontal_space, row, text, Column, Component, Container
+use iced::widget::{ column, component, container, horizontal_space, row, text, Column, Component, Container, Row
 };
 use iced::widget::container::Appearance;
 use iced_aw::Bootstrap;
 
+use crate::app::theme;
 use crate::tag::Tag;
 use crate::ToPrettyString;
 use crate::{ icon, simple_button };
@@ -53,6 +54,8 @@ pub struct State {
 pub struct TagEntry<'a, Message: Clone> {
     tag: &'a Tag,
     on_edit_pressed: Option<Message>,
+    /// Cache containing the indices of entries that don't exist
+    erroneous_entries: Vec<usize>,
 }
 
 impl<'a, Message: Clone> TagEntry<'a, Message> {
@@ -60,6 +63,10 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
         TagEntry {
             tag,
             on_edit_pressed: None,
+            erroneous_entries: tag.entries.as_ref().iter().enumerate()
+                .filter(|(_, pb)| !pb.exists())
+                .map(|(i, _)| i)
+                .collect(),
         }
     }
 
@@ -70,8 +77,16 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
 
     fn view_contents(&self, _state: &State) -> Column<Event> {
         column(
-            self.tag.entries.as_ref().iter()
-                .map(|pb| text(pb.to_pretty_string()) .style(ENTRY_COLOR) .into())
+            self.tag.entries.as_ref().iter().enumerate()
+                .map(|(i, pb)| Row::new()
+                    .push( text(pb.to_pretty_string()) .style(ENTRY_COLOR) )
+                    .push_maybe(self.is_entry_index_erroneous(&i).then(||
+                        icon!(Bootstrap::ExclamationCircleFill, theme::ERROR_COLOR)
+                    ))
+                    .spacing(12)
+                    .align_items(Alignment::Center)
+                    .into()
+                )
         )
         .spacing(8.0)
         .padding([0, 24])
@@ -79,27 +94,37 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
 
     fn view_top_bar(&self, state: &State) -> Container<Event> {
         container(row![
-            // Dropdown icon
-            simple_button!(icon = if state.is_expanded {
-                Bootstrap::CaretDownFill
-            } else {
-                Bootstrap::CaretRight
-            })
-            .on_press(Event::ToggleExpand),
+                // Dropdown icon
+                simple_button!(icon = if state.is_expanded {
+                    Bootstrap::CaretDownFill
+                } else {
+                    Bootstrap::CaretRight
+                })
+                .on_press(Event::ToggleExpand),
 
-            // Label
-            text(&self.tag.id),
-
-            horizontal_space(),
-        ]
-        .push_maybe(self.on_edit_pressed.is_some().then(||
-            simple_button!(icon = Bootstrap::PencilSquare)
-                .on_press(Event::EditPressed)
-        ))
-        .align_items(Alignment::Center))
+                // Label
+                text(&self.tag.id),
+            ]
+            // Error if any
+            .push_maybe((!self.erroneous_entries.is_empty()).then(||
+                icon!(Bootstrap::ExclamationCircleFill, theme::WARNING_COLOR)
+            ))
+            .push(horizontal_space())
+            // Edit button
+            .push_maybe(self.on_edit_pressed.is_some().then(||
+                simple_button!(icon = Bootstrap::PencilSquare)
+                    .on_press(Event::EditPressed)
+            ))
+            .align_items(Alignment::Center)
+            .spacing(12)
+        )
         .style( TOP_BAR_APPEARANCE() )
         .width(Length::Fill)
         .padding(8.0)
+    }
+
+    fn is_entry_index_erroneous(&self, index: &usize) -> bool {
+        self.erroneous_entries.binary_search(index).is_ok()
     }
 }
 

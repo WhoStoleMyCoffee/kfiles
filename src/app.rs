@@ -31,13 +31,13 @@ const UPDATE_RATE_MS: u64 = 100;
 #[macro_export]
 macro_rules! send_message {
     ($msg:expr) => {
-        Command::perform(async { () }, move |_| $msg)
+        Command::perform(async {}, move |_| $msg)
     };
 
     ($($msg:expr),*$(,)?) => {
         Command::batch(vec![
             $(
-                Command::perform(async{ () }, move |_| $msg),
+                Command::perform(async{}, move |_| $msg),
              )*
         ])
     };
@@ -286,22 +286,73 @@ impl Screen {
 }
 
 
+
+
+
+pub mod theme {
+    use iced::Color;
+
+    pub const INFO_COLOR: Color = Color { r: 0.2, g: 0.8, b: 1.0, a: 1.0 };
+    pub const WARNING_COLOR: Color = Color { r: 0.95, g: 0.9, b: 0.2, a: 1.0 };
+    pub const ERROR_COLOR: Color = Color { r: 1.0, g: 0.2, b: 0.2, a: 1.0 };
+
+    pub mod button {
+        use iced::{widget::button, Color, Vector};
+
+        pub struct Simple;
+
+        impl button::StyleSheet for Simple {
+            type Style = iced::Theme;
+
+            fn active(&self, _style: &Self::Style) -> button::Appearance {
+                button::Appearance {
+                    background: Some(Color::new(0.17, 0.17, 0.24, 1.0).into()),
+                    border: iced::Border::with_radius(4.0),
+                    ..Default::default()
+                }
+            }
+
+            fn hovered(&self, style: &Self::Style) -> button::Appearance {
+                let active = self.active(style);
+
+                button::Appearance {
+                    background: Some(Color::new(0.20, 0.20, 0.28, 1.0).into()),
+                    shadow_offset: active.shadow_offset + Vector::new(0.0, 1.0),
+                    ..active
+                }
+            }
+
+            /// Produces the pressed [`Appearance`] of a button.
+            fn pressed(&self, style: &Self::Style) -> button::Appearance {
+                button::Appearance {
+                    background: Some(Color::new(0.16, 0.15, 0.23, 1.0).into()),
+                    shadow_offset: Vector::default(),
+                    ..self.active(style)
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
 pub mod notification {
     use std::time::{Duration, Instant};
-    use iced::{widget::Text, Color};
+    use iced::widget::Text;
     use iced_aw::Bootstrap;
 
     use crate::{app, icon};
 
     /// Create a new error notification wrapped in [`app::Message::Notify`]
-    /// The created [`Notification`] will have a default lifetime of 10 seconds
+    /// The created [`Notification`] will have the default lifetime
     pub fn error_message(content: String) -> app::Message {
         app::Message::Notify(
             Notification::new(
                 Type::Error,
                 content,
             )
-            .with_lifetime(Duration::from_secs(10))
         )
     }
 
@@ -315,22 +366,19 @@ pub mod notification {
     }
 
     impl Type {
-        const INFO_COLOR: Color = Color { r: 0.2, g: 0.8, b: 1.0, a: 1.0 };
-        const WARNING_COLOR: Color = Color { r: 0.95, g: 0.9, b: 0.2, a: 1.0 };
-        const ERROR_COLOR: Color = Color { r: 1.0, g: 0.2, b: 0.2, a: 1.0 };
-
         pub fn get_icon(&self) -> Option<Text> {
+            use app::theme;
             match self {
                 Type::Text(_) => None,
-                Type::Info => Some(icon!(Bootstrap::InfoCircle, Self::INFO_COLOR)),
-                Type::Warning => Some(icon!(Bootstrap::ExclamationTriangle, Self::WARNING_COLOR)),
-                Type::Error => Some(icon!(Bootstrap::XLg, Self::ERROR_COLOR)),
+                Type::Info => Some(icon!(Bootstrap::InfoCircle, theme::INFO_COLOR)),
+                Type::Warning => Some(icon!(Bootstrap::ExclamationTriangle, theme::WARNING_COLOR)),
+                Type::Error => Some(icon!(Bootstrap::ExclamationTriangleFill, theme::ERROR_COLOR)),
             }
         }
 
         pub fn get_title(&self) -> &str {
             match self {
-                Type::Text(title) => &title,
+                Type::Text(title) => title,
                 Type::Info => "Info",
                 Type::Warning => "Warning",
                 Type::Error => "Error",
@@ -347,16 +395,24 @@ pub mod notification {
     }
 
     impl Notification {
+        pub const DEFAULT_LIFETIME: f32 = 10.0;
+
+        /// Create a new [`Notification`]
         pub fn new(notification_type: Type, content: String) -> Self {
             Notification {
                 notification_type,
                 content,
-                expire_at: None,
+                expire_at: Some(Instant::now() + Duration::from_secs_f32(Notification::DEFAULT_LIFETIME)),
             }
         }
 
-        pub fn with_lifetime(mut self, duration: Duration) -> Self {
-            self.expire_at = Some(Instant::now() + duration);
+        pub fn no_expiration(mut self) -> Self {
+            self.expire_at = None;
+            self
+        }
+
+        pub fn with_lifetime(mut self, duration_seconds: f32) -> Self {
+            self.expire_at = Some(Instant::now() + Duration::from_secs_f32(duration_seconds));
             self
         }
 
