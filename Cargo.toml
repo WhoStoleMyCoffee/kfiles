@@ -15,9 +15,10 @@ iced = { version = "0.12.1", features = [
 ] }
 iced_aw = { version = "0.9.2", features = [
 	"wrap",
-	"selection_list",
-	"spinner" ,
+	# "selection_list",
+	"spinner",
 	"icons",
+	"floating_element",
 ] }
 walkdir = "2.5.0"
 serde = { version = "1.0.195", features = ["derive"] }

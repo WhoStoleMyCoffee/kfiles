@@ -6,7 +6,7 @@ use iced_aw::Bootstrap;
 
 use crate::tag::Tag;
 use crate::ToPrettyString;
-use crate::{ icon, icon_button };
+use crate::{ icon, simple_button };
 
 
 const CONTAINER_APPEARANCE: fn() -> Appearance = || {
@@ -80,7 +80,7 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
     fn view_top_bar(&self, state: &State) -> Container<Event> {
         container(row![
             // Dropdown icon
-            icon_button!(icon = if state.is_expanded {
+            simple_button!(icon = if state.is_expanded {
                 Bootstrap::CaretDownFill
             } else {
                 Bootstrap::CaretRight
@@ -93,7 +93,7 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
             horizontal_space(),
         ]
         .push_maybe(self.on_edit_pressed.is_some().then(||
-            icon_button!(icon = Bootstrap::PencilSquare)
+            simple_button!(icon = Bootstrap::PencilSquare)
                 .on_press(Event::EditPressed)
         ))
         .align_items(Alignment::Center))

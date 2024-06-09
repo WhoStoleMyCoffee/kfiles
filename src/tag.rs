@@ -57,6 +57,7 @@ impl Tag {
     }
 
     /// Add an entry to this [`Tag`]
+    #[inline]
     pub fn add_entry<P>(&mut self, path: P) -> Result<(), AddEntryError>
     where P: AsRef<Path>
     {

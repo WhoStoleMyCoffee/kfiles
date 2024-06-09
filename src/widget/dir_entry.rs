@@ -146,7 +146,7 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
         }
 
         let file_name = self.path.file_name()
-            .unwrap()
+            .unwrap_or( std::ffi::OsStr::new("") )
             .to_string_lossy();
         let img = load_thumbnail_for_path(&self.path);
         let inner = column![

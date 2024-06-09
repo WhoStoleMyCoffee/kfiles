@@ -11,7 +11,9 @@ use iced_aw::Bootstrap;
 use crate::app::Message as AppMessage;
 use crate::tag::{ self, Tag, TagID };
 use crate::widget::tag_entry::TagEntry as TagEntryWidget;
-use crate::{ icon_button, icon };
+use crate::{ icon, send_message, simple_button, ToPrettyString };
+
+use super::notification::error_message;
 
 const ERROR_COLOR: Color = Color {
     r: 0.9,
@@ -19,9 +21,6 @@ const ERROR_COLOR: Color = Color {
     b: 0.1,
     a: 1.0,
 };
-
-// Ids
-const LIST_SCROLLABLE_ID: fn() -> scrollable::Id = || { scrollable::Id::new("tag_list") };
 
 
 type LoadTagsResult = Result< Vec<Tag>, Arc<tag::LoadError> >;
@@ -50,7 +49,6 @@ enum TagList {
 
 
 
-/// TODO use hashset or hashmap instead of vec
 #[derive(Debug)]
 pub struct TagListScreen {
     tags: TagList,
@@ -81,7 +79,11 @@ impl TagListScreen {
 
             Message::OpenTagsDir => {
                 let path: PathBuf = tag::get_save_dir();
-                opener::open(path) .unwrap();
+                if let Err(err) = opener::open(&path) {
+                    return send_message!(error_message(
+                        format!("Failed to open {}:\n{}", path.to_pretty_string(), err)
+                    ));
+                }
             }
 
             Message::CreateTag => {
@@ -91,13 +93,13 @@ impl TagListScreen {
 
                 let new_tag_id = TagID::new("new-tag") .make_unique_in(tag_list);
                 let tag = Tag::create(new_tag_id);
-                tag.save() .unwrap(); // TODO error handling
-                tag_list.push(tag);
+                if let Err(err) = tag.save() {
+                    return send_message!(error_message(
+                        format!("Failed to create tag:\n{}", err)
+                    ));
+                }
 
-                return scrollable::snap_to(
-                    LIST_SCROLLABLE_ID(),
-                    scrollable::RelativeOffset { x: 0.0, y: 1.0, }
-                )
+                return send_message!(AppMessage::SwitchToTagEditScreen(tag))
             }
 
         }
@@ -111,7 +113,7 @@ impl TagListScreen {
         column![
             row![
                 // Back arrow
-                icon_button!(icon = Bootstrap::ArrowLeft)
+                simple_button!(icon = Bootstrap::ArrowLeft)
                     .on_press(AppMessage::SwitchToMainScreen),
                 text("Tags List") .size(24),
                 horizontal_space(),
@@ -122,6 +124,8 @@ impl TagListScreen {
 
             list
         ]
+        .width(Length::Fill)
+        .height(Length::Fill)
     }
 
     fn view_list(&self) -> Container<AppMessage> {
@@ -150,20 +154,17 @@ impl TagListScreen {
         };
 
         // Contents
-        container(
-            scrollable(
-                column(tags.iter().map(|t| 
-                    // aaa i dont like the cloning
-                    TagEntryWidget::new(t)
-                        .on_edit_pressed(AppMessage::SwitchToTagEditScreen(t.clone()))
-                        .into()
-                ))
-                .width(Length::Fill)
-                .padding(12.0)
-                .spacing(12.0)
-            )
-            .id(LIST_SCROLLABLE_ID())
-        )
+        container(scrollable(
+            column(tags.iter().map(|t| 
+                // aaa i dont like the cloning
+                TagEntryWidget::new(t)
+                    .on_edit_pressed(AppMessage::SwitchToTagEditScreen(t.clone()))
+                    .into()
+            ))
+            .width(Length::Fill)
+            .padding(12.0)
+            .spacing(12.0)
+        ))
 
     }
 

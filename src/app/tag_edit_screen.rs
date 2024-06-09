@@ -11,11 +11,12 @@ use iced::{Alignment, Color, Command, Event, Length};
 use iced_aw::{Bootstrap, Spinner};
 use rfd::FileDialog;
 
+use crate::app::notification::{self, error_message, Notification};
 use crate::app::Message as AppMessage;
 use crate::tag::{ self, Entries, Tag, TagID };
 use crate::widget::context_menu::ContextMenu;
 use crate::widget::tag_entry;
-use crate::{ icon, icon_button, ToPrettyString };
+use crate::{ icon, send_message, simple_button, ToPrettyString };
 
 
 pub const RENAME_INPUT_ID: fn() -> widget::text_input::Id = || { widget::text_input::Id::new("tag_rename_input") };
@@ -102,7 +103,13 @@ impl TagEditScreen {
                 self.is_loading = true;
                 let path: PathBuf = self.tag.get_save_path();
                 if path.exists() {
-                    fs::remove_file(&path) .unwrap();
+                    if let Err(err) = fs::remove_file(&path) {
+                        let pathstr: String = path.to_pretty_string();
+                        return send_message![
+                            error_message(format!("Failed to remove file {}:\n{}", pathstr, err)),
+                            AppMessage::SwitchToTagListScreen,
+                        ]
+                    }
                 }
 
                 return Command::perform(
@@ -117,7 +124,7 @@ impl TagEditScreen {
                 };
 
                 self.tag.entries = Entries::from_string_list(&content.text());
-                self.tag.save() .unwrap(); // TODO error handling
+                return self.save();
             }
 
             Message::CancelEntriesEdit => {
@@ -129,14 +136,15 @@ impl TagEditScreen {
                     return Command::none();
                 };
 
-                match self.tag.add_entry(pick) {
-                    Ok(()) => {
-                        self.tag.save() .unwrap(); // TODO error handling
-                    },
-                    Err(err) => {
-                        println!("Error while adding file: {err}");
-                    },
+                if let Err(err) = self.tag.add_entry(&pick) {
+                    let pathstr: String = pick.to_pretty_string();
+                    return send_message!(error_message(
+                        format!("Failed to add entry {}:\n{}", pathstr, err)
+                    ));
+                } else {
+                    return self.save();
                 }
+
             }
 
             Message::AddFolder => {
@@ -144,13 +152,13 @@ impl TagEditScreen {
                     return Command::none();
                 };
 
-                match self.tag.add_entry(pick) {
-                    Ok(()) => {
-                        self.tag.save() .unwrap(); // TODO error handling
-                    },
-                    Err(err) => {
-                        println!("Error while adding folder: {err}");
-                    },
+                if let Err(err) = self.tag.add_entry(&pick) {
+                    let pathstr: String = pick.to_pretty_string();
+                    return send_message!(error_message(
+                        format!("Failed to add entry {}:\n{}", pathstr, err)
+                    ));
+                } else {
+                    return self.save();
                 }
             }
 
@@ -205,18 +213,18 @@ impl TagEditScreen {
             row![
                 button(icon!(Bootstrap::FloppyFill))
                     .on_press(Message::EndEntriesEdit.into()),
-                icon_button!(icon = Bootstrap::X)
+                simple_button!(icon = Bootstrap::X)
                     .on_press(Message::CancelEntriesEdit.into()),
             ]
         } else {
             row![
                 // Edit button
-                icon_button!(icon = Bootstrap::PencilSquare)
+                simple_button!(icon = Bootstrap::PencilSquare)
                     .on_press(Message::StartEntriesEdit.into()),
 
                 // Add entry button
                 ContextMenu::new(
-                    icon_button!(icon = Bootstrap::FolderPlus).on_press(AppMessage::Empty),
+                    simple_button!(icon = Bootstrap::FolderPlus).on_press(AppMessage::Empty),
                     || column![
                         button("Add folder").on_press(Message::AddFolder.into()),
                         button("Add file")  .on_press(Message::AddFile.into()),
@@ -236,13 +244,13 @@ impl TagEditScreen {
                     .on_submit(Message::EndRename.into()),
                 button(icon!(Bootstrap::FloppyFill))
                     .on_press(Message::EndRename.into()),
-                icon_button!(icon = Bootstrap::X)
+                simple_button!(icon = Bootstrap::X)
                     .on_press(Message::CancelRename.into()),
             ],
             None => row![
                 text(&self.tag.id)
                     .size(24),
-                icon_button!(icon = Bootstrap::Pen)
+                simple_button!(icon = Bootstrap::Pen)
                     .on_press_maybe((!self.is_loading).then_some(Message::StartRename.into())),
             ],
         }
@@ -253,7 +261,7 @@ impl TagEditScreen {
         let col = column![
             row![
                 // Back arrow
-                icon_button!(icon = Bootstrap::ArrowLeft)
+                simple_button!(icon = Bootstrap::ArrowLeft)
                     .on_press_maybe((!self.is_loading).then_some(AppMessage::SwitchToTagListScreen)),
                 self.view_label(),
                 horizontal_space(),
@@ -261,9 +269,9 @@ impl TagEditScreen {
             // Menu
             .push_maybe((!self.is_loading && self.renaming_content.is_none()).then(|| 
                 ContextMenu::new(
-                    icon_button!(icon = Bootstrap::ThreeDots) .on_press(AppMessage::Empty),
+                    simple_button!(icon = Bootstrap::ThreeDots) .on_press(AppMessage::Empty),
                     || column![
-                        icon_button!(icon!(Bootstrap::TrashFill, DANGER_COLOR), "Delete")
+                        simple_button!(icon!(Bootstrap::TrashFill, DANGER_COLOR), "Delete")
                             .on_press(Message::Delete.into())
                             .width(Length::Fill),
                     ]
@@ -274,7 +282,9 @@ impl TagEditScreen {
             ))
             .align_items(Alignment::Center)
             .spacing(16),
-        ];
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill);
 
         if self.is_loading {
             col.push(
@@ -320,38 +330,81 @@ impl TagEditScreen {
     /// make the tag unique
     /// There will be *at most* 1 recursive call in case the tag already exists, and that's it
     fn rename(&mut self, new_id: TagID) -> Command<AppMessage> {
+        use crate::tag::RenameError;
+
         let old_path = self.tag.get_save_path();
         let new_path = new_id.get_path();
 
-        // TODO error handling
         match self.tag.rename(&new_id) {
             // Renaming was successful
             Ok(true) => {
                 self.is_loading = true;
-                self.tag.save() .unwrap(); // TODO error handling
+
+                // We don't use `self.save()` because we don't want to wait if it fails
+                if let Err(err) = self.tag.save() {
+                    return send_message!(error_message(
+                        format!("Failed to save tag:\n{}", err)
+                    ))
+                }
 
                 return Command::perform(
                     wait_for_path_rename(old_path, new_path),
                     |_| Message::StopLoadingMate.into(),
                 );
             }
+
             // Nothing has changed
             Ok(false) => {
+                // TODO delete this
                 println!("nothing's changed")
             }
+
             Err(err) => match err {
-                crate::tag::RenameError::AlreadyExists => {
-                    println!("Tag already exists");
-                    let tags = tag::get_all_tag_ids() .unwrap();
-                    // There will be no infinite recursion because we make the tag unique
-                    return self.rename(new_id.make_unique_in(&tags))
+                // Already exists; make name unique and try again
+                RenameError::AlreadyExists => {
+                    let id: String = new_id.as_ref().clone();
+
+                    let tags = match tag::get_all_tag_ids() {
+                        Ok(v) => v,
+                        Err(err) => return send_message!(error_message(
+                            format!("Failed to get tags list:\n{}", err)
+                        ))
+                    };
+
+                    return Command::batch(vec![
+                        // Already exists warning
+                        send_message!(AppMessage::Notify(
+                            Notification::new(
+                                notification::Type::Warning,
+                                format!("Tag \"{}\" already exists", id)
+                            )
+                            .with_lifetime(Duration::from_secs(10))
+                        )),
+
+                        // There will be no infinite recursion because we make the tag unique
+                        self.rename(new_id.make_unique_in(&tags)) 
+                    ]);
                 }
-                crate::tag::RenameError::IO(err) => {
-                    println!("Error renaming tag: {err:?}");
+
+                RenameError::IO(err) => {
+                    return send_message!(error_message(
+                        format!("Failed to rename tag:\n{}", err)
+                    ));
                 }
             }
         }
+
         return Command::none();
+    }
+
+    /// Save the current tag to disk and notify any errors via [`Command`]
+    fn save(&self) -> Command<AppMessage> {
+        let Err(err) = self.tag.save() else {
+            return Command::none();
+        };
+        send_message!(error_message(
+            format!("Failed to save tag:\n{}", err)
+        ))
     }
 
 }

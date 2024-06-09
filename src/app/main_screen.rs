@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
+use std::time::Duration;
 
 use iced::event::Status;
 use iced::widget::scrollable::Viewport;
@@ -14,7 +15,9 @@ use crate::tag::{self, Tag, TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::Message as AppMessage;
-use crate::ToPrettyString;
+use crate::{send_message, ToPrettyString};
+
+use super::notification::{self, error_message, Notification};
 
 
 // TODO make these configurable
@@ -93,6 +96,22 @@ pub struct MainScreen {
 
 impl MainScreen {
     pub fn new() -> (Self, Command<AppMessage>) {
+        let mut command = MainScreen::fetch_results_bounds()
+            .map(|m| m.into());
+
+        let tags_cache = match tag::get_all_tag_ids() {
+            Ok(v) => v,
+            Err(err) => {
+                command = Command::batch(vec![
+                    command,
+                    send_message!(error_message(
+                        format!("Failed to load tags:\n{}", err),
+                    )),
+                ]);
+                Vec::new()
+            }
+        };
+
         (
             MainScreen {
                 query: Query::empty(),
@@ -103,10 +122,9 @@ impl MainScreen {
                 scroll: 0.0,
                 results_container_bounds: None,
                 hovered_path: None,
-                // TODO error handling
-                tags_cache: tag::get_all_tag_ids() .unwrap(),
+                tags_cache,
             },
-            MainScreen::fetch_results_bounds() .map(|m| m.into()),
+            command,
         )
     }
 
@@ -202,7 +220,13 @@ impl MainScreen {
                 let removed: bool = self.query.remove_tag(&tag_id);
                 // If not removed, then add it
                 if !removed {
-                    let tag: Tag = tag_id.load() .unwrap();
+                    let tag: Tag = match tag_id.load() {
+                        Ok(t) => t,
+                        Err(err) => return send_message!(error_message(
+                            format!("Failed to load tag {}:\n{}", tag_id, err)
+                        )),
+                    };
+
                     if self.query.add_tag(tag) {
                         self.query.constraints.clear();
                         self.update_search();
@@ -217,13 +241,30 @@ impl MainScreen {
 
 
             Message::OpenPath(path) => {
-                println!("Opening path {}", path.display());
+                let Err(err) = opener::open(&path) else {
+                    return Command::none();
+                };
 
-                if let Err(err) = opener::open(&path) {
-                    println!("Failed to open {}:\n\t{:?}\n\tRevealing in file explorer instead", &path.display(), err);
-                    opener::reveal(&path) .unwrap();
+                let pathstr: String = path.to_pretty_string();
+                let mut command = send_message!(AppMessage::Notify(
+                    Notification::new(
+                        notification::Type::Info,
+                        format!("Failed to open {}:\n{}\nRevealing in file explorer instead", pathstr, err)
+                    )
+                    .with_lifetime(Duration::from_secs(10))
+                ));
+
+                if let Err(err) = opener::reveal(&path) {
+                    let pathstr: String = path.to_pretty_string();
+                    command = Command::batch(vec![
+                        command,
+                        send_message!(error_message(
+                            format!("Failed to reveal {}:\n{}", pathstr, err)
+                        )),
+                    ]);
                 }
 
+                return command;
             }
 
             Message::EntryHovered(path) => {
@@ -362,7 +403,6 @@ impl MainScreen {
 
         // Build
         if let Err(err) = builder.build_for_path(path) {
-            println!("TODO error handling for thumbnail building");
             println!("Failed to build thumbnail for {}: {}", path.display(), err);
         }
     }
