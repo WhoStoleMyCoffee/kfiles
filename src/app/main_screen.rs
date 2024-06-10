@@ -404,6 +404,7 @@ impl MainScreen {
     }
 
     /// Get the range of items which are visible in the main view
+    /// come to think of it, there was probably a better way to do all this culling thing
     fn get_visible_items_range(&self) -> Option<std::ops::Range<usize>> {
         let Rectangle { width, height, .. } = self.results_container_bounds?;
 
@@ -411,7 +412,7 @@ impl MainScreen {
         //          (        Which row do we start at?       ) * items per row
         let start = (self.scroll / TOTAL_ITEM_SIZE.1) as usize * items_per_row;
         let end = start
-        //  + (           How many rows does the view span?                    ) * items per row
+        //  + (    How many rows does the view span?    ) * items per row
             + ((height / TOTAL_ITEM_SIZE.1) as usize + 2) * items_per_row;
 
         Some(start..end)

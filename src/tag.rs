@@ -6,17 +6,14 @@ use std::path::{Path, PathBuf};
 
 use convert_case::{Case, Casing};
 use thiserror::Error;
-use toml;
-
-use serde::{Deserialize, Serialize};
+use nanoserde::{DeJson, DeJsonErr, SerJson};
 
 use crate::app::main_screen::Item;
 use crate::{search, ToPrettyString};
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Tag {
-    #[serde(skip)]
     pub id: TagID,
 
     pub entries: Entries,
@@ -145,13 +142,12 @@ impl Tag {
             return Err(SaveError::NoID);
         }
 
-        let string = toml::to_string_pretty(self)?;
-
         if !path.exists() {
             let dir = path.parent().expect("could not get parent dir");
             create_dir_all(dir)?;
         }
 
+        let string = SerTag::from(self).serialize_json();
         File::create(path)?.write_all(string.as_bytes())?;
         Ok(())
     }
@@ -189,10 +185,10 @@ impl Tag {
     {
         let mut contents = String::new();
         File::open(&path)?.read_to_string(&mut contents)?;
-        let mut tag = toml::from_str::<Tag>(&contents)?;
+        let mut tag: Tag = SerTag::deserialize_json(&contents)?
+            .into();
 
-        let file_name = path
-            .as_ref()
+        let file_name: &str = path.as_ref()
             .file_stem()
             .and_then(|osstr| osstr.to_str())
             .ok_or(LoadError::InvalidName)?;
@@ -252,7 +248,7 @@ impl PartialEq<Tag> for TagID {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Hash)]
 pub struct TagID(String);
 
 impl TagID {
@@ -288,7 +284,7 @@ impl TagID {
     }
 
     pub fn get_path(&self) -> PathBuf {
-        get_save_dir().join(format!("{}.toml", self.0))
+        get_save_dir().join(format!("{}.json", self.0))
     }
 
     pub fn exists(&self) -> bool {
@@ -354,7 +350,7 @@ impl Display for TagID {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 // TODO hashset?
 pub struct Entries(Vec<PathBuf>);
 
@@ -546,15 +542,13 @@ pub enum LoadError {
     #[error(transparent)]
     IO(#[from] io::Error),
     #[error("failed to parse: {0}")]
-    ParseError(#[from] toml::de::Error),
+    ParseError(#[from] DeJsonErr),
 }
 
 #[derive(Debug, Error)]
 pub enum SaveError {
     #[error("no ID set")]
     NoID,
-    #[error("failed to parse: {0}")]
-    ParseError(#[from] toml::ser::Error),
     #[error(transparent)]
     IO(#[from] io::Error),
 }
@@ -614,6 +608,44 @@ pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
         .iter()
         .filter_map(|pb| TagID::try_from(pb.as_path()).ok())
         .collect())
+}
+
+
+
+
+#[derive(Debug, Clone, SerJson, DeJson)]
+struct SerTag {
+    entries: Vec<String>,
+    subtags: Vec<String>,
+}
+
+impl From<&Tag> for SerTag {
+    fn from(value: &Tag) -> Self {
+        SerTag {
+            entries: value.entries.as_ref().iter()
+                .filter_map(|pb| pb.to_str())
+                .map(|str| str.to_string())
+                .collect(),
+            subtags: value.subtags.iter()
+                .map(|id| id.0.clone())
+                .collect(),
+        }
+    }
+}
+
+impl From<SerTag> for Tag {
+    fn from(value: SerTag) -> Self {
+        Tag {
+            id: TagID::new("uninitialized-tag"),
+            entries: value.entries.into_iter()
+                .map(|str| PathBuf::from(str))
+                .collect::<Vec<PathBuf>>()
+                .into(),
+            subtags: value.subtags.into_iter()
+                .map(|str| TagID(str))
+                .collect(),
+        }
+    }
 }
 
 
