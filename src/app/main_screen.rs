@@ -16,7 +16,8 @@ use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::Message as AppMessage;
 use crate::{send_message, ToPrettyString};
 
-use super::notification::{self, error_message, Notification};
+use super::notification::error_message;
+use super::TagExplorer;
 
 
 // TODO make these configurable
@@ -211,7 +212,7 @@ impl MainScreen {
                 let has_changed = self.query.parse_query(&new_text);
                 self.query_text = new_text;
                 if has_changed {
-                    self.update_search();
+                    self.reset_search();
                 }
             }
 
@@ -228,39 +229,19 @@ impl MainScreen {
 
                     if self.query.add_tag(tag) {
                         self.query.constraints.clear();
-                        self.update_search();
+                        self.reset_search();
                     }
                 }
 
                 if clear_input {
                     self.query_text.clear();
                 }
-                self.update_search();
+                self.reset_search();
             }
 
 
             Message::OpenPath(path) => {
-                let Err(err) = opener::open(&path) else {
-                    return Command::none();
-                };
-
-                let pathstr: String = path.to_pretty_string();
-                let mut command = send_message!(AppMessage::Notify(Notification::new(
-                    notification::Type::Info,
-                    format!("Failed to open \"{}\":\n{}\nRevealing in file explorer instead", pathstr, err)
-                )));
-
-                if let Err(err) = opener::reveal(&path) {
-                    let pathstr: String = path.to_pretty_string();
-                    command = Command::batch(vec![
-                        command,
-                        send_message!(error_message(
-                            format!("Failed to reveal {}:\n{}", pathstr, err)
-                        )),
-                    ]);
-                }
-
-                return command;
+                return TagExplorer::open_path(&path);
             }
 
             Message::EntryHovered(path) => {
@@ -418,7 +399,7 @@ impl MainScreen {
         Some(start..end)
     }
 
-    pub fn update_search(&mut self) {
+    pub fn reset_search(&mut self) {
         self.items.clear(); // TODO filter instead?
         self.receiver = Some(self.query.search());
         self.scroll = 0.0;
@@ -427,7 +408,7 @@ impl MainScreen {
 
     pub fn handle_event(&mut self, event: Event, status: Status) -> Command<AppMessage> {
         use iced::window::Event as WindowEvent;
-        use iced::keyboard::{Event as KeyboardEvent, Key};
+        use iced::keyboard::{Event as KeyboardEvent, Key, key::Named};
 
         match event {
             // UNHANDLED KEY PRESS
@@ -438,9 +419,17 @@ impl MainScreen {
                     return Command::none();
                 }
 
+                // Match key here
                 match key.as_ref() {
                     Key::Character(ch) if FOCUS_QUERY_KEYS.contains(&ch) => {
                         MainScreen::focus_query().map(|m| m.into())
+                    }
+
+                    Key::Named(Named::Enter) => {
+                        if let Some(Item(_, path)) = self.items.first() {
+                            return TagExplorer::open_path(path)
+                        }
+                        Command::none()
                     }
 
                     _ => Command::none(),

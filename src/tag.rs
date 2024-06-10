@@ -663,11 +663,11 @@ impl From<SerTag> for Tag {
         Tag {
             id: TagID::new("uninitialized-tag"),
             entries: value.entries.into_iter()
-                .map(|str| PathBuf::from(str))
+                .map(PathBuf::from)
                 .collect::<Vec<PathBuf>>()
                 .into(),
             subtags: value.subtags.into_iter()
-                .map(|str| TagID(str))
+                .map(TagID)
                 .collect(),
         }
     }

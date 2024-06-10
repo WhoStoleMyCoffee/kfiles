@@ -21,7 +21,6 @@ use crate::strmatch::{self, StringMatcher};
 
 
 /// [`TextInput`] extension widget that can fuzzy search from a list of options
-/// TODO make it so we can configure what matching algorithm to use
 /// ```
 /// let value = "Some text";
 /// let fuzzy_input = FuzzyInput::new(
@@ -147,35 +146,38 @@ where
             return None;
         }
 
-        if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = &event {
-            match key {
-                Key::Named(key::Named::ArrowUp) if modifiers.is_empty() => {
-                    self.move_selection(-1, state, Some(shell));
-                    return Some(event::Status::Captured);
-                }
+        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = &event else {
+            return None;
+        };
 
-                Key::Named(key::Named::ArrowDown) if modifiers.is_empty() => {
-                    self.move_selection(1, state, Some(shell));
-                    return Some(event::Status::Captured);
-                }
-
-                Key::Named(key::Named::Enter) if modifiers.is_empty() => {
-                    let index: usize = state.hovered_option?;
-
-                    let options = match &state.filtered_options {
-                        Some(options) => options,
-                        None => self.options,
-                    };
-
-                    shell.publish( (self.on_selected)( options.get(index)? .clone() ) );
-                    return Some(event::Status::Captured);
-                }
-
-                _ => {}
+        match key {
+            Key::Named(key::Named::ArrowUp) if modifiers.is_empty() => {
+                self.move_selection(-1, state, Some(shell));
+                Some(event::Status::Captured)
             }
-        }
 
-        None
+            Key::Named(key::Named::ArrowDown) if modifiers.is_empty() => {
+                self.move_selection(1, state, Some(shell));
+                Some(event::Status::Captured)
+            }
+
+            Key::Named(key::Named::Enter) if modifiers.is_empty() => {
+                let options = match &state.filtered_options {
+                    Some(options) => options,
+                    None => self.options,
+                };
+
+                let Some(selected_option) = options.get(state.hovered_option?) else {
+                    state.hovered_option = None;
+                    return Some(event::Status::Ignored);
+                };
+
+                shell.publish( (self.on_selected)(selected_option.clone()) );
+                Some(event::Status::Captured)
+            }
+
+            _ => None
+        }
     }
 
     /// Selects the `current + relative`th item, and publishes a message if `shell` is set
@@ -296,9 +298,11 @@ where
         clipboard: &mut dyn advanced::Clipboard,
         shell: &mut advanced::Shell<'_, Message>,
         viewport: &iced::Rectangle,
-    ) -> advanced::graphics::core::event::Status {
-
-        self.handle_event(tree, &event, layout, cursor, renderer, clipboard, shell, viewport);
+    ) -> event::Status
+    {
+        if let Some(status) = self.handle_event(tree, &event, layout, cursor, renderer, clipboard, shell, viewport) {
+            return status;
+        }
 
         let state: &mut FuzzyState<T> = tree.state.downcast_mut();
         if state.is_expanded {

@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Duration;
 
 use iced::event::Status;
@@ -10,12 +11,14 @@ pub mod main_screen;
 pub mod tag_list_screen;
 pub mod tag_edit_screen;
 
-use main_screen::MainScreen;
 use crate::tag::Tag;
 use crate::widget::notification_card::NotificationCard;
-use self::notification::Notification;
-use self::tag_edit_screen::TagEditScreen;
-use self::tag_list_screen::TagListScreen;
+use crate::ToPrettyString;
+
+use notification::Notification;
+use main_screen::MainScreen;
+use tag_edit_screen::TagEditScreen;
+use tag_list_screen::TagListScreen;
 
 const UPDATE_RATE_MS: u64 = 100;
 
@@ -216,6 +219,30 @@ impl TagExplorer {
     #[inline]
     fn update_notifications(&mut self) {
         self.notifications.retain(|n| !n.is_expired());
+    }
+
+    pub fn open_path(path: &Path) -> Command<Message> {
+        let Err(err) = opener::open(path) else {
+            return Command::none();
+        };
+
+        let pathstr: String = path.to_pretty_string();
+        let mut command = send_message!(Message::Notify(Notification::new(
+            notification::Type::Info,
+            format!("Failed to open \"{}\":\n{}\nRevealing in file explorer instead", pathstr, err)
+        )));
+
+        if let Err(err) = opener::reveal(path) {
+            let pathstr: String = path.to_pretty_string();
+            command = Command::batch(vec![
+                command,
+                send_message!(notification::error_message(
+                    format!("Failed to reveal {}:\n{}", pathstr, err)
+                )),
+            ]);
+        }
+
+        command
     }
 }
 

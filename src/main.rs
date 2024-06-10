@@ -56,7 +56,7 @@ trait ToPrettyString {
     fn to_pretty_string(&self) -> String;
 }
 
-impl ToPrettyString for Path {
+impl ToPrettyString for &Path {
     fn to_pretty_string(&self) -> String {
         self.display()
             .to_string()

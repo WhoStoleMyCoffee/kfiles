@@ -437,19 +437,19 @@ impl TagEditScreen {
         use tag::AddEntryError;
 
         match self.tag.add_entry(&path) {
-            Ok(()) => return self.save(),
+            Ok(()) => self.save(),
             Err(AddEntryError::AlreadyContained) => {
                 let pathstr: String = path.to_pretty_string();
-                return send_message!(AppMessage::Notify(Notification::new(
+                send_message!(AppMessage::Notify(Notification::new(
                     notification::Type::Info,
                     format!("Entry \"{}\" is already contained", pathstr)
-                )));
+                )))
             }
             Err(err) => {
                 let pathstr: String = path.to_pretty_string();
-                return send_message!(error_message(
+                send_message!(error_message(
                     format!("Failed to add entry \"{}\":\n{}", pathstr, err)
-                ));
+                ))
             }
         }
     }
