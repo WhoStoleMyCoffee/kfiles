@@ -132,8 +132,13 @@ impl TagEditScreen {
                     return Command::none();
                 };
 
-                self.tag.entries = Entries::from_string_list(&content.text());
-                return self.save();
+                let entries = &mut self.tag.entries;
+                *entries = Entries::from_string_list(&content.text());
+
+                return Command::batch(vec![
+                    self.filter_duplicate_entries(),
+                    self.save(),
+                ]);
             }
 
             Message::CancelEntriesEdit => {
@@ -141,29 +146,10 @@ impl TagEditScreen {
             }
 
             Message::AddFile => {
-                use tag::AddEntryError;
-
                 let Some(pick) = FileDialog::new().pick_file() else {
                     return Command::none();
                 };
-
-                match self.tag.add_entry(&pick) {
-                    Ok(()) => return self.save(),
-                    Err(AddEntryError::AlreadyContained) => {
-                        let pathstr: String = pick.to_pretty_string();
-                        return send_message!(AppMessage::Notify(Notification::new(
-                            notification::Type::Warning,
-                            format!("Entry \"{}\" is already contained", pathstr)
-                        )));
-                    }
-                    Err(err) => {
-                        let pathstr: String = pick.to_pretty_string();
-                        return send_message!(error_message(
-                            format!("Failed to add entry \"{}\":\n{}", pathstr, err)
-                        ));
-                    }
-                }
-
+                return self.add_entry(pick);
             }
 
             Message::AddFolder => {
@@ -171,14 +157,7 @@ impl TagEditScreen {
                     return Command::none();
                 };
 
-                if let Err(err) = self.tag.add_entry(&pick) {
-                    let pathstr: String = pick.to_pretty_string();
-                    return send_message!(error_message(
-                        format!("Failed to add entry {}:\n{}", pathstr, err)
-                    ));
-                } else {
-                    return self.save();
-                }
+                return self.add_entry(pick);
             }
 
             Message::StartRename => {
@@ -443,7 +422,7 @@ impl TagEditScreen {
         Command::none()
     }
 
-    /// Save the current tag to disk and notify any errors via [`Command`]
+    /// Save the current tag to disk and notify any errors via a [`Command`]
     fn save(&self) -> Command<AppMessage> {
         let Err(err) = self.tag.save() else {
             return Command::none();
@@ -451,6 +430,41 @@ impl TagEditScreen {
         send_message!(error_message(
             format!("Failed to save tag:\n{}", err)
         ))
+    }
+
+    /// Add the entry `path` to the current tag's [`Entries`] and notify any errors via a [`Command`]
+    fn add_entry(&mut self, path: PathBuf) -> Command<AppMessage> {
+        use tag::AddEntryError;
+
+        match self.tag.add_entry(&path) {
+            Ok(()) => return self.save(),
+            Err(AddEntryError::AlreadyContained) => {
+                let pathstr: String = path.to_pretty_string();
+                return send_message!(AppMessage::Notify(Notification::new(
+                    notification::Type::Info,
+                    format!("Entry \"{}\" is already contained", pathstr)
+                )));
+            }
+            Err(err) => {
+                let pathstr: String = path.to_pretty_string();
+                return send_message!(error_message(
+                    format!("Failed to add entry \"{}\":\n{}", pathstr, err)
+                ));
+            }
+        }
+    }
+
+    fn filter_duplicate_entries(&mut self) -> Command<AppMessage> {
+        Command::batch(
+            self.tag.entries.filter_duplicates()
+                .into_iter()
+                .map(|pb| 
+                    send_message!(AppMessage::Notify(Notification::new(
+                        notification::Type::Info,
+                        format!("Entry \"{}\" is already contained", pb.to_pretty_string())
+                    ))),
+                )
+        )
     }
 
 }

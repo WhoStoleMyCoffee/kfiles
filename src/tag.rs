@@ -56,9 +56,9 @@ impl Tag {
     /// Add an entry to this [`Tag`]
     #[inline]
     pub fn add_entry<P>(&mut self, path: P) -> Result<(), AddEntryError>
-    where P: AsRef<Path>
+        where P: Into<PathBuf>
     {
-        self.entries.push(path.as_ref())
+        self.entries.push(path.into())
     }
 
     /// Remove `path` from this tag's entries
@@ -209,6 +209,7 @@ impl Tag {
         &self.subtags
     }
 
+    /// Returns whether the subtag was successfully added
     pub fn add_subtag(&mut self, tag_id: &TagID) -> bool {
         if self.subtags.contains(tag_id) {
             return false;
@@ -217,6 +218,7 @@ impl Tag {
         true
     }
 
+    /// Returns whether the subtag was successfully removed
     pub fn remove_subtag(&mut self, tag_id: &TagID) -> bool {
         if let Some(idx) = self.subtags.iter().position(|st| st == tag_id) {
             self.subtags.remove(idx);
@@ -360,21 +362,17 @@ impl Entries {
         Entries::default()
     }
 
-    pub fn push(&mut self, path: &Path) -> Result<(), AddEntryError>
-    {
+    pub fn push(&mut self, path: PathBuf) -> Result<(), AddEntryError> {
         if !path.exists() {
             return Err(AddEntryError::NonexistentPath);
         }
 
-        if self.contains(path) {
+        if self.contains(&path) {
             return Err(AddEntryError::AlreadyContained);
         }
 
-        self.0.retain(|pb|
-            !pb.starts_with(path)
-        );
-        self.0.push(path.to_path_buf());
-
+        self.0.retain(|pb| !pb.starts_with(&path));
+        self.0.push(path);
         Ok(())
     }
 
@@ -439,6 +437,7 @@ impl Entries {
         Entries(c)
     }
 
+    // TODO un-generic this mf
     pub fn contains<P>(&self, path: P) -> bool
     where
         P: AsRef<Path>,
@@ -454,6 +453,32 @@ impl Entries {
     #[inline]
     pub fn iter(self) -> Box<dyn Iterator<Item = PathBuf>> {
         search::iter_entries(self)
+    }
+
+    /// Remove and return any duplicate entries
+    #[must_use]
+    pub fn filter_duplicates(&mut self) -> Vec<PathBuf> {
+        let entries: Vec<PathBuf> = self.0.drain(..) .collect();
+        let mut duplicates: Vec<PathBuf> = Vec::new();
+
+        for path in entries {
+            if self.contains(&path) {
+                duplicates.push(path);
+                continue;
+            }
+
+            self.0.retain(|pb| {
+                if pb.starts_with(&path) {
+                    duplicates.push(pb.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            self.0.push(path);
+        }
+
+        duplicates
     }
 
     pub fn to_string_list(&self) -> String {
@@ -662,47 +687,101 @@ mod tests {
 
     #[test]
     fn serde() {
-        let tag_id = TagID::from("test");
+        let tag_id = TagID::from("test-serde");
         let mut tag = Tag::create(tag_id.clone());
         tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
         tag.add_entry("C:/Users/ddxte/Documents/").unwrap();
 
-        println!("Saving...");
         tag.save().unwrap();
-
-        println!("Loading...");
         let tag2 = Tag::load(&tag_id).unwrap();
 
         assert_eq!(tag.entries.as_ref(), tag2.entries.as_ref());
     }
 
     #[test]
-    fn add_and_remove() {
-        let tag_id = TagID::from("test");
+    fn entries_add_and_remove() {
+        let tag_id = TagID::from("test-add-and-remove");
         let mut tag = Tag::create(tag_id);
         tag.add_entry("C:/Users/ddxte/Documents/").unwrap();
+        tag.add_entry("C:/Users/ddxte/Videos/").unwrap();
+
+        assert_eq!(tag.entries.as_ref(), &[
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Videos/"),
+        ]);
 
         assert!(tag.contains("C:/Users/ddxte/Documents/"));
         assert!(tag.contains("C:/Users/ddxte/Documents/Projects/music_tools.exe"));
+        assert!(tag.contains("C:/Users/ddxte/Videos/Captures/"));
 
-        // Adding already tagged dir
+        // Adding already tagged dirs
+        let add_err = tag.add_entry("C:/Users/ddxte/Documents/");
+        match add_err {
+            Err(AddEntryError::AlreadyContained) => {},
+            other => panic!("Expected add_err to be Err(AddEntryError::AlreadyContained). Found {:?}", other),
+        }
+
         let add_err = tag.add_entry("C:/Users/ddxte/Documents/Projects/music_tools.exe");
-        assert!(matches!(add_err, Err(AddEntryError::AlreadyContained)));
-        assert_eq!(tag.entries.len(), 1);
+        match add_err {
+            Err(AddEntryError::AlreadyContained) => {},
+            other => panic!("Expected add_err to be Err(AddEntryError::AlreadyContained). Found {:?}", other),
+        }
 
-        tag.remove_entry(&Path::new("C:/Users/ddxte/Documents/"));
-        assert!(tag.entries.is_empty());
+        // Entries haven't changed
+        assert_eq!(tag.entries.as_ref(), &[
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Videos/"),
+        ]);
+
+        tag.add_entry(PathBuf::from("C:/Users/ddxte/")) .unwrap();
+        assert_eq!(tag.entries.as_ref(), &[
+            PathBuf::from("C:/Users/ddxte/"),
+        ]);
+
+        assert!( !tag.remove_entry(&Path::new("C:/Users/ddxte/Documents/")) );
+        assert!( tag.remove_entry(&Path::new("C:/Users/ddxte/")) );
+        assert!( tag.entries.is_empty() );
     }
 
     #[test]
-    fn subtags_basic() {
-        let mut tag = Tag::create("test");
+    fn entries_filter_duplicates() {
+        let mut e = Entries::from(vec![
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Pictures/bread.JPG"),
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+        ]);
+
+        let duplicates = e.filter_duplicates();
+        assert_eq!(duplicates, &[
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+        ]);
+        assert_eq!(e.as_ref(), &[
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Pictures/bread.JPG"),
+        ]);
+
+        e.0.push( PathBuf::from("C:/Users/ddxte/") );
+        let duplicates = e.filter_duplicates();
+        assert_eq!(duplicates, &[
+            PathBuf::from("C:/Users/ddxte/Documents/"),
+            PathBuf::from("C:/Users/ddxte/Pictures/bread.JPG"),
+        ]);
+        assert_eq!(e.as_ref(), &[
+            PathBuf::from("C:/Users/ddxte/"),
+        ]);
+
+    }
+
+    #[test]
+    fn subtags_dirs() {
+        let mut tag = Tag::create("test-subtags-dirs");
         tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/")
             .unwrap();
-        tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
+        tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG")
+            .unwrap();
 
-        println!("Creating subtag");
-        let mut tag2 = Tag::create("bup").as_subtag_of(&mut tag);
+        // Creating subtag
+        let mut tag2 = Tag::create("test-subtags-dirs-2").as_subtag_of(&mut tag);
         tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/")
             .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/Projects/")
@@ -710,11 +789,11 @@ mod tests {
 
         assert!(tag2.is_subtag_of(&tag));
 
-        println!("Saving...");
+        // Save so we can get entries
         tag.save().unwrap();
         tag2.save().unwrap();
 
-        println!("Getting merged entries");
+        // Getting merged entries
         let all_entries = tag.get_all_entries();
         assert_eq!(
             *all_entries,
@@ -724,37 +803,25 @@ mod tests {
                 PathBuf::from("C:/Users/ddxte/Documents/Projects/"),
             ]
         );
-    }
 
-    #[test]
-    fn subtags_dirs() {
-        let mut tag = Tag::create("test");
-        tag.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/")
-            .unwrap();
-        tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG").unwrap();
-
-        let mut tag2 = Tag::create("bup").as_subtag_of(&mut tag);
-        tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/")
-            .unwrap();
-        tag2.add_entry("C:/Users/ddxte/Documents/godot/").unwrap();
-
-        println!("Saving...");
-        tag.save().unwrap();
-        tag2.save().unwrap();
-
-        println!("Getting paths...");
-        let tag_paths: Vec<PathBuf> = tag.get_all_entries()
-            .iter()
-            .collect();
-
-        println!("Checking for duplicates");
+        // Checking for duplicates
         let mut uniq = HashSet::new();
-        let is_all_unique = tag_paths.into_iter().all(move |p| uniq.insert(p));
-        assert!(is_all_unique);
+        for pb in all_entries.into_iter() {
+            assert!(uniq.insert(pb.clone()), "Path {} was a duplicate", pb.display());
+        }
+
+        assert!( tag.remove_subtag(&tag2.id) );
+        assert!( tag.get_subtags().is_empty() );
     }
 
     #[test]
-    fn tag_id() {
+    #[should_panic = "not yet implemented"]
+    fn cyclic_subtags() {
+        todo!()
+    }
+
+    #[test]
+    fn tag_id_parse() {
         let id_string = "test tagYeah";
         let id = TagID::parse(id_string);
         assert_eq!("test-tag-yeah", id.as_ref()); // Conversion
@@ -775,29 +842,6 @@ mod tests {
 
         assert_eq!(id.as_ref(), "new-tag-3");
     }
-    
-    #[test]
-    fn entries() {
-        let mut e = Entries::new();
-        e.push(Path::new("C:/Users/ddxte/Documents/")) .unwrap();
-        e.push(Path::new("C:/Users/ddxte/Videos/")) .unwrap();
-
-        assert_eq!(e.as_ref(), &[
-            PathBuf::from("C:/Users/ddxte/Documents/"),
-            PathBuf::from("C:/Users/ddxte/Videos/"),
-        ]);
-
-        assert!(matches!(
-            e.push(Path::new("C:/Users/ddxte/Videos/Voicelines")),
-            Err(AddEntryError::AlreadyContained),
-        ));
-
-        e.push(Path::new("C:/Users/ddxte/")) .unwrap();
-        assert_eq!(e.as_ref(), &[
-            PathBuf::from("C:/Users/ddxte/"),
-        ]);
-    }
-
 
     #[test]
     fn entries_operations() {
