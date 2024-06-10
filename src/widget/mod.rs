@@ -26,7 +26,7 @@ macro_rules! icon {
             iced_aw::core::icons::bootstrap::icon_to_string($i)
         )
         .font(iced_aw::core::icons::BOOTSTRAP_FONT)
-        .style(iced::Color::new(0.8, 0.84, 0.95, 1.0))
+        .style($crate::app::theme::LIGHT_TEXT_COLOR)
     };
 
     ($i:expr, $col:expr) => {
@@ -48,12 +48,12 @@ macro_rules! icon {
 macro_rules! simple_button {
     (icon = $icon:expr) => {
         iced::widget::button(icon!($icon, light))
-            .style( iced::theme::Button::custom($crate::app::theme::button::Simple) )
+            .style($crate::app::theme::Simple)
     };
 
     ($inner:expr) => {
         iced::widget::button($inner)
-            .style( iced::theme::Button::custom($crate::app::theme::button::Simple) )
+            .style($crate::app::theme::Simple)
     };
 
     ($inner:expr, $text:expr) => {
@@ -61,7 +61,7 @@ macro_rules! simple_button {
             $inner,
             iced::widget::text($text) .style(iced::Color::new(0.8, 0.84, 0.95, 1.0)),
         ])
-            .style( iced::theme::Button::custom($crate::app::theme::button::Simple) )
+        .style($crate::app::theme::Simple)
     };
 }
 

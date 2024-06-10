@@ -60,6 +60,7 @@ where
     on_selected: Box<dyn Fn(T) -> Message + 'a>,
     on_hovered: Option<Box<dyn Fn(T) -> Message + 'a>>,
     query: String,
+    overlay_style: <Theme as menu::StyleSheet>::Style,
 }
 
 
@@ -88,6 +89,7 @@ where
             on_selected: Box::new(on_selected),
             on_hovered: None,
             query: text.to_string(),
+            overlay_style: <Theme as menu::StyleSheet>::Style::default(),
         }
     }
 
@@ -104,6 +106,14 @@ where
         F: Fn(T) -> Message + 'a
     {
         self.on_hovered = Some(Box::new(f));
+        self
+    }
+
+    pub fn style(
+        mut self,
+        style: impl Into<<Theme as menu::StyleSheet>::Style>,
+    ) -> Self {
+        self.overlay_style = style.into();
         self
     }
 
@@ -214,9 +224,10 @@ where
     T: ToString + PartialEq + Clone + 'static,
     Message: 'a + Clone,
     Theme: text_input::StyleSheet
-        + menu::StyleSheet
+        + menu::StyleSheet<Style = iced::theme::Menu>
         + scrollable::StyleSheet
         + container::StyleSheet,
+    // <Theme as iced::overlay::menu::StyleSheet>::Style: From<iced::theme::Menu>,
     Renderer: 'a + advanced::text::Renderer,
 {
     fn size(&self) -> Size<Length> {
@@ -359,7 +370,8 @@ where
         layout: Layout<'_>,
         _renderer: &Renderer,
         translation: iced::Vector,
-    ) -> Option<advanced::overlay::Element<'b, Message, Theme, Renderer>> {
+    ) -> Option<advanced::overlay::Element<'b, Message, Theme, Renderer>>
+    {
         let state: &mut FuzzyState<T> = tree.state.downcast_mut();
 
         if !state.is_expanded {
@@ -370,7 +382,7 @@ where
             Some(options) => options,
             None => self.options,
         };
-        
+
         let bounds = layout.bounds();
         let menu = menu::Menu::new(
             &mut state.menu,
@@ -379,7 +391,8 @@ where
             &self.on_selected,
             self.on_hovered.as_deref(),
         )
-        .width(bounds.width);
+        .width(bounds.width)
+        .style(self.overlay_style.clone());
 
         Some(menu.overlay( layout.position() + translation, bounds.height ))
     }
@@ -393,7 +406,7 @@ where
     T: ToString + PartialEq + Clone + 'static,
     Message: 'a + Clone,
     Theme: 'a + text_input::StyleSheet
-        + menu::StyleSheet
+        + menu::StyleSheet<Style = iced::theme::Menu>
         + scrollable::StyleSheet
         + container::StyleSheet,
     Renderer: 'a + advanced::text::Renderer,

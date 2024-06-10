@@ -13,7 +13,7 @@ use crate::search::Query;
 use crate::tag::{self, Tag, TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
-use crate::app::Message as AppMessage;
+use crate::app::{theme, Message as AppMessage};
 use crate::{send_message, ToPrettyString};
 
 use super::notification::error_message;
@@ -316,7 +316,8 @@ impl MainScreen {
                 text_input
                     .id(QUERY_INPUT_ID())
                     .on_input(|text| Message::QueryTextChanged(text).into())
-            }),
+            })
+            .style(theme::Simple),
         ]
     }
 

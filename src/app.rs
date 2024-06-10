@@ -94,7 +94,7 @@ impl Application for TagExplorer {
     }
 
     fn title(&self) -> String {
-        "Tag Explorer".to_string()
+        "KFiles".to_string()
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
@@ -317,48 +317,90 @@ impl Screen {
 
 
 pub mod theme {
-    use iced::Color;
+    use iced::{theme, Border, Color, Vector};
+    use iced::widget::button;
+    use iced::overlay::menu;
 
+    pub const LIGHT_TEXT_COLOR: Color = Color { r: 0.8, g: 0.84, b: 0.95, a: 1.0 };
     pub const INFO_COLOR: Color = Color { r: 0.2, g: 0.8, b: 1.0, a: 1.0 };
     pub const WARNING_COLOR: Color = Color { r: 0.95, g: 0.9, b: 0.2, a: 1.0 };
     pub const ERROR_COLOR: Color = Color { r: 1.0, g: 0.2, b: 0.2, a: 1.0 };
 
-    pub mod button {
-        use iced::{widget::button, Color, Vector};
+    pub struct Simple;
 
-        pub struct Simple;
+    impl button::StyleSheet for Simple {
+        type Style = iced::Theme;
 
-        impl button::StyleSheet for Simple {
-            type Style = iced::Theme;
-
-            fn active(&self, _style: &Self::Style) -> button::Appearance {
-                button::Appearance {
-                    background: Some(Color::new(0.17, 0.17, 0.24, 1.0).into()),
-                    border: iced::Border::with_radius(4.0),
-                    ..Default::default()
-                }
+        fn active(&self, _style: &Self::Style) -> button::Appearance {
+            button::Appearance {
+                background: Some(Color::new(0.17, 0.17, 0.24, 1.0).into()),
+                border: iced::Border::with_radius(4.0),
+                ..Default::default()
             }
+        }
 
-            fn hovered(&self, style: &Self::Style) -> button::Appearance {
-                let active = self.active(style);
+        fn hovered(&self, style: &Self::Style) -> button::Appearance {
+            let active = self.active(style);
 
-                button::Appearance {
-                    background: Some(Color::new(0.20, 0.20, 0.28, 1.0).into()),
-                    shadow_offset: active.shadow_offset + Vector::new(0.0, 1.0),
-                    ..active
-                }
+            button::Appearance {
+                background: Some(Color::new(0.20, 0.20, 0.28, 1.0).into()),
+                shadow_offset: active.shadow_offset + Vector::new(0.0, 1.0),
+                ..active
             }
+        }
 
-            /// Produces the pressed [`Appearance`] of a button.
-            fn pressed(&self, style: &Self::Style) -> button::Appearance {
-                button::Appearance {
-                    background: Some(Color::new(0.16, 0.15, 0.23, 1.0).into()),
-                    shadow_offset: Vector::default(),
-                    ..self.active(style)
-                }
+        /// Produces the pressed [`Appearance`] of a button.
+        fn pressed(&self, style: &Self::Style) -> button::Appearance {
+            button::Appearance {
+                background: Some(Color::new(0.16, 0.15, 0.23, 1.0).into()),
+                shadow_offset: Vector::default(),
+                ..self.active(style)
             }
         }
     }
+
+    impl From<Simple> for theme::Button {
+        fn from(value: Simple) -> Self {
+            theme::Button::custom(value)
+        }
+    }
+
+
+
+    impl menu::StyleSheet for Simple {
+        type Style = iced::Theme;
+
+        fn appearance(&self, style: &Self::Style) -> menu::Appearance {
+            let palette = style.palette();
+
+            menu::Appearance {
+                text_color: palette.text,
+                background: Color::new(
+                    palette.background.r * 1.19,
+                    palette.background.g * 1.2,
+                    palette.background.b * 1.15,
+                    0.98,
+                ).into(),
+                border: Border::default(),
+                selected_text_color: palette.text,
+                selected_background: Color::new(
+                    palette.background.r * 0.81,
+                    palette.background.g * 0.8,
+                    palette.background.b * 0.85,
+                    1.0,
+                ).into(),
+            }
+        }
+    }
+
+    impl From<Simple> for theme::Menu {
+        fn from(value: Simple) -> Self {
+            use std::rc::Rc;
+            theme::Menu::Custom(Rc::new( value ))
+        }
+    }
+
+
 }
 
 
