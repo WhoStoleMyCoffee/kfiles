@@ -10,7 +10,7 @@ use iced_aw::Wrap;
 use rand::Rng;
 
 use crate::search::Query;
-use crate::tag::{self, Tag, TagID};
+use crate::tag::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{theme, Message as AppMessage};

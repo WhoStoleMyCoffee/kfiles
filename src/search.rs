@@ -6,7 +6,7 @@ use walkdir::{DirEntry, WalkDir};
 
 use crate::app::main_screen::Item;
 use crate::strmatch::Sublime;
-use crate::tag::{ Entries, Tag };
+use crate::tag::{ entries::Entries, Tag };
 
 use self::constraint::{ConstraintList, Score};
 
@@ -517,7 +517,7 @@ mod constraint {
         fn searching() {
             let paths = vec![
                 Path::new("C:/Users/ddxte/Pictures/art stuff/dino_cool.png"),
-                Path::new("C:/Users/ddxte/Pictures/art stuff/tankinsands/dino.ase"),
+                Path::new("C:/Users/ddxte/Documents/Projects/music_tools.exe"),
                 Path::new("C:/Users/ddxte/Pictures/"),
                 Path::new("C:/Users/ddxte/Pictures/rendererwoooow.png"),
                 Path::new("C:/Users/ddxte/Pictures/bread.JPG"),
@@ -538,7 +538,7 @@ mod constraint {
 
             a("--file", &vec![
                 &Path::new("C:/Users/ddxte/Pictures/art stuff/dino_cool.png"),
-                &Path::new("C:/Users/ddxte/Pictures/art stuff/tankinsands/dino.ase"),
+                &Path::new("C:/Users/ddxte/Documents/Projects/music_tools.exe"),
                 &Path::new("C:/Users/ddxte/Pictures/rendererwoooow.png"),
                 &Path::new("C:/Users/ddxte/Pictures/bread.JPG"),
             ]);
@@ -558,8 +558,8 @@ mod constraint {
                 &Path::new("C:/Users/ddxte/Pictures/rendererwoooow.png"),
             ]);
 
-            a("as \"dino\" .ase -f", &vec![
-                &Path::new("C:/Users/ddxte/Pictures/art stuff/tankinsands/dino.ase"),
+            a("dp \"music\" .exe -f", &vec![
+                &Path::new("C:/Users/ddxte/Documents/Projects/music_tools.exe"),
             ]);
 
         }

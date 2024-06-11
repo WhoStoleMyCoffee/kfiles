@@ -13,7 +13,7 @@ use rfd::FileDialog;
 
 use crate::app::notification::{self, error_message, Notification};
 use crate::app::Message as AppMessage;
-use crate::tag::{ self, Entries, Tag, TagID };
+use crate::tag::{ self, entries::Entries, Tag, id::TagID };
 use crate::widget::context_menu::ContextMenu;
 use crate::widget::tag_entry;
 use crate::{ icon, send_message, simple_button, ToPrettyString };

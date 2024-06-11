@@ -9,7 +9,7 @@ use iced_aw::spinner;
 use iced_aw::Bootstrap;
 
 use crate::app::Message as AppMessage;
-use crate::tag::{ self, Tag, TagID };
+use crate::tag::{ self, Tag, id::TagID };
 use crate::widget::tag_entry::TagEntry as TagEntryWidget;
 use crate::{ icon, send_message, simple_button, ToPrettyString };
 
