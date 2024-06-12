@@ -5,14 +5,15 @@ use std::time::Duration;
 use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::widget::text_editor::{Action, Content};
-use iced::widget::{self, button, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, vertical_space, Column, Row};
+use iced::widget::{self, button, checkbox, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, vertical_space, Column, Row};
 use iced::{Alignment, Color, Command, Event, Length};
 
 use iced_aw::{Bootstrap, Spinner};
 use rfd::FileDialog;
 
-use crate::app::notification::{self, error_message, Notification};
+use crate::app::notification::{error_message, info_message, warning_message};
 use crate::app::Message as AppMessage;
+use crate::tag::tag::SelfReferringSubtag;
 use crate::tag::{ self, entries::Entries, Tag, id::TagID };
 use crate::widget::context_menu::ContextMenu;
 use crate::widget::tag_entry;
@@ -52,6 +53,10 @@ pub enum Message {
     Delete,
     /// Just stop loading mate
     StopLoadingMate,
+
+    /// Add or remove a subtag from the current [`Tag`]
+    SubtagToggled(TagID, bool),
+    SubtagPressed(usize),
 }
 
 impl From<Message> for AppMessage {
@@ -69,21 +74,36 @@ pub struct TagEditScreen {
     entries_editing_content: Option<Content>,
     renaming_content: Option<String>,
     is_loading: bool,
+    tags_cache: Vec<TagID>,
 }
 
 impl TagEditScreen {
     pub fn new(tag: Tag) -> (Self, Command<AppMessage>) {
+        let (tags_cache, tag_load_command) = match tag::get_all_tag_ids() {
+            Ok(v) => (v, Command::none()),
+            Err(err) => (
+                Vec::new(),
+                send_message!(error_message(
+                    format!("Failed to load tags:\n{}", err),
+                ))
+            )
+        };
+
         (
             TagEditScreen {
                 tag,
                 entries_editing_content: None,
                 renaming_content: None,
                 is_loading: false,
+                tags_cache,
             },
-            scrollable::snap_to(
-                MAIN_SCROLLABLE_ID(),
-                scrollable::RelativeOffset::START,
-            )
+            Command::batch(vec![
+                tag_load_command,
+                scrollable::snap_to(
+                    MAIN_SCROLLABLE_ID(),
+                    scrollable::RelativeOffset::START,
+                ),
+            ])
         )
     }
 
@@ -187,6 +207,31 @@ impl TagEditScreen {
 
             // Do nothing since we're currently not loading
             Message::StopLoadingMate => {}
+
+            Message::SubtagPressed(index) => {
+                let Some(tag_id) = self.tag.get_subtags().get(index) else {
+                    return Command::none();
+                };
+
+                // TODO handle unwrap
+                let tag = Tag::load(tag_id) .unwrap();
+                return send_message!(AppMessage::SwitchToTagEditScreen(tag))
+            }
+
+            Message::SubtagToggled(tag_id, is_on) => {
+                if is_on {
+                    if let Err(SelfReferringSubtag) = self.tag.add_subtag(&tag_id) {
+                        self.tag.remove_subtag(&tag_id);
+                        return send_message!(error_message(
+                            format!("Cannot to subtag \"{}\" with itself", tag_id)
+                        ));
+                    };
+                } else {
+                    self.tag.remove_subtag(&tag_id);
+                }
+
+                return self.save();
+            }
         }
 
         Command::none()
@@ -275,11 +320,10 @@ impl TagEditScreen {
                     .on_press_maybe((!self.is_loading).then_some(Message::StartRename.into())),
             ],
         }
-
     }
 
-    pub fn view(&self) -> Column<AppMessage> {
-        let col = column![
+    fn view_top(&self) -> Column<AppMessage> {
+        column![
             row![
                 // Back arrow
                 simple_button!(icon = Bootstrap::ArrowLeft)
@@ -303,9 +347,49 @@ impl TagEditScreen {
             ))
             .align_items(Alignment::Center)
             .spacing(16),
+
+            self.view_subtags_row(),
         ]
         .width(Length::Fill)
-        .height(Length::Fill);
+        .height(Length::Fill)
+    }
+
+    fn view_subtags_row(&self) -> Row<AppMessage> {
+        row![
+            // Context menu button
+            ContextMenu::new(
+                button("t") .on_press(AppMessage::Empty),
+                || container(scrollable(column(
+                    self.tags_cache.iter()
+                        .filter(|id| **id != self.tag.id)
+                        .map(|id|
+                             checkbox(id.to_string(), id.is_subtag_of(&self.tag))
+                                .on_toggle(|is_on| Message::SubtagToggled(id.clone(), is_on).into())
+                                .into()
+                        )
+                )))
+                .max_width(240)
+                .max_height(480)
+                .style(container::Appearance::default() .with_background(Color::BLACK))
+                .into()
+            )
+            .left_click_release_activated(),
+        ]
+        // List
+        .extend(self.tag.get_subtags().iter().enumerate()
+            .map(|(i, tag_id)|
+                button(text( tag_id.to_string() ))
+                    .on_press(Message::SubtagPressed(i).into())
+                    .into()
+            )
+        )
+        .align_items(Alignment::Center)
+    }
+
+    pub fn view(&self) -> Column<AppMessage> {
+        use scrollable::{Direction, Properties};
+
+        let col = self.view_top();
 
         if self.is_loading {
             return col.push(
@@ -314,17 +398,17 @@ impl TagEditScreen {
                     .center_x()
             );
         }
-        use scrollable::{Direction, Properties};
 
+        // MAIN
         col.extend(vec![
-                   horizontal_rule(1).into(),
-                   scrollable(self.view_entries())
-                   .id(MAIN_SCROLLABLE_ID())
-                   .direction(Direction::Both {
-                       vertical: Properties::default(),
-                       horizontal: Properties::default() .width(4).scroller_width(4),
-                   })
-                   .into(),
+            horizontal_rule(1).into(),
+            scrollable(self.view_entries())
+            .id(MAIN_SCROLLABLE_ID())
+            .direction(Direction::Both {
+                vertical: Properties::default(),
+                horizontal: Properties::default() .width(4).scroller_width(4),
+            })
+            .into(),
         ])
     }
 
@@ -401,10 +485,9 @@ impl TagEditScreen {
 
                     return Command::batch(vec![
                         // Already exists warning
-                        send_message!(AppMessage::Notify(Notification::new(
-                            notification::Type::Warning,
+                        send_message!(warning_message(
                             format!("Tag \"{}\" already exists", id)
-                        ))),
+                        )),
 
                         // There will be no infinite recursion because we make the tag unique
                         self.rename(new_id.make_unique_in(&tags)) 
@@ -440,10 +523,9 @@ impl TagEditScreen {
             Ok(()) => self.save(),
             Err(AddEntryError::AlreadyContained) => {
                 let pathstr: String = path.to_pretty_string();
-                send_message!(AppMessage::Notify(Notification::new(
-                    notification::Type::Info,
+                send_message!(info_message(
                     format!("Entry \"{}\" is already contained", pathstr)
-                )))
+                ))
             }
             Err(err) => {
                 let pathstr: String = path.to_pretty_string();
@@ -459,10 +541,9 @@ impl TagEditScreen {
             self.tag.entries.filter_duplicates()
                 .into_iter()
                 .map(|pb| 
-                    send_message!(AppMessage::Notify(Notification::new(
-                        notification::Type::Info,
+                    send_message!(info_message(
                         format!("Entry \"{}\" is already contained", pb.to_pretty_string())
-                    ))),
+                    )),
                 )
         )
     }

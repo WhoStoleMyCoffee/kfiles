@@ -51,13 +51,13 @@ impl TagID {
         self.get_path().exists()
     }
 
-    pub fn make_unique(&mut self) {
-        todo!()
-    }
-
     #[inline]
     pub fn load(&self) -> Result<Tag, LoadError> {
         Tag::load(self)
+    }
+
+    pub fn is_subtag_of(&self, tag: &Tag) -> bool {
+        tag.subtags.contains(&self)
     }
 }
 

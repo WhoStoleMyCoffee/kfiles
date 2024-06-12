@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::fs::{create_dir_all, remove_file, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -37,6 +38,15 @@ pub enum SaveError {
     IO(#[from] io::Error),
 }
 
+/// Self-referring subtag error
+#[derive(Debug)]
+pub struct SelfReferringSubtag;
+
+impl Display for SelfReferringSubtag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "self-referring subtag")
+    }
+}
 
 
 
@@ -51,7 +61,7 @@ pub struct Tag {
     /// All tags that are tagged with this tag
     /// E.g. tag `"pictures"` could have `subtags = [ "trip", "cats" ]`
     /// Then, searching for tag `"pictures"` would reveal dirs from all 3 tags
-    subtags: Vec<TagID>,
+    pub(super) subtags: Vec<TagID>,
 }
 
 impl Tag {
@@ -68,9 +78,9 @@ impl Tag {
     }
 
     /// Make this tag a subtag of `parent_tag`
-    pub fn as_subtag_of(self, parent_tag: &mut Tag) -> Self {
-        parent_tag.add_subtag(&self.id);
-        self
+    pub fn as_subtag_of(self, parent_tag: &mut Tag) -> Result<Self, SelfReferringSubtag> {
+        parent_tag.add_subtag(&self.id)?;
+        Ok(self)
     }
 
     #[inline]
@@ -235,20 +245,24 @@ impl Tag {
     }
 
     #[inline]
-    pub fn get_subtags(&mut self) -> &Vec<TagID> {
+    pub fn get_subtags(&self) -> &Vec<TagID> {
         &self.subtags
     }
 
-    /// Returns whether the subtag was successfully added
-    pub fn add_subtag(&mut self, tag_id: &TagID) -> bool {
+    /// Returns whether the subtag was successfully added (i.e. whether it wasn't already contained)
+    pub fn add_subtag(&mut self, tag_id: &TagID) -> Result<bool, SelfReferringSubtag> {
+        if *tag_id == self.id {
+            return Err(SelfReferringSubtag);
+        }
+
         if self.subtags.contains(tag_id) {
-            return false;
+            return Ok(false);
         }
         self.subtags.push(tag_id.clone());
-        true
+        Ok(true)
     }
 
-    /// Returns whether the subtag was successfully removed
+    /// Returns whether the subtag was successfully removed (i.e. whether it was contained)
     pub fn remove_subtag(&mut self, tag_id: &TagID) -> bool {
         if let Some(idx) = self.subtags.iter().position(|st| st == tag_id) {
             self.subtags.remove(idx);
@@ -258,7 +272,7 @@ impl Tag {
     }
 
     pub fn is_subtag_of(&self, other: &Tag) -> bool {
-        other.subtags.contains(&self.id)
+        self.id.is_subtag_of(other)
     }
 }
 

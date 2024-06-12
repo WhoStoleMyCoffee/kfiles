@@ -185,34 +185,6 @@ impl Application for TagExplorer {
 
 impl TagExplorer {
     fn handle_event(&mut self, event: Event, status: Status) -> Command<Message> {
-        #[cfg(debug_assertions)]
-        {
-            match event {
-                Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                    key: iced::keyboard::Key::Named(iced::keyboard::key::Named::F1),
-                    modifiers,
-                    .. 
-                }) if modifiers.is_empty() =>
-                {
-                    return send_message![
-                        Message::Notify(Notification::new(
-                                notification::Type::Info,
-                                "You've got mail!".to_string(),
-                        )),
-                        Message::Notify(Notification::new(
-                                notification::Type::Warning,
-                                "You've got mail!".to_string(),
-                        )),
-                        Message::Notify(Notification::new(
-                                notification::Type::Error,
-                                "You've got mail!".to_string(),
-                        )),
-                    ];
-                },
-                _ => {},
-            }
-        }
-
         self.current_screen.handle_event(event, status)
     }
 
@@ -420,6 +392,28 @@ pub mod notification {
         app::Message::Notify(
             Notification::new(
                 Type::Error,
+                content,
+            )
+        )
+    }
+
+    /// Create a new warning notification wrapped in [`app::Message::Notify`]
+    /// The created [`Notification`] will have the default lifetime
+    pub fn warning_message(content: String) -> app::Message {
+        app::Message::Notify(
+            Notification::new(
+                Type::Warning,
+                content,
+            )
+        )
+    }
+    
+    /// Create a new info notification wrapped in [`app::Message::Notify`]
+    /// The created [`Notification`] will have the default lifetime
+    pub fn info_message(content: String) -> app::Message {
+        app::Message::Notify(
+            Notification::new(
+                Type::Info,
                 content,
             )
         )

@@ -84,7 +84,7 @@ pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
 mod tests {
     use std::{collections::HashSet, path::{Path, PathBuf}};
 
-    use crate::tag::{entries::{AddEntryError, Entries}, id::TagID, tag::Tag};
+    use crate::tag::{entries::{AddEntryError, Entries}, id::TagID, tag::{SelfReferringSubtag, Tag}};
 
     #[test]
     fn serde() {
@@ -182,13 +182,23 @@ mod tests {
             .unwrap();
 
         // Creating subtag
-        let mut tag2 = Tag::create("test-subtags-dirs-2").as_subtag_of(&mut tag);
+        let mut tag2 = Tag::create("test-subtags-dirs-2")
+            .as_subtag_of(&mut tag)
+            .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/")
             .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/Projects/")
             .unwrap();
 
         assert!(tag2.is_subtag_of(&tag));
+
+        {
+            let res = Tag::create(tag.id.clone()) .as_subtag_of(&mut tag);
+            assert!(
+                matches!(res, Err(SelfReferringSubtag)),
+                "Expected Err(SelfReferringSubtag) but found {:?}", res
+                );
+        }
 
         // Save so we can get entries
         tag.save().unwrap();
