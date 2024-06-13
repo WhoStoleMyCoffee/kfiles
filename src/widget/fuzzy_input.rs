@@ -61,6 +61,8 @@ where
     on_hovered: Option<Box<dyn Fn(T) -> Message + 'a>>,
     query: String,
     overlay_style: <Theme as menu::StyleSheet>::Style,
+    /// Whether to show options if text input is empty
+    overlay_on_empty: bool,
 }
 
 
@@ -90,6 +92,7 @@ where
             on_hovered: None,
             query: text.to_string(),
             overlay_style: <Theme as menu::StyleSheet>::Style::default(),
+            overlay_on_empty: true,
         }
     }
 
@@ -117,6 +120,14 @@ where
         self
     }
 
+    /// Hides this [`FuzzyInput`]'s dropdown menu if the query is empty
+    /// The menu is shown by default, so this is a way to disable it until the user types in
+    /// something
+    pub fn hide_on_empty(mut self) -> Self {
+        self.overlay_on_empty = false;
+        self
+    }
+
     /// Filters `self.options` and returns the results
     /// Returns `None` if query is empty
     fn filter(&self, query: &str) -> Option<Vec<T>> {
@@ -124,9 +135,7 @@ where
             return None;
         }
 
-        // let matcher = strmatch::Simple::new(query.to_string()) .case_insensitive();
         let matcher = strmatch::Sublime::default() .with_query(query);
-
         let mut matches: Vec<(&T, isize)> = self.options.iter()
             .filter_map(|opt| {
                 matcher.score( &opt.to_string() ) .map(|score| (opt, score))
@@ -338,9 +347,19 @@ where
         );
 
         let text_state: &widget::text_input::State<Renderer::Paragraph> = textinput_tree.state.downcast_ref();
-        let should_be_expanded = text_state.is_focused();
-        if state.is_expanded != should_be_expanded {
-            state.is_expanded = should_be_expanded;
+        let should_be_expanded: bool = if self.query.is_empty() && !self.overlay_on_empty {
+            false
+        } else {
+            text_state.is_focused()
+        };
+
+        // Change expansion state if needed
+        if state.is_expanded && !should_be_expanded {
+            state.is_expanded = false;
+            state.hovered_option = None;
+            state.filtered_options = None;
+        } else if !state.is_expanded && should_be_expanded {
+            state.is_expanded = true;
             state.hovered_option = Some(0);
         }
 

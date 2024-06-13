@@ -2,9 +2,10 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 use iced::event::Status;
+use iced::keyboard::Key;
 use iced::widget::scrollable::Viewport;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Column, Container};
-use iced::{self, Event, Length, Rectangle};
+use iced::{self, keyboard, Event, Length, Rectangle};
 use iced::Command;
 use iced_aw::Wrap;
 use rand::Rng;
@@ -17,11 +18,15 @@ use crate::app::{theme, Message as AppMessage};
 use crate::{send_message, ToPrettyString};
 
 use super::notification::error_message;
-use super::TagExplorer;
+use super::KFiles;
 
 
 // TODO make these configurable
-const FOCUS_QUERY_KEYS: [&str; 3] = ["s", "/", ";"];
+const FOCUS_QUERY_KEYS: [keyboard::Key<&str>; 3] = [
+    Key::Character("s"),
+    Key::Character("/"),
+    Key::Named(keyboard::key::Named::Tab),
+];
 const MAX_RESULT_COUNT: usize = 256;
 const MAX_RESULTS_PER_TICK: usize = 10;
 
@@ -68,8 +73,8 @@ impl AsRef<PathBuf> for Item {
 }
 
 
-/// See [`Main::try_receive_results`]
-pub enum RecvResultsError {
+/// See [`MainScreen::try_receive_results`]
+pub enum RecvItemsResult {
     /// Results successfully received
     Ok,
     /// Results were already full
@@ -135,7 +140,8 @@ impl MainScreen {
         Command::none()
     }
 
-    pub fn try_receive_results(&mut self) -> Option<RecvResultsError> {
+    /// Returns `None` if there is no search occurring
+    pub fn try_receive_results(&mut self) -> Option<RecvItemsResult> {
         use std::sync::mpsc::TryRecvError;
 
         let rx = self.receiver.as_mut()?;
@@ -143,7 +149,7 @@ impl MainScreen {
         // Already full
         if self.items.len() >= MAX_RESULT_COUNT {
             self.receiver = None;
-            return Some(RecvResultsError::Full);
+            return Some(RecvItemsResult::Full);
         }
 
         // If there is no query, just append normally
@@ -153,10 +159,10 @@ impl MainScreen {
             // Because if it has, we also want to drop the receiver
             let item = match rx.try_recv() {
                 Ok(item) => item,
-                Err(TryRecvError::Empty) => return Some(RecvResultsError::Empty),
+                Err(TryRecvError::Empty) => return Some(RecvItemsResult::Empty),
                 Err(TryRecvError::Disconnected) => {
                     self.receiver = None;
-                    return Some(RecvResultsError::Disconnected);
+                    return Some(RecvItemsResult::Disconnected);
                 }
             };
 
@@ -166,7 +172,7 @@ impl MainScreen {
                 .collect()
             );
 
-            return Some(RecvResultsError::Ok);
+            return Some(RecvItemsResult::Ok);
         }
 
         for _ in 0..MAX_RESULTS_PER_TICK {
@@ -174,10 +180,10 @@ impl MainScreen {
             // same match statement as above...
             let item = match rx.try_recv() {
                 Ok(item) => item,
-                Err(TryRecvError::Empty) => return Some(RecvResultsError::Empty),
+                Err(TryRecvError::Empty) => return Some(RecvItemsResult::Empty),
                 Err(TryRecvError::Disconnected) => {
                     self.receiver = None;
-                    return Some(RecvResultsError::Disconnected);
+                    return Some(RecvItemsResult::Disconnected);
                 }
             };
 
@@ -186,7 +192,7 @@ impl MainScreen {
             self.items.insert(index, item);
         }
 
-        Some(RecvResultsError::Ok)
+        Some(RecvItemsResult::Ok)
     }
 
     pub fn focus_query() -> Command<Message> {
@@ -241,7 +247,7 @@ impl MainScreen {
 
 
             Message::OpenPath(path) => {
-                return TagExplorer::open_path(&path);
+                return KFiles::open_path(&path);
             }
 
             Message::EntryHovered(path) => {
@@ -317,6 +323,7 @@ impl MainScreen {
                     .id(QUERY_INPUT_ID())
                     .on_input(|text| Message::QueryTextChanged(text).into())
             })
+            .hide_on_empty()
             .style(theme::Simple),
         ]
     }
@@ -401,7 +408,7 @@ impl MainScreen {
     }
 
     pub fn reset_search(&mut self) {
-        self.items.clear(); // TODO filter instead?
+        self.items.clear();
         self.receiver = Some(self.query.search());
         self.scroll = 0.0;
         self.hovered_path = None;
@@ -419,30 +426,34 @@ impl MainScreen {
                 if !modifiers.is_empty() {
                     return Command::none();
                 }
+                let key: Key<&str> = key.as_ref();
 
-                // Match key here
-                match key.as_ref() {
-                    Key::Character(ch) if FOCUS_QUERY_KEYS.contains(&ch) => {
-                        MainScreen::focus_query().map(|m| m.into())
-                    }
+                // Focus query
+                if FOCUS_QUERY_KEYS.contains(&key) {
+                    return MainScreen::focus_query() .map(|m| m.into());
+                }
 
+                // Other keys
+                match key {
+                    // Open first item
                     Key::Named(Named::Enter) => {
                         if let Some(Item(_, path)) = self.items.first() {
-                            return TagExplorer::open_path(path)
+                            return KFiles::open_path(path)
                         }
-                        Command::none()
                     }
 
-                    _ => Command::none(),
+                    _ => {}
                 }
             },
 
             // WINDOW RESIZED
             Event::Window(_, WindowEvent::Resized { .. }) => {
-                MainScreen::fetch_results_bounds().map(|m| m.into())
+                return MainScreen::fetch_results_bounds().map(|m| m.into());
             }
 
-            _ => Command::none()
+            _ => {}
         }
+
+        Command::none()
     }
 }

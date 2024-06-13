@@ -101,7 +101,6 @@ impl Entries {
         Entries(c)
     }
 
-    // TODO un-generic this mf
     pub fn contains(&self, path: &Path) -> bool {
         self.0.iter().any(|p| path.starts_with(p))
     }

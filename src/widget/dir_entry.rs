@@ -179,7 +179,3 @@ where
         component(dir_entry)
     }
 }
-
-
-
-

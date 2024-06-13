@@ -138,12 +138,14 @@ impl ThumbnailBuilder {
 impl Drop for ThumbnailBuilder {
     fn drop(&mut self) {
         // Join all threads
-        println!("[ThumbnailBuilder::drop()] Joining threads...");
         for worker in self.0.iter_mut() {
             if let Some(handle) = worker.take() {
-                let _ = handle.join();
+                if let Err(err) = handle.join() {
+                    println!("[ThumbnailBuilder::drop()] Failed to join worker thread:\n {err:?}");
+                }
             }
         }
+
     }
 }
 

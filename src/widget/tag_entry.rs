@@ -50,7 +50,10 @@ pub struct State {
 
 
 
-/// TODO documentation
+/// Displays surface level info about a [`Tag`]:
+/// - Its name
+/// - Entries under it along with an icon for any errors with them
+/// - Optionally, an edit button
 pub struct TagEntry<'a, Message: Clone> {
     tag: &'a Tag,
     on_edit_pressed: Option<Message>,

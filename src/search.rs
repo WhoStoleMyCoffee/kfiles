@@ -1,6 +1,6 @@
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
-use std::thread;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::{self, JoinHandle};
 
 use walkdir::{DirEntry, WalkDir};
 
@@ -39,6 +39,7 @@ pub fn iter_entries(entries: Entries) -> Box<dyn Iterator<Item = PathBuf>> {
 
     iter
 }
+
 
 
 
@@ -81,19 +82,14 @@ impl Iterator for Searcher {
 
 
 
-/*
- * score, "contains", --file, --.rs
- * --dir
- * score, !--.png
- */
-
 
 /// A query to search through `tags` with an optional `query`
-/// Use [`search`] to begin the search
+/// Use [`Query::search`] to begin the search
 #[derive(Debug, Default)]
 pub struct Query {
     pub tags: Vec<Tag>,
     pub constraints: ConstraintList,
+    search_handle: Option<JoinHandle<()>>,
 }
 
 impl Query {
@@ -105,6 +101,7 @@ impl Query {
         Query {
             tags: Vec::new(),
             constraints: ConstraintList::parse(query),
+            search_handle: None,
         }
     }
 
@@ -146,7 +143,7 @@ impl Query {
     }
 
     /// Begins the search.
-    pub fn search(&self) -> Receiver<Item> {
+    pub fn search(&mut self) -> Receiver<Item> {
         let (tx, rx) = mpsc::channel::<Item>();
 
         let constraints = self.constraints.clone();
@@ -154,26 +151,60 @@ impl Query {
             .map(|tag| tag.get_all_entries())
         );
 
-        thread::spawn(move || {
-            let iter: Box<dyn Iterator<Item = Item>> = if constraints.is_empty() {
-                Box::new(iter_entries(entries)
-                    .map(|pb| Item(0, pb) )
-                )
+        let handle = thread::spawn(move ||
+            if constraints.is_empty() {
+                send_entries(tx, entries)
             } else {
-                Box::new( Searcher::new(entries, constraints) )
-            };
-
-            for item in iter {
-                if tx.send(item).is_err() {
-                    return;
-                }
+                search_entries(tx, entries, constraints)
             }
-        });
+        );
+
+        self.search_handle = Some(handle);
 
         rx
     }
+}
+
+impl Drop for Query {
+    fn drop(&mut self) {
+        // Join threads
+        if let Some(handle) = self.search_handle.take() {
+            if let Err(err) = handle.join() {
+                println!("[Query::drop()] Failed to join search handle:\n {err:?}");
+            }
+        }
+    }
 
 }
+
+
+/// Send entries in `entries` over `sender`
+fn send_entries(sender: Sender<Item>, entries: Entries) {
+    let it = entries.into_iter()
+        .filter(|pb| pb.exists())
+        .map(|pb| Item(0, pb));
+
+    for item in it {
+        if sender.send(item).is_err() {
+            return;
+        }
+    }
+}
+
+/// Searches through all paths in [`Entries`], with the given [`ConstraintList`], and sends it over
+/// a `sender`
+fn search_entries(
+    sender: Sender<Item>,
+    entries: Entries,
+    constraints: ConstraintList,
+) {
+    for item in Searcher::new(entries, constraints) {
+        if sender.send(item).is_err() {
+            return;
+        }
+    }
+}
+
 
 
 
@@ -207,7 +238,6 @@ mod constraint {
     pub struct ConstraintList {
         pub score: Option<Score>,
         /// All AND-ed together
-        /// TODO do regex searching instead?
         pub contains: Vec<Contains>,
         // All OR-ed together
         pub extensions: Vec<Extension>,
@@ -297,7 +327,6 @@ mod constraint {
             }
 
             // 3. AND contains
-            // TODO maybe OR them? idk
             let pathstr = path.to_pretty_string();
             if !self.contains.is_empty() && !self.contains.iter() .all(|c| c.matches(&pathstr)) {
                 return None;

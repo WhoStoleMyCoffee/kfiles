@@ -9,12 +9,12 @@ pub mod thumbnail;
 pub mod widget;
 pub mod strmatch;
 
-use app::TagExplorer;
+use app::KFiles;
 
 static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 fn main() -> iced::Result {
-    let res = TagExplorer::run(Settings {
+    let res = KFiles::run(Settings {
         window: iced::window::Settings {
             size: iced::Size::new(800.0, 400.0),
             ..Default::default()

@@ -214,8 +214,16 @@ impl TagEditScreen {
                 };
 
                 // TODO handle unwrap
-                let tag = Tag::load(tag_id) .unwrap();
-                return send_message!(AppMessage::SwitchToTagEditScreen(tag))
+                match Tag::load(tag_id) {
+                    Ok(tag) => return send_message!(AppMessage::SwitchToTagEditScreen(tag)),
+                    Err(err) => {
+                        let tag_id = tag_id.clone();
+                        return send_message!(error_message(
+                            format!("Failed to load tag \"{}\":\n{}", tag_id, err)
+                        ));
+                    },
+                }
+                
             }
 
             Message::SubtagToggled(tag_id, is_on) => {

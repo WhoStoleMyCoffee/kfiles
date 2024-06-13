@@ -66,12 +66,12 @@ pub enum Message {
 
 
 
-pub struct TagExplorer {
+pub struct KFiles {
     current_screen: Screen,
     notifications: Vec<Notification>,
 }
 
-impl Application for TagExplorer {
+impl Application for KFiles {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Flags = ();
@@ -81,7 +81,7 @@ impl Application for TagExplorer {
         let (main_screen, command) = MainScreen::new();
 
         (
-            TagExplorer {
+            KFiles {
                 current_screen: Screen::Main(main_screen),
                 notifications: Vec::new(),
             },
@@ -182,7 +182,7 @@ impl Application for TagExplorer {
     }
 }
 
-impl TagExplorer {
+impl KFiles {
     fn handle_event(&mut self, event: Event, status: Status) -> Command<Message> {
         self.current_screen.handle_event(event, status)
     }
