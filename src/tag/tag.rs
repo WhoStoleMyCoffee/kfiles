@@ -145,7 +145,7 @@ impl Tag {
     pub fn contains<P>(&self, path: P) -> bool
     where P: AsRef<Path>,
     {
-        self.entries.contains(path)
+        self.entries.contains(path.as_ref())
     }
 
     /// Returns whether the given path is tagged with this [`Tag`], INCLUDING subtags
@@ -157,19 +157,22 @@ impl Tag {
     pub fn all_contains<P>(&self, path: P) -> bool
     where P: AsRef<Path>,
     {
-        self.get_all_entries().contains(path)
+        self.get_all_entries().contains(path.as_ref())
     }
 
     /// Get all entries under this [`Tag`], INCLUDING all subtags
     /// If you want to simply get the entries without subtags, please use [`Tag::entries`] directly
-    /// TODO what if there's a cyclic dependency?
     pub fn get_all_entries(&self) -> Entries {
         let mut entries = self.entries.clone();
 
         // Merge subtags' entries into this one
-        let it = self.subtags.iter().filter_map(|id| Tag::load(id).ok());
-        for subtag in it {
-            entries = entries.or(&subtag.get_all_entries());
+        // TODO hmm i dont like the double-loading... once in get_all_subtags(), once again in
+        // filter_map
+        for subtag in self.get_all_subtags()
+            .into_iter()
+            .filter_map(|id| Tag::load(&id).ok())
+        {
+            entries = entries.or(&subtag.entries);
         }
 
         entries
@@ -244,9 +247,18 @@ impl Tag {
         unimplemented!()
     }
 
+    /// Get this tag's direct subtags
     #[inline]
     pub fn get_subtags(&self) -> &Vec<TagID> {
         &self.subtags
+    }
+
+    /// Get all of this tag's subtags, that is, including subtags' subtags
+    /// Avoids infinite loops
+    pub fn get_all_subtags(&self) -> Vec<TagID> {
+        let mut results = vec![ self.id.clone() ];
+        _get_subtags_recursive(self, &mut results);
+        results[1..].to_vec()
     }
 
     /// Returns whether the subtag was successfully added (i.e. whether it wasn't already contained)
@@ -271,7 +283,7 @@ impl Tag {
         false
     }
 
-    pub fn is_subtag_of(&self, other: &Tag) -> bool {
+    pub fn is_direct_subtag_of(&self, other: &Tag) -> bool {
         self.id.is_subtag_of(other)
     }
 }
@@ -326,4 +338,14 @@ impl From<SerTag> for Tag {
 }
 
 
+
+fn _get_subtags_recursive(tag: &Tag, results: &mut Vec<TagID>) {
+    for subtag_id in tag.subtags.iter() {
+        if results.contains(subtag_id) { continue; }
+
+        results.push(subtag_id.clone());
+        let Ok(subtag) = Tag::load(subtag_id) else { continue };
+        _get_subtags_recursive(&subtag, results);
+    }
+}
 

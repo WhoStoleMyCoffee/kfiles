@@ -102,11 +102,7 @@ impl Entries {
     }
 
     // TODO un-generic this mf
-    pub fn contains<P>(&self, path: P) -> bool
-    where
-        P: AsRef<Path>,
-    {
-        let path = path.as_ref();
+    pub fn contains(&self, path: &Path) -> bool {
         self.0.iter().any(|p| path.starts_with(p))
     }
 

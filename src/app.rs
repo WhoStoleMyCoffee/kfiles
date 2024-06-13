@@ -48,7 +48,6 @@ macro_rules! send_message {
 
 
 
-// TODO Message::NotifyError
 #[derive(Debug, Clone)]
 pub enum Message {
     /// Does nothing.

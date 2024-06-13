@@ -190,7 +190,7 @@ mod tests {
         tag2.add_entry("C:/Users/ddxte/Documents/Projects/")
             .unwrap();
 
-        assert!(tag2.is_subtag_of(&tag));
+        assert!(tag2.is_direct_subtag_of(&tag));
 
         {
             let res = Tag::create(tag.id.clone()) .as_subtag_of(&mut tag);
@@ -226,9 +226,71 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "not yet implemented"]
     fn cyclic_subtags() {
-        todo!()
+        // A <=> B
+        let mut tag_a = Tag::create("cyclic-a");
+        let mut tag_b = Tag::create("cyclic-b");
+
+        tag_a.add_subtag(&tag_b.id) .unwrap();
+        tag_b.add_subtag(&tag_a.id) .unwrap();
+        tag_a.save() .unwrap();
+        tag_b.save() .unwrap();
+
+        assert_eq!(tag_a.get_all_subtags(), vec![ tag_b.id.clone() ]);
+        assert_eq!(tag_b.get_all_subtags(), vec![ tag_a.id.clone() ]);
+
+        // A <=> B => C
+        let mut tag_c = Tag::create("cyclic-c");
+        tag_b.add_subtag(&tag_c.id) .unwrap();
+        tag_b.save() .unwrap();
+        tag_c.save() .unwrap();
+
+        assert_eq!(tag_a.get_all_subtags(), vec![
+            tag_b.id.clone(),
+            tag_c.id.clone(),
+        ]);
+        assert_eq!(tag_b.get_all_subtags(), vec![
+            tag_a.id.clone(),
+            tag_c.id.clone(),
+        ]);
+
+        // A <=> B => C => A
+        tag_c.add_subtag(&tag_a.id) .unwrap();
+        tag_c.save() .unwrap();
+        tag_a.save() .unwrap();
+
+        assert_eq!(tag_a.get_all_subtags(), vec![
+            tag_b.id.clone(),
+            tag_c.id.clone(),
+        ]);
+        assert_eq!(tag_b.get_all_subtags(), vec![
+            tag_a.id.clone(),
+            tag_c.id.clone(),
+        ]);
+        assert_eq!(tag_c.get_all_subtags(), vec![
+            tag_a.id.clone(),
+            tag_b.id.clone(),
+        ]);
+
+        // A <=> B <=> C <=> A full 3-way cycle
+        tag_c.add_subtag(&tag_b.id.clone()) .unwrap();
+        tag_a.add_subtag(&tag_c.id.clone()) .unwrap();
+        tag_a.save() .unwrap();
+        tag_b.save() .unwrap();
+        tag_c.save() .unwrap();
+
+        assert_eq!(tag_a.get_all_subtags(), vec![
+            tag_b.id.clone(),
+            tag_c.id.clone(),
+        ]);
+        assert_eq!(tag_b.get_all_subtags(), vec![
+            tag_a.id.clone(),
+            tag_c.id.clone(),
+        ]);
+        assert_eq!(tag_c.get_all_subtags(), vec![
+            tag_a.id.clone(),
+            tag_b.id.clone(),
+        ]);
     }
 
     #[test]

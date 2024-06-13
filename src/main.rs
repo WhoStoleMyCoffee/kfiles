@@ -137,7 +137,6 @@ mod fs {
     }
 
 
-    /// TODO proofread this
     pub struct ModificationWatcher {
         pub path: PathBuf,
         pub check_interval: Duration,
