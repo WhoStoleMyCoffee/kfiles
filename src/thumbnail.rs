@@ -12,8 +12,6 @@ use thiserror::Error;
 
 use crate::get_temp_dir;
 
-pub const MAX_CACHE_SIZE_BYTES: u64 = 500_000;
-
 static CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 
@@ -66,7 +64,7 @@ pub trait Thumbnail {
 impl Thumbnail for &Path {
     #[inline]
     fn get_thumbnail_cache_path(&self) -> PathBuf {
-        get_cache_dir().join(format!("{}.jpg", hash_path(self)))
+        get_cache_dir_or_create().join(format!("{}.jpg", hash_path(self)))
     }
 
     fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
@@ -97,11 +95,17 @@ impl Thumbnail for PathBuf {
 type Worker = JoinHandle<Result<(), ThumbnailError>>;
 
 #[derive(Debug)]
-pub struct ThumbnailBuilder( Vec<Option<Worker>> );
+pub struct ThumbnailBuilder {
+    workers: Vec<Option<Worker>>,
+    max_cache_size_bytes: u64,
+}
 
 impl ThumbnailBuilder {
-    pub fn new(thread_count: usize) -> Self {
-        ThumbnailBuilder((0..thread_count).map(|_| None).collect())
+    pub fn new(thread_count: usize, max_cache_size_bytes: u64) -> Self {
+        ThumbnailBuilder {
+            workers: (0..thread_count).map(|_| None).collect(),
+            max_cache_size_bytes,
+        }
     }
 
     /// Builds a thumbnail for `path` on a thread, replacing a previous worker in the pool
@@ -109,7 +113,7 @@ impl ThumbnailBuilder {
     /// - `Err(`[`ThumbnailError`]`)` containing any error that occured during the previous
     ///   building process (of the replaced worker)
     pub fn build_for_path(&mut self, path: &Path) -> Result<bool, ThumbnailError> {
-        for worker_maybe in self.0.iter_mut() {
+        for worker_maybe in self.workers.iter_mut() {
             let is_done = worker_maybe
                 .as_ref()
                 .map(|h| h.is_finished())
@@ -138,7 +142,7 @@ impl ThumbnailBuilder {
 impl Drop for ThumbnailBuilder {
     fn drop(&mut self) {
         // Join all threads
-        for worker in self.0.iter_mut() {
+        for worker in self.workers.iter_mut() {
             if let Some(handle) = worker.take() {
                 if let Err(err) = handle.join() {
                     println!("[ThumbnailBuilder::drop()] Failed to join worker thread:\n {err:?}");
@@ -149,18 +153,25 @@ impl Drop for ThumbnailBuilder {
     }
 }
 
+
 pub fn get_cache_dir() -> &'static PathBuf {
-    CACHE_DIR.get_or_init(|| {
-        let pb = get_temp_dir().join("thumbnails/");
-        if pb.exists() {
-            return pb;
-        }
-        if let Err(err) = create_dir(&pb) {
+    CACHE_DIR.get_or_init(||
+        get_temp_dir().join("thumbnails/")
+    )
+}
+
+pub fn get_cache_dir_or_create() -> &'static PathBuf {
+    let path = get_cache_dir();
+
+    if !path.exists() {
+        if let Err(err) = create_dir(path) {
             eprintln!("Failed to create thumbnail cache dir: {:?}", err);
         }
-        pb
-    })
+    }
+
+    path
 }
+
 
 fn hash_path(path: &Path) -> u64 {
     let mut s = DefaultHasher::new();

@@ -10,6 +10,7 @@ use iced_aw::floating_element;
 pub mod main_screen;
 pub mod tag_list_screen;
 pub mod tag_edit_screen;
+pub mod configs_screen;
 
 use crate::tag::Tag;
 use crate::widget::notification_card::NotificationCard;
@@ -19,6 +20,8 @@ use notification::Notification;
 use main_screen::MainScreen;
 use tag_edit_screen::TagEditScreen;
 use tag_list_screen::TagListScreen;
+
+use self::configs_screen::ConfigsScreen;
 
 const UPDATE_RATE_MS: u64 = 100;
 
@@ -60,6 +63,7 @@ pub enum Message {
     SwitchToMainScreen,
     SwitchToTagListScreen,
     SwitchToTagEditScreen(Tag),
+    SwitchToConfigScreen,
     CloseNotification(usize),
     Notify(Notification),
 }
@@ -134,6 +138,12 @@ impl Application for KFiles {
             Message::SwitchToTagEditScreen(tag) => {
                 let (tag_edit_screen, command) = TagEditScreen::new(tag);
                 self.current_screen = Screen::TagEdit(tag_edit_screen);
+                command
+            }
+
+            Message::SwitchToConfigScreen => {
+                let (configs_screen, command) = ConfigsScreen::new();
+                self.current_screen = Screen::Configs(configs_screen);
                 command
             }
 
@@ -223,6 +233,7 @@ pub enum ScreenMessage {
     Main(main_screen::Message),
     TagList(tag_list_screen::Message),
     TagEdit(tag_edit_screen::Message),
+    Configs(configs_screen::Message),
 }
 
 impl From<ScreenMessage> for Message {
@@ -237,7 +248,7 @@ enum Screen {
     Main(MainScreen),
     TagList(TagListScreen),
     TagEdit(TagEditScreen),
-    // Settings,
+    Configs(ConfigsScreen),
 }
 
 impl Screen {
@@ -261,6 +272,10 @@ impl Screen {
             ScreenMessage::TagEdit(message) => if let Screen::TagEdit(tag_edit) = self {
                 return tag_edit.update(message);
             }
+
+            ScreenMessage::Configs(message) => if let Screen::Configs(configs) = self {
+                return configs.update(message);
+            }
         }
 
         Command::none()
@@ -271,6 +286,7 @@ impl Screen {
             Screen::Main(main) => main.view().into(),
             Screen::TagList(tag_list) => tag_list.view().into(),
             Screen::TagEdit(tag_edit) => tag_edit.view().into(),
+            Screen::Configs(configs) => configs.view().into(),
         }
     }
 
@@ -279,6 +295,7 @@ impl Screen {
             Screen::Main(main) => main.handle_event(event, status),
             Screen::TagList(tag_list) => tag_list.handle_event(event, status),
             Screen::TagEdit(tag_edit) => tag_edit.handle_event(event, status),
+            Screen::Configs(configs) => configs.handle_event(event, status),
         }
     }
 }

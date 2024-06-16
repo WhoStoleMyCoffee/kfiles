@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use iced::event::Status;
 use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, Column, Container};
-use iced::{Color, Command, Event, Length};
+use iced::{Command, Event, Length};
 
 use iced_aw::spinner;
 use iced_aw::Bootstrap;
@@ -14,14 +14,7 @@ use crate::widget::tag_entry::TagEntry as TagEntryWidget;
 use crate::{ icon, send_message, simple_button, ToPrettyString };
 
 use super::notification::error_message;
-
-const ERROR_COLOR: Color = Color {
-    r: 0.9,
-    g: 0.1,
-    b: 0.1,
-    a: 1.0,
-};
-
+use super::theme::ERROR_COLOR;
 
 type LoadTagsResult = Result< Vec<Tag>, Arc<tag::LoadError> >;
 
@@ -147,8 +140,8 @@ impl TagListScreen {
                 );
                 let error_message = format!("Failed to load tags:\n{}", error_message);
 
-                return container(text(error_message)
-                    .style(ERROR_COLOR)
+                return container(
+                    text(error_message).style(ERROR_COLOR)
                 );
             }
         };

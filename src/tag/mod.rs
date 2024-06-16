@@ -39,19 +39,20 @@ pub fn get_save_dir_or_create() -> io::Result<PathBuf> {
 #[cfg(not(test))]
 #[inline]
 pub fn get_save_dir() -> PathBuf {
-    const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
+    use crate::APP_NAME;
+
     directories::BaseDirs::new()
-        .expect("could not get base dirs")
+        .expect("failed to get base dirs")
         .config_dir()
         .to_path_buf()
-        .join(APP_NAME.to_string() + "/tags/")
+        .join( format!("{APP_NAME}/tags/") )
 }
 
 /// Returns the base dir where all tags are stored (for tests only)
 #[cfg(test)]
 #[inline]
 pub fn get_save_dir() -> PathBuf {
-    PathBuf::from("C:/Users/ddxte/Documents/Projects/tag-explorer/test_tags/")
+    PathBuf::from("C:/Users/ddxte/Documents/Projects/tag-explorer/tests/tags/")
 }
 
 /// Get all existing tags as paths

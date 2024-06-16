@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, sync::OnceLock};
+use std::{io, path::{Path, PathBuf}, sync::OnceLock};
 
 use iced::{ Application, Settings};
 
@@ -8,12 +8,26 @@ pub mod tag;
 pub mod thumbnail;
 pub mod widget;
 pub mod strmatch;
+pub mod configs;
 
 use app::KFiles;
 
+const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
+
 static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+
 fn main() -> iced::Result {
+    // TODO handle errors
+    let configs = configs::load_configs()
+        .unwrap_or_else(|err| {
+            println!("TODO error handling: {err}");
+            configs::Configs::default()
+        });
+
+    configs::set_global(configs) .expect("failed to initialize configs");
+
+    // Run program...
     let res = KFiles::run(Settings {
         window: iced::window::Settings {
             size: iced::Size::new(800.0, 400.0),
@@ -23,30 +37,36 @@ fn main() -> iced::Result {
     });
 
     // Trim thumbnail cache once we're done
-    match thumbnail::trim_cache(thumbnail::MAX_CACHE_SIZE_BYTES) {
+    println!("Trimming thumbnail cache...");
+    match thumbnail::trim_cache( configs::global().thumbnail_cache_size ) {
         Ok(bytes) if bytes > 0 => {
-            println!("Sucessfully trimmed cache by {} bytes", bytes)
+            println!("Sucessfully trimmed thumbnail cache by {} bytes", bytes)
         }
-        Err(err) => {
-            println!("ERROR: failed to trim cache: {}", err);
+        Err(err) => match err.kind() {
+            io::ErrorKind::NotFound => println!("Thumbnail cache already clear"),
+            _ => println!("ERROR: failed to trim thumbnail cache:\n{}", err),
         }
         _ => {}
     }
+
+    // Save configs
+    configs::global().save() .unwrap();
 
     res
 }
 
 pub fn get_temp_dir() -> &'static PathBuf {
-    TEMP_DIR.get_or_init(|| {
-        let pb: PathBuf = std::env::temp_dir().join(env!("CARGO_PKG_NAME"));
-        if pb.exists() {
-            return pb;
-        }
-        if let Err(err) = std::fs::create_dir_all(&pb) {
+    let path = TEMP_DIR.get_or_init(||
+        std::env::temp_dir().join(env!("CARGO_PKG_NAME"))
+    );
+
+    if !path.exists() {
+        if let Err(err) = std::fs::create_dir_all(path) {
             eprintln!("Failed to create temp directory: {:?}", err);
         }
-        pb
-    })
+    }
+
+    path
 }
 
 

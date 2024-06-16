@@ -4,7 +4,7 @@ use std::sync::mpsc::Receiver;
 use iced::event::Status;
 use iced::keyboard::Key;
 use iced::widget::scrollable::Viewport;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Column, Container};
+use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, Column, Container};
 use iced::{self, keyboard, Event, Length, Rectangle};
 use iced::Command;
 use iced_aw::Wrap;
@@ -15,7 +15,7 @@ use crate::tag::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{theme, Message as AppMessage};
-use crate::{send_message, ToPrettyString};
+use crate::{configs, send_message, ToPrettyString};
 
 use super::notification::error_message;
 use super::KFiles;
@@ -117,13 +117,18 @@ impl MainScreen {
             }
         };
 
+        let configs = configs::global();
+
         (
             MainScreen {
                 query: Query::empty(),
                 query_text: String::default(),
                 items: Vec::new(),
                 receiver: None,
-                thumbnail_builder: (0, ThumbnailBuilder::new(4)),
+                thumbnail_builder: (
+                    0,
+                    ThumbnailBuilder::new(4, configs.thumbnail_cache_size)
+                ),
                 scroll: 0.0,
                 results_container_bounds: None,
                 hovered_path: None,
@@ -274,8 +279,12 @@ impl MainScreen {
 
         container(
             column![
-                button("tags")
-                    .on_press(AppMessage::SwitchToTagListScreen),
+                row![
+                    horizontal_space(),
+                    button("tags") .on_press(AppMessage::SwitchToTagListScreen),
+                    button("settings") .on_press(AppMessage::SwitchToConfigScreen),
+                ],
+
                 query_input,
                 text("Results:"),
                 container(

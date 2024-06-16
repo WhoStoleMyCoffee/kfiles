@@ -191,7 +191,8 @@ impl Tag {
         }
 
         let string = SerTag::from(self).serialize_json();
-        File::create(path)?.write_all(string.as_bytes())?;
+        File::create(path)?
+            .write_all(string.as_bytes())?;
         Ok(())
     }
 
@@ -222,12 +223,14 @@ impl Tag {
         Ok(true)
     }
 
+    /// TODO un-generic this mf
     pub fn load_from_path<P>(path: P) -> Result<Tag, LoadError>
     where
         P: AsRef<Path>,
     {
         let mut contents = String::new();
-        File::open(&path)?.read_to_string(&mut contents)?;
+        File::open(&path)?
+            .read_to_string(&mut contents)?;
         let mut tag: Tag = SerTag::deserialize_json(&contents)?
             .into();
 

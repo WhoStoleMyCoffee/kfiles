@@ -31,8 +31,7 @@ regex = "1.10.4"
 rfd = "0.14.1"
 nanoserde = "0.1.37"
 
-# anyhow
-# clean-path
+# clean-path?
 # confy
 
 [profile.dev]

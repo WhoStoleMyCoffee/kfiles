@@ -40,8 +40,6 @@ pub enum Event {
     EditPressed,
 }
 
-pub enum TagOperation {}
-
 #[derive(Debug, Default)]
 pub struct State {
     is_expanded: bool,
