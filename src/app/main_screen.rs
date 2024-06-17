@@ -27,8 +27,6 @@ const FOCUS_QUERY_KEYS: [keyboard::Key<&str>; 3] = [
     Key::Character("/"),
     Key::Named(keyboard::key::Named::Tab),
 ];
-const MAX_RESULT_COUNT: usize = 256;
-const MAX_RESULTS_PER_TICK: usize = 10;
 
 const ITEM_SIZE: (f32, f32) = (80.0, 120.0);
 const ITEM_SPACING: (f32, f32) = (8.0, 8.0);
@@ -117,18 +115,13 @@ impl MainScreen {
             }
         };
 
-        let configs = configs::global();
-
         (
             MainScreen {
                 query: Query::empty(),
                 query_text: String::default(),
                 items: Vec::new(),
                 receiver: None,
-                thumbnail_builder: (
-                    0,
-                    ThumbnailBuilder::new(4, configs.thumbnail_cache_size)
-                ),
+                thumbnail_builder: (0, ThumbnailBuilder::new(4)),
                 scroll: 0.0,
                 results_container_bounds: None,
                 hovered_path: None,
@@ -150,9 +143,13 @@ impl MainScreen {
         use std::sync::mpsc::TryRecvError;
 
         let rx = self.receiver.as_mut()?;
+        let (max_result_count, max_this_tick) = {
+            let cfg = configs::global();
+            (cfg.max_result_count, cfg.max_results_per_tick)
+        };
 
         // Already full
-        if self.items.len() >= MAX_RESULT_COUNT {
+        if self.items.len() >= max_result_count {
             self.receiver = None;
             return Some(RecvItemsResult::Full);
         }
@@ -173,14 +170,14 @@ impl MainScreen {
 
             self.items.push(item);
             self.items.append(&mut rx.try_iter()
-                .take(MAX_RESULTS_PER_TICK)
+                .take(max_this_tick)
                 .collect()
             );
 
             return Some(RecvItemsResult::Ok);
         }
 
-        for _ in 0..MAX_RESULTS_PER_TICK {
+        for _ in 0..max_this_tick {
             // We do a loop of `try_recv()` insead of `try_iter()` for the same reasons
             // same match statement as above...
             let item = match rx.try_recv() {

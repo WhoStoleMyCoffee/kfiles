@@ -14,7 +14,7 @@ pub mod configs_screen;
 
 use crate::tag::Tag;
 use crate::widget::notification_card::NotificationCard;
-use crate::ToPrettyString;
+use crate::{configs, ToPrettyString};
 
 use notification::Notification;
 use main_screen::MainScreen;
@@ -22,8 +22,6 @@ use tag_edit_screen::TagEditScreen;
 use tag_list_screen::TagListScreen;
 
 use self::configs_screen::ConfigsScreen;
-
-const UPDATE_RATE_MS: u64 = 100;
 
 
 
@@ -185,9 +183,14 @@ impl Application for KFiles {
     }
 
     fn subscription(&self) -> iced::Subscription<Self::Message> {
+        let update_rate = configs::global().update_rate_ms;
+
         iced::Subscription::batch(vec![
-            time::every(Duration::from_millis(UPDATE_RATE_MS)).map(|_| Message::Tick),
-            iced::event::listen_with(|event, status| Some(Message::Event(event, status))),
+            time::every(Duration::from_millis(update_rate))
+                .map(|_| Message::Tick),
+            iced::event::listen_with(|event, status|
+                Some(Message::Event(event, status))
+            ),
         ])
     }
 }

@@ -97,14 +97,12 @@ type Worker = JoinHandle<Result<(), ThumbnailError>>;
 #[derive(Debug)]
 pub struct ThumbnailBuilder {
     workers: Vec<Option<Worker>>,
-    max_cache_size_bytes: u64,
 }
 
 impl ThumbnailBuilder {
-    pub fn new(thread_count: usize, max_cache_size_bytes: u64) -> Self {
+    pub fn new(thread_count: usize) -> Self {
         ThumbnailBuilder {
             workers: (0..thread_count).map(|_| None).collect(),
-            max_cache_size_bytes,
         }
     }
 

@@ -96,8 +96,9 @@ impl ToPrettyString for PathBuf {
 
 
 mod fs {
-    use std::{path::PathBuf, time::{Duration, Instant, SystemTime}};
+    use std::{fs::File, io::Write, path::PathBuf, time::{Duration, Instant, SystemTime}};
 
+    #[derive(Debug)]
     pub struct Timeout;
 
     pub trait Watcher {
@@ -108,6 +109,7 @@ mod fs {
     }
 
 
+    #[derive(Debug)]
     pub struct DeletionWatcher {
         pub path: PathBuf,
         pub check_interval: Duration,
@@ -132,6 +134,7 @@ mod fs {
         }
     }
 
+    #[derive(Debug)]
     pub struct CreationWatcher {
         pub path: PathBuf,
         pub check_interval: Duration,
@@ -156,37 +159,6 @@ mod fs {
         }
     }
 
-
-    pub struct ModificationWatcher {
-        pub path: PathBuf,
-        pub check_interval: Duration,
-        pub since: SystemTime,
-    }
-
-    impl Watcher for ModificationWatcher {
-        type Error = ();
-
-        /// TODO proofread this
-        fn wait(&self, timeout: Duration) -> Result<(), Self::Error> {
-            let start = Instant::now();
-
-            loop {
-                std::thread::sleep(self.check_interval);
-
-                let Some(modified) = self.path.metadata().ok()
-                    .and_then(|m| m.modified().ok())
-                else {
-                    return Err(());
-                };
-
-                if modified >= self.since {
-                    return Ok(());
-                }
-                if start.elapsed() >= timeout {
-                    return Err(());
-                }
-
-            }
-        }
-    }
+    // There is no ModificationWatcher;
+    // Creation and deletion may not be instant, but modification apparently is
 }

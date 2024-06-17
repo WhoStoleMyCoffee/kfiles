@@ -91,6 +91,9 @@ pub fn set_global(configs: Configs) -> Result<(), Configs> {
 #[derive(Debug, Clone)]
 pub struct Configs {
     pub thumbnail_cache_size: u64,
+    pub max_result_count: usize,
+    pub max_results_per_tick: usize,
+    pub update_rate_ms: u64,
 }
 
 impl Configs {
@@ -104,6 +107,9 @@ impl Default for Configs {
     fn default() -> Self {
         Configs {
             thumbnail_cache_size: 500_000,
+            max_results_per_tick: 10,
+            max_result_count: 256,
+            update_rate_ms: 100,
         }
     }
 }
@@ -113,12 +119,18 @@ impl Default for Configs {
 #[derive(Debug, Clone, SerJson, DeJson)]
 struct SerConfigs {
     thumbnail_cache_size: u64,
+    max_result_count: usize,
+    max_results_per_tick: usize,
+    update_rate_ms: u64,
 }
 
 impl From<&Configs> for SerConfigs {
     fn from(value: &Configs) -> Self {
         SerConfigs {
             thumbnail_cache_size: value.thumbnail_cache_size,
+            max_result_count: value.max_result_count,
+            max_results_per_tick: value.max_results_per_tick,
+            update_rate_ms: value.update_rate_ms,
         }
     }
 }
@@ -127,6 +139,9 @@ impl From<SerConfigs> for Configs {
     fn from(value: SerConfigs) -> Self {
         Configs {
             thumbnail_cache_size: value.thumbnail_cache_size,
+            max_result_count: value.max_result_count,
+            max_results_per_tick: value.max_results_per_tick,
+            update_rate_ms: value.update_rate_ms,
         }
     }
 }
