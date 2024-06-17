@@ -100,7 +100,7 @@ pub struct ThumbnailBuilder {
 }
 
 impl ThumbnailBuilder {
-    pub fn new(thread_count: usize) -> Self {
+    pub fn new(thread_count: u8) -> Self {
         ThumbnailBuilder {
             workers: (0..thread_count).map(|_| None).collect(),
         }

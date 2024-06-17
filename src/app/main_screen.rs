@@ -115,13 +115,18 @@ impl MainScreen {
             }
         };
 
+        let cfg = configs::global();
+
         (
             MainScreen {
                 query: Query::empty(),
                 query_text: String::default(),
                 items: Vec::new(),
                 receiver: None,
-                thumbnail_builder: (0, ThumbnailBuilder::new(4)),
+                thumbnail_builder: (
+                    0,
+                    ThumbnailBuilder::new(cfg.thumbnail_thread_count)
+                ),
                 scroll: 0.0,
                 results_container_bounds: None,
                 hovered_path: None,

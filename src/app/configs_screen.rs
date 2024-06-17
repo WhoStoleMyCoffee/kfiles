@@ -1,9 +1,9 @@
 use iced::event::Status;
 use iced::widget::{
     button, column, container, row, scrollable,
-    text, Column, Container, Row
+    text, Column, Container, Row, Text
 };
-use iced::{Command, Element, Event, Length};
+use iced::{Color, Command, Element, Event, Length};
 
 use iced_aw::Bootstrap;
 use iced_aw::widgets::NumberInput;
@@ -17,6 +17,13 @@ use super::notification::error_message;
 
 // IDs
 // const THUMBNAIL_CACHE_INPUT_ID: fn() -> text_input::Id = || { text_input::Id::new("thumbnail_cache_size_input") };
+
+pub const DESCRIPTION_TEXT_COLOR: Color = Color {
+    r: 0.6,
+    g: 0.6,
+    b: 0.7,
+    a: 1.0
+};
 
 
 /// Usage:
@@ -36,8 +43,9 @@ macro_rules! number_input {
 
 
 
+/// TODO documentation
 /// Could use `Into<Element>` but I wanna avoid too many generics
-pub fn config_entry<'a>(
+fn config_entry<'a>(
     name: &str,
     description: Element<'a, AppMessage>,
     value: Element<'a, AppMessage>
@@ -59,18 +67,26 @@ pub fn config_entry<'a>(
     .width(Length::Fill)
 }
 
+/// TODO documentation
+fn desc_text(text: &str) -> Text {
+    Text::new(text)
+        .style(DESCRIPTION_TEXT_COLOR)
+        .size(14)
+}
+
 
 
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Save,
-    ThumbnailCacheSizeInput(u64),
     OpenThumbnailCacheDir,
     ClearThumbnailCache,
     UpdateRateInput(u64),
     MaxResultsPerTickInput(usize),
     MaxResultCountChanged(usize),
+    ThumbnailCacheSizeInput(u64),
+    ThumbnailThreadCountInput(u8),
 }
 
 impl From<Message> for AppMessage {
@@ -103,11 +119,6 @@ impl ConfigsScreen {
         match message {
             Message::Save => {
                 return self.save();
-            }
-
-            Message::ThumbnailCacheSizeInput(input) => {
-                self.configs.thumbnail_cache_size = input;
-                self.is_dirty = true;
             }
 
             Message::OpenThumbnailCacheDir => {
@@ -148,6 +159,16 @@ impl ConfigsScreen {
                 self.configs.max_result_count = input;
             }
 
+            Message::ThumbnailCacheSizeInput(input) => {
+                self.is_dirty = true;
+                self.configs.thumbnail_cache_size = input;
+            }
+
+            Message::ThumbnailThreadCountInput(input) => {
+                self.is_dirty = true;
+                self.configs.thumbnail_thread_count = input;
+            }
+
         }
 
         Command::none()
@@ -185,7 +206,7 @@ impl ConfigsScreen {
                 // Update rate
                 config_entry(
                     "Update rate",
-                    "Application's update rate, in milliseconds".into(),
+                    desc_text("Application's update rate, in milliseconds").into(),
                     number_input!(c.update_rate_ms, u64, UpdateRateInput)
                         .min(1)
                         .into()
@@ -194,7 +215,7 @@ impl ConfigsScreen {
                 // Max results per tick
                 config_entry(
                     "Max results per tick",
-                    "How many search results to take every update tick".into(),
+                    desc_text("How many search results to take every update tick").into(),
                     number_input!(c.max_results_per_tick, usize, MaxResultsPerTickInput)
                         .min(1)
                         .into()
@@ -203,7 +224,7 @@ impl ConfigsScreen {
                 // Max result count
                 config_entry(
                     "Max result count",
-                    "How many results to show all at once".into(),
+                    desc_text("How many results to show all at once").into(),
                     number_input!(c.max_result_count, usize, MaxResultCountChanged)
                         .min(1)
                         .into()
@@ -216,10 +237,21 @@ impl ConfigsScreen {
                         row![
                             button("Open") .on_press(Message::OpenThumbnailCacheDir.into()),
                             button("Clear") .on_press(Message::ClearThumbnailCache.into()),
-                        ],
-                        "Size of the thumbnail cache in bytes.\nThis is not a hard limit, the actual size may fluctuate around this value",
-                    ].into(),
-                    number_input!(c.thumbnail_cache_size, u64, ThumbnailCacheSizeInput)
+                        ]
+                        .spacing(4),
+                        desc_text("Size of the thumbnail cache in bytes.\nThis is not a hard limit, the actual size may fluctuate around this value"),
+                    ]
+                    .spacing(4)
+                    .into(),
+                    number_input!(c.thumbnail_cache_size, u64, ThumbnailCacheSizeInput) .into()
+                ),
+
+                // Thumbnail thread count
+                config_entry(
+                    "Thumbnail builder thread count",
+                    desc_text("How many threads to use for building thumbnails") .into(),
+                    number_input!(c.thumbnail_thread_count, u8, ThumbnailThreadCountInput)
+                        .min(1)
                         .into()
                 ),
 

@@ -45,8 +45,7 @@ pub fn load_configs() -> Result<Configs, LoadError> {
     File::open(path)?
         .read_to_string(&mut contents)?;
 
-    let configs: Configs = SerConfigs::deserialize_json(&contents)?
-        .into();
+    let configs: Configs = Configs::deserialize_json(&contents)?;
 
     Ok(configs)
 }
@@ -59,7 +58,7 @@ pub fn save_configs(configs: &Configs) -> Result<(), SaveError> {
         create_dir_all(dir)?;
     }
 
-    let string = SerConfigs::from(configs).serialize_json();
+    let string: String = configs.serialize_json();
     File::create(path)?
         .write_all(string.as_bytes())?;
     Ok(())
@@ -88,9 +87,10 @@ pub fn set_global(configs: Configs) -> Result<(), Configs> {
 
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, SerJson, DeJson)]
 pub struct Configs {
     pub thumbnail_cache_size: u64,
+    pub thumbnail_thread_count: u8,
     pub max_result_count: usize,
     pub max_results_per_tick: usize,
     pub update_rate_ms: u64,
@@ -107,6 +107,7 @@ impl Default for Configs {
     fn default() -> Self {
         Configs {
             thumbnail_cache_size: 500_000,
+            thumbnail_thread_count: 4,
             max_results_per_tick: 10,
             max_result_count: 256,
             update_rate_ms: 100,
@@ -115,6 +116,9 @@ impl Default for Configs {
 }
 
 
+/*
+ * SerConfigs
+ * Bring this back if you need to if you're serializing types unsupported by nanoserde
 
 #[derive(Debug, Clone, SerJson, DeJson)]
 struct SerConfigs {
@@ -145,5 +149,6 @@ impl From<SerConfigs> for Configs {
         }
     }
 }
+*/
 
 
