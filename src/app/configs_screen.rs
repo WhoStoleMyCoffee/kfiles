@@ -1,7 +1,6 @@
 use iced::event::Status;
 use iced::widget::{
-    button, column, container, row, scrollable,
-    text, Column, Container, Row, Text
+    button, column, container, row, scrollable, text, Column, Container, Row, Slider, Text
 };
 use iced::{Color, Command, Element, Event, Length};
 
@@ -48,6 +47,7 @@ macro_rules! number_input {
 fn config_entry<'a>(
     name: &str,
     description: Element<'a, AppMessage>,
+    default: Option<String>,
     value: Element<'a, AppMessage>
 ) -> Row<'a, AppMessage>
 {
@@ -55,19 +55,26 @@ fn config_entry<'a>(
         // Name & description
         column![
             text(name),
-            container(description) .padding([8, 24])
         ]
-        .width(Length::FillPortion(1)),
+        .push_maybe(default.map(|str|
+            Text::new(format!("Default: {str}"))
+                .style(DESCRIPTION_TEXT_COLOR)
+                .size(12)
+        ))
+        .push(container(description) .padding([8, 24]))
+        .width(Length::FillPortion(2)),
 
         // Value
         container(value)
             .center_y()
             .width(Length::FillPortion(1)),
     ]
+    .spacing(4)
     .width(Length::Fill)
+    .padding([4, 48, 4, 24])
 }
 
-/// TODO documentation
+/// Dimmed text for descriptions
 fn desc_text(text: &str) -> Text {
     Text::new(text)
         .style(DESCRIPTION_TEXT_COLOR)
@@ -87,6 +94,7 @@ pub enum Message {
     MaxResultCountChanged(usize),
     ThumbnailCacheSizeInput(u64),
     ThumbnailThreadCountInput(u8),
+    ThumbnailUpdateProbInput(f32),
 }
 
 impl From<Message> for AppMessage {
@@ -169,12 +177,17 @@ impl ConfigsScreen {
                 self.configs.thumbnail_thread_count = input;
             }
 
+            Message::ThumbnailUpdateProbInput(input) => {
+                self.is_dirty = true;
+                self.configs.thumbnail_update_prob = input;
+            }
+
         }
 
         Command::none()
     }
 
-    pub fn view(&self) -> Column<AppMessage> {
+    pub fn view(&self) -> Element<AppMessage> {
         column![
             row![
                 // Back arrow
@@ -194,10 +207,12 @@ impl ConfigsScreen {
         ]
         .width(Length::Fill)
         .height(Length::Fill)
+        .into()
     }
 
     fn view_entries(&self) -> Container<AppMessage> {
         let c: &Configs = &self.configs;
+        let default = Configs::default();
 
         // TODO do the list rendering inside Configs struct?
         // TODO use macro?
@@ -207,6 +222,7 @@ impl ConfigsScreen {
                 config_entry(
                     "Update rate",
                     desc_text("Application's update rate, in milliseconds").into(),
+                    Some(default.update_rate_ms.to_string()),
                     number_input!(c.update_rate_ms, u64, UpdateRateInput)
                         .min(1)
                         .into()
@@ -216,6 +232,7 @@ impl ConfigsScreen {
                 config_entry(
                     "Max results per tick",
                     desc_text("How many search results to take every update tick").into(),
+                    Some(default.max_results_per_tick.to_string()),
                     number_input!(c.max_results_per_tick, usize, MaxResultsPerTickInput)
                         .min(1)
                         .into()
@@ -225,6 +242,7 @@ impl ConfigsScreen {
                 config_entry(
                     "Max result count",
                     desc_text("How many results to show all at once").into(),
+                    Some(default.max_result_count.to_string()),
                     number_input!(c.max_result_count, usize, MaxResultCountChanged)
                         .min(1)
                         .into()
@@ -243,6 +261,7 @@ impl ConfigsScreen {
                     ]
                     .spacing(4)
                     .into(),
+                    Some(format!("{} bytes", default.thumbnail_cache_size)),
                     number_input!(c.thumbnail_cache_size, u64, ThumbnailCacheSizeInput) .into()
                 ),
 
@@ -250,9 +269,25 @@ impl ConfigsScreen {
                 config_entry(
                     "Thumbnail builder thread count",
                     desc_text("How many threads to use for building thumbnails") .into(),
+                    Some(default.thumbnail_thread_count.to_string()),
                     number_input!(c.thumbnail_thread_count, u8, ThumbnailThreadCountInput)
                         .min(1)
                         .into()
+                ),
+
+                // Thumbnail rebuild prob
+                config_entry(
+                    "Thumbnail update prob",
+                    desc_text("The probability that a file's thumbnail will be updated. 
+Useful if you make changes to an image file while this app is open, but will cause unnecessary re-computation if set too high"
+                    ).into(),
+                    Some(format!( "{}%", (default.thumbnail_update_prob * 100.0).round() )),
+                    column![
+                        text(format!( "{}%", (c.thumbnail_update_prob * 100.0).round() )),
+                        Slider::new(0.0..=1.0, c.thumbnail_update_prob, |v| Message::ThumbnailUpdateProbInput(v).into())
+                            .step(0.01)
+                    ]
+                    .into()
                 ),
 
             ]

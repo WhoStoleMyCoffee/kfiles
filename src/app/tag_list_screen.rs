@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use iced::event::Status;
 use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, Column, Container};
-use iced::{Command, Event, Length};
+use iced::{Command, Element, Event, Length};
 
 use iced_aw::spinner;
 use iced_aw::Bootstrap;
@@ -100,7 +100,7 @@ impl TagListScreen {
         Command::none()
     }
 
-    pub fn view(&self) -> Column<AppMessage> {
+    pub fn view(&self) -> Element<AppMessage> {
         let list = self.view_list();
 
         column![
@@ -119,6 +119,7 @@ impl TagListScreen {
         ]
         .width(Length::Fill)
         .height(Length::Fill)
+        .into()
     }
 
     fn view_list(&self) -> Container<AppMessage> {

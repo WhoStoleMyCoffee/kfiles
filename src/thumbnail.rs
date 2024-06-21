@@ -135,19 +135,24 @@ impl ThumbnailBuilder {
         let path = path.to_path_buf();
         thread::spawn(move || path.create_thumbnail())
     }
+
+    pub fn join_threads(&mut self) {
+        for worker in self.workers.iter_mut() {
+            let Some(handle) = worker.take() else {
+                continue;
+            };
+
+            if let Err(err) = handle.join() {
+                println!("[ThumbnailBuilder::drop()] Failed to join worker thread:\n {err:?}");
+            }
+        }
+    }
+
 }
 
 impl Drop for ThumbnailBuilder {
     fn drop(&mut self) {
-        // Join all threads
-        for worker in self.workers.iter_mut() {
-            if let Some(handle) = worker.take() {
-                if let Err(err) = handle.join() {
-                    println!("[ThumbnailBuilder::drop()] Failed to join worker thread:\n {err:?}");
-                }
-            }
-        }
-
+        self.join_threads();
     }
 }
 

@@ -286,10 +286,10 @@ impl Screen {
 
     fn view(&self) -> Element<Message> {
         match self {
-            Screen::Main(main) => main.view().into(),
-            Screen::TagList(tag_list) => tag_list.view().into(),
-            Screen::TagEdit(tag_edit) => tag_edit.view().into(),
-            Screen::Configs(configs) => configs.view().into(),
+            Screen::Main(main) => main.view(),
+            Screen::TagList(tag_list) => tag_list.view(),
+            Screen::TagEdit(tag_edit) => tag_edit.view(),
+            Screen::Configs(configs) => configs.view(),
         }
     }
 

@@ -5,7 +5,8 @@ use iced::event::Status;
 use iced::keyboard::Key;
 use iced::widget::scrollable::Viewport;
 use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, Column, Container};
-use iced::{self, keyboard, Event, Length, Rectangle};
+use iced::window::{self, close};
+use iced::{self, keyboard, Element, Event, Length, Rectangle};
 use iced::Command;
 use iced_aw::Wrap;
 use rand::Rng;
@@ -91,6 +92,7 @@ pub struct MainScreen {
     receiver: Option<Receiver<Item>>,
     /// Tuple with the item index it's trying to build and the builder itself
     thumbnail_builder: (usize, ThumbnailBuilder),
+    thumbnail_update_prob: f64,
     scroll: f32,
     results_container_bounds: Option<Rectangle>,
     hovered_path: Option<PathBuf>,
@@ -127,6 +129,7 @@ impl MainScreen {
                     0,
                     ThumbnailBuilder::new(cfg.thumbnail_thread_count)
                 ),
+                thumbnail_update_prob: cfg.thumbnail_update_prob as f64,
                 scroll: 0.0,
                 results_container_bounds: None,
                 hovered_path: None,
@@ -273,7 +276,7 @@ impl MainScreen {
         Command::none()
     }
 
-    pub fn view(&self) -> Container<AppMessage> {
+    pub fn view(&self) -> Element<AppMessage> {
         use scrollable::{Direction, Properties};
 
         let query_input = self.view_query_input();
@@ -304,6 +307,7 @@ impl MainScreen {
                     .size(12)
             )),
         )
+        .into()
     }
 
     fn view_query_input(&self) -> Column<AppMessage> {
@@ -391,13 +395,16 @@ impl MainScreen {
             return;
         }
 
-        // If thumbnail already exists, don't try to rebuild it 90% of the time
-        // TODO make the probability configurable
-        if path.get_thumbnail_cache_path().exists() && rand::thread_rng().gen_bool(0.9) {
+        // If thumbnail already exists, don't try to rebuild it some percentage of the time
+        // (configurable)
+        if path.get_thumbnail_cache_path().exists()
+            && !rand::thread_rng().gen_bool(self.thumbnail_update_prob)
+        {
             return;
         }
 
         // Build
+        // println!("building {}", path.display());
         if let Err(err) = builder.build_for_path(path) {
             println!("Failed to build thumbnail for {}: {}", path.display(), err);
         }
@@ -430,28 +437,37 @@ impl MainScreen {
         use iced::keyboard::{Event as KeyboardEvent, Key, key::Named};
 
         match event {
-            // UNHANDLED KEY PRESS
-            Event::Keyboard(KeyboardEvent::KeyPressed { key, modifiers, .. })
-                if status == Status::Ignored =>
-            {
-                if !modifiers.is_empty() {
-                    return Command::none();
-                }
-                let key: Key<&str> = key.as_ref();
+            // KEY PRESS
+            Event::Keyboard(KeyboardEvent::KeyPressed { key, modifiers, .. }) => {
+                if modifiers.is_empty() && status == Status::Ignored {
+                    let key: Key<&str> = key.as_ref();
 
-                // Focus query
-                if FOCUS_QUERY_KEYS.contains(&key) {
-                    return MainScreen::focus_query() .map(|m| m.into());
+                    // Focus query
+                    if FOCUS_QUERY_KEYS.contains(&key) {
+                        return MainScreen::focus_query() .map(|m| m.into());
+                    }
                 }
 
                 // Other keys
                 match key {
                     // Open first item
-                    Key::Named(Named::Enter) => {
+                    Key::Named(Named::Enter) if modifiers.is_empty() && status == Status::Ignored => {
                         if let Some(Item(_, path)) = self.items.first() {
-                            return KFiles::open_path(path)
+                            return KFiles::open_path(path);
                         }
                     }
+
+                    // Open first item and close
+                    /*
+                    Key::Named(Named::Enter) if modifiers.command() => {
+                        if let Some(Item(_, path)) = self.items.first() {
+                            return Command::batch(vec![
+                                KFiles::open_path(path),
+                                window::close(window::Id::MAIN),
+                            ]);
+                        }
+                    }
+                    */
 
                     _ => {}
                 }

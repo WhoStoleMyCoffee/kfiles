@@ -6,7 +6,7 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::widget::text_editor::{Action, Content};
 use iced::widget::{self, button, checkbox, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, vertical_space, Column, Row};
-use iced::{Alignment, Color, Command, Event, Length};
+use iced::{Alignment, Color, Command, Element, Event, Length};
 
 use iced_aw::{Bootstrap, Spinner};
 use rfd::FileDialog;
@@ -394,7 +394,7 @@ impl TagEditScreen {
         .align_items(Alignment::Center)
     }
 
-    pub fn view(&self) -> Column<AppMessage> {
+    pub fn view(&self) -> Element<AppMessage> {
         use scrollable::{Direction, Properties};
 
         let col = self.view_top();
@@ -404,7 +404,8 @@ impl TagEditScreen {
                 container(Spinner::new() .width(64).height(64))
                     .width(Length::Fill)
                     .center_x()
-            );
+            )
+            .into();
         }
 
         // MAIN
@@ -418,6 +419,7 @@ impl TagEditScreen {
             })
             .into(),
         ])
+        .into()
     }
 
     pub fn handle_event(&mut self, event: Event, status: Status) -> Command<AppMessage> {

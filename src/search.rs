@@ -256,7 +256,7 @@ mod constraint {
             // Contains constraint
             constraints.contains = Contains::parse(&mut str);
 
-            let mut score_query: Vec<&str> = Vec::new();
+            let mut score_query: String = String::new();
             for arg in str.split(' ')
                 .map(|str| str.trim())
                 .filter(|str| !str.is_empty())
@@ -274,12 +274,11 @@ mod constraint {
                 }
 
                 // Everything else -> Score constraint (aka fuzzy search)
-                score_query.push(arg);
+                score_query += arg;
             }
 
             if !score_query.is_empty() {
-                let query = score_query.join(" ");
-                constraints.score = Some(Score::parse(&query));
+                constraints.score = Some(Score::parse(&score_query));
             }
 
             constraints

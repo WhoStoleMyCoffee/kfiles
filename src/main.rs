@@ -96,7 +96,8 @@ impl ToPrettyString for PathBuf {
 
 
 mod fs {
-    use std::{fs::File, io::Write, path::PathBuf, time::{Duration, Instant, SystemTime}};
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
 
     #[derive(Debug)]
     pub struct Timeout;
