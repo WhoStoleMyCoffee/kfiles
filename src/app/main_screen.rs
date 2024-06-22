@@ -41,6 +41,7 @@ const MAIN_RESULTS_ID: fn() -> container::Id = || { container::Id::new("main_res
 #[derive(Debug, Clone)]
 pub enum Message {
     QueryTextChanged(String),
+    QuerySubmit,
     ToggleQueryTag {
         tag_id: TagID,
         clear_input: bool,
@@ -218,6 +219,11 @@ impl MainScreen {
             .map(Message::ResultsBoundsFetched)
     }
 
+    pub fn open_first_result(&self) -> Option<Command<AppMessage>> {
+        let Item(_, path) = self.items.first()?;
+        Some(KFiles::open_path(path))
+    }
+
     pub fn update(&mut self, message: Message) -> Command<AppMessage> {
         match message {
             Message::FocusQuery => {
@@ -230,6 +236,10 @@ impl MainScreen {
                 if has_changed {
                     self.reset_search();
                 }
+            }
+
+            Message::QuerySubmit => {
+                return self.open_first_result() .unwrap_or(Command::none());
             }
 
             Message::ToggleQueryTag { tag_id, clear_input } => {
@@ -337,6 +347,7 @@ impl MainScreen {
                 text_input
                     .id(QUERY_INPUT_ID())
                     .on_input(|text| Message::QueryTextChanged(text).into())
+                    .on_submit(Message::QuerySubmit.into())
             })
             .hide_on_empty()
             .style(theme::Simple),
@@ -452,9 +463,7 @@ impl MainScreen {
                 match key {
                     // Open first item
                     Key::Named(Named::Enter) if modifiers.is_empty() && status == Status::Ignored => {
-                        if let Some(Item(_, path)) = self.items.first() {
-                            return KFiles::open_path(path);
-                        }
+                        return self.open_first_result() .unwrap_or(Command::none());
                     }
 
                     // Open first item and close

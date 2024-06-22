@@ -185,7 +185,7 @@ where
                     Some(options) => options,
                     None => self.options,
                 };
-
+                
                 let Some(selected_option) = options.get(state.hovered_option?) else {
                     state.hovered_option = None;
                     return Some(event::Status::Ignored);

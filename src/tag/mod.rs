@@ -52,7 +52,7 @@ pub fn get_save_dir() -> PathBuf {
 #[cfg(test)]
 #[inline]
 pub fn get_save_dir() -> PathBuf {
-    PathBuf::from("C:/Users/ddxte/Documents/Projects/tag-explorer/tests/tags/")
+    PathBuf::from("C:/Users/ddxte/Documents/Projects/kfiles new/tests/tags/")
 }
 
 /// Get all existing tags as paths
