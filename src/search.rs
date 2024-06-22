@@ -147,15 +147,16 @@ impl Query {
         let (tx, rx) = mpsc::channel::<Item>();
 
         let constraints = self.constraints.clone();
-        let entries = Entries::intersection_of(self.tags.iter()
+        let mut entries = Entries::intersection_of(self.tags.iter()
             .map(|tag| tag.get_all_entries())
         );
 
         let handle = thread::spawn(move ||
             if constraints.is_empty() {
+                let _ = entries.filter_duplicates();
                 send_entries(tx, entries)
             } else {
-                search_entries(tx, entries, constraints)
+                search_entries(tx, entries.trim(), constraints)
             }
         );
 

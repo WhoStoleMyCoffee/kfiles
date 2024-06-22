@@ -531,7 +531,7 @@ impl TagEditScreen {
 
         match self.tag.add_entry(&path) {
             Ok(()) => self.save(),
-            Err(AddEntryError::AlreadyContained) => {
+            Err(AddEntryError::DuplicateEntry) => {
                 let pathstr: String = path.to_pretty_string();
                 send_message!(info_message(
                     format!("Entry \"{}\" is already contained", pathstr)

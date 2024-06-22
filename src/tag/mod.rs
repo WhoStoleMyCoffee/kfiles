@@ -119,34 +119,28 @@ mod tests {
         // Adding already tagged dirs
         let add_err = tag.add_entry("C:/Users/ddxte/Documents/");
         match add_err {
-            Err(AddEntryError::AlreadyContained) => {},
+            Err(AddEntryError::DuplicateEntry) => {},
             other => panic!("Expected add_err to be Err(AddEntryError::AlreadyContained). Found {:?}", other),
         }
 
         let add_err = tag.add_entry("C:/Users/ddxte/Documents/Projects/music_tools.exe");
         match add_err {
-            Err(AddEntryError::AlreadyContained) => {},
-            other => panic!("Expected add_err to be Err(AddEntryError::AlreadyContained). Found {:?}", other),
+            Ok(()) => {},
+            other => panic!("Expected add_err to be Ok(()). Found {:?}", other),
         }
 
         // Entries haven't changed
         assert_eq!(tag.entries.as_ref(), &[
             PathBuf::from("C:/Users/ddxte/Documents/"),
             PathBuf::from("C:/Users/ddxte/Videos/"),
+            PathBuf::from("C:/Users/ddxte/Documents/Projects/music_tools.exe"),
         ]);
 
-        tag.add_entry(PathBuf::from("C:/Users/ddxte/")) .unwrap();
-        assert_eq!(tag.entries.as_ref(), &[
-            PathBuf::from("C:/Users/ddxte/"),
-        ]);
-
-        assert!( !tag.remove_entry(&Path::new("C:/Users/ddxte/Documents/")) );
-        assert!( tag.remove_entry(&Path::new("C:/Users/ddxte/")) );
-        assert!( tag.entries.is_empty() );
+        assert!( !tag.remove_entry(&Path::new("C:/Users/ddxte/")) );
     }
 
     #[test]
-    fn entries_filter_duplicates() {
+    fn entries_trim() {
         let mut e = Entries::from(vec![
             PathBuf::from("C:/Users/ddxte/Documents/"),
             PathBuf::from("C:/Users/ddxte/Pictures/bread.JPG"),
@@ -163,11 +157,7 @@ mod tests {
         ]);
 
         e.0.push( PathBuf::from("C:/Users/ddxte/") );
-        let duplicates = e.filter_duplicates();
-        assert_eq!(duplicates, &[
-            PathBuf::from("C:/Users/ddxte/Documents/"),
-            PathBuf::from("C:/Users/ddxte/Pictures/bread.JPG"),
-        ]);
+        let e = e.trim();
         assert_eq!(e.as_ref(), &[
             PathBuf::from("C:/Users/ddxte/"),
         ]);

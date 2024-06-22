@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
@@ -12,11 +13,14 @@ pub enum AddEntryError {
     #[error("path does not exist")]
     NonexistentPath,
     #[error("already contained")]
-    AlreadyContained,
+    DuplicateEntry,
 }
 
 
 /// TODO hashset?
+/// - Duplicate entries are not allowed, but subpaths are
+///   E.g. `[ a/b/, a/b/ ]` is not allowed, but `[ a/b/, a/b/c ]` is
+///   TODO also why
 #[derive(Debug, Clone, Default)]
 pub struct Entries(pub(super) Vec<PathBuf>);
 
@@ -31,11 +35,10 @@ impl Entries {
             return Err(AddEntryError::NonexistentPath);
         }
 
-        if self.contains(&path) {
-            return Err(AddEntryError::AlreadyContained);
+        if self.0.contains(&path) {
+            return Err(AddEntryError::DuplicateEntry);
         }
 
-        self.0.retain(|pb| !pb.starts_with(&path));
         self.0.push(path);
         Ok(())
     }
@@ -117,6 +120,48 @@ impl Entries {
     /// Remove and return any duplicate entries
     #[must_use]
     pub fn filter_duplicates(&mut self) -> Vec<PathBuf> {
+        let mut paths: HashMap<PathBuf, bool> = HashMap::new();
+
+        self.0.retain(|path| {
+            !*paths.entry(path.clone())
+                .and_modify(|v| *v = true)
+                .or_insert(false)
+        });
+
+        paths.into_iter()
+            .filter(|(_, v)| *v)
+            .map(|(p, _)| p)
+            .collect()
+    }
+    
+    /// Creates a new [`Entries`] that's the minimum of all paths in `self`
+    /// Removes:
+    /// - Any duplicate entries
+    /// - Entries that are sub-paths of other entries
+    #[must_use]
+    pub fn trim(mut self) -> Entries {
+        let paths: Vec<PathBuf> = self.0.drain(..) .collect();
+        let mut new_entries = Entries::new();
+
+        for path in paths.into_iter() {
+            if new_entries.contains(&path) {
+                continue;
+            }
+
+            new_entries.0.retain(|pb| !pb.starts_with(&path));
+            new_entries.0.push(path);
+        }
+
+        new_entries
+    }
+
+
+    /// Remove and return any duplicate entries
+    /// TODO
+    /// also find a better name for this function
+    #[must_use]
+    pub fn sterilize(&mut self) -> Vec<PathBuf> {
+        println!("TODO Reminder: sterilize()");
         let entries: Vec<PathBuf> = self.0.drain(..) .collect();
         let mut duplicates: Vec<PathBuf> = Vec::new();
 
@@ -197,5 +242,4 @@ impl IntoIterator for Entries {
         self.0.into_iter()
     }
 }
-
 
