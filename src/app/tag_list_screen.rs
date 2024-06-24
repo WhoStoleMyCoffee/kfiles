@@ -2,21 +2,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::event::Status;
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, Column, Container};
+use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, Container};
 use iced::{Command, Element, Event, Length};
 
 use iced_aw::spinner;
 use iced_aw::Bootstrap;
 
 use crate::app::Message as AppMessage;
-use crate::tag::{ self, Tag, id::TagID };
+use crate::tagging::{ self, Tag, id::TagID };
 use crate::widget::tag_entry::TagEntry as TagEntryWidget;
 use crate::{ icon, send_message, simple_button, ToPrettyString };
 
 use super::notification::error_message;
 use super::theme::ERROR_COLOR;
 
-type LoadTagsResult = Result< Vec<Tag>, Arc<tag::LoadError> >;
+type LoadTagsResult = Result< Vec<Tag>, Arc<tagging::LoadError> >;
 
 
 #[derive(Debug, Clone)]
@@ -37,7 +37,7 @@ impl From<Message> for AppMessage {
 enum TagList {
     Loading,
     Loaded(Vec<Tag>),
-    Failed(Option<tag::LoadError>),
+    Failed(Option<tagging::LoadError>),
 }
 
 
@@ -71,7 +71,7 @@ impl TagListScreen {
             }
 
             Message::OpenTagsDir => {
-                let path: PathBuf = tag::get_save_dir();
+                let path: PathBuf = tagging::get_save_dir();
                 if let Err(err) = opener::open(&path) {
                     return send_message!(error_message(
                         format!("Failed to open {}:\n{}", path.to_pretty_string(), err)
@@ -175,10 +175,10 @@ impl TagListScreen {
 
 
 async fn load_tags() -> LoadTagsResult {
-    tag::get_all_tags()
-        .map_err(|err| Arc::new(tag::LoadError::from(err)) )?
+    tagging::get_all_tags()
+        .map_err(|err| Arc::new(tagging::LoadError::from(err)) )?
         .into_iter()
-        .map(|path| Tag::load_from_path(path) .map_err(Arc::new) )
+        .map(|path| Tag::load_from_path(&path) .map_err(Arc::new) )
         .collect()
 
 }

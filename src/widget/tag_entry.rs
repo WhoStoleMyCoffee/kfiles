@@ -5,8 +5,8 @@ use iced::widget::container::Appearance;
 use iced_aw::Bootstrap;
 
 use crate::app::theme;
-use crate::tag::id::TagID;
-use crate::tag::Tag;
+use crate::tagging::id::TagID;
+use crate::tagging::Tag;
 use crate::ToPrettyString;
 use crate::{ icon, simple_button };
 

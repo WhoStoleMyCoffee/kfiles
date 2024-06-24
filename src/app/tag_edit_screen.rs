@@ -5,7 +5,11 @@ use std::time::Duration;
 use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::widget::text_editor::{Action, Content};
-use iced::widget::{self, button, checkbox, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, vertical_rule, vertical_space, Column, Row};
+use iced::widget::{
+    self, button, checkbox, column, container, horizontal_rule,
+    horizontal_space, row, scrollable, text, text_editor, text_input,
+    vertical_space, Column, Row
+};
 use iced::{Alignment, Color, Command, Element, Event, Length};
 
 use iced_aw::{Bootstrap, Spinner};
@@ -13,8 +17,8 @@ use rfd::FileDialog;
 
 use crate::app::notification::{error_message, info_message, warning_message};
 use crate::app::Message as AppMessage;
-use crate::tag::tag::SelfReferringSubtag;
-use crate::tag::{ self, entries::Entries, Tag, id::TagID };
+use crate::tagging::tag::SelfReferringSubtag;
+use crate::tagging::{ self, entries::Entries, Tag, id::TagID };
 use crate::widget::context_menu::ContextMenu;
 use crate::widget::tag_entry;
 use crate::{ icon, send_message, simple_button, ToPrettyString };
@@ -79,7 +83,7 @@ pub struct TagEditScreen {
 
 impl TagEditScreen {
     pub fn new(tag: Tag) -> (Self, Command<AppMessage>) {
-        let (tags_cache, tag_load_command) = match tag::get_all_tag_ids() {
+        let (tags_cache, tag_load_command) = match tagging::get_all_tag_ids() {
             Ok(v) => (v, Command::none()),
             Err(err) => (
                 Vec::new(),
@@ -456,7 +460,7 @@ impl TagEditScreen {
     /// make the tag unique
     /// There will be *at most* 1 recursive call in case the tag already exists, and that's it
     fn rename(&mut self, new_id: TagID) -> Command<AppMessage> {
-        use crate::tag::RenameError;
+        use crate::tagging::RenameError;
 
         let old_path = self.tag.get_save_path();
         let new_path = new_id.get_path();
@@ -487,7 +491,7 @@ impl TagEditScreen {
                 RenameError::AlreadyExists => {
                     let id: String = new_id.as_ref().clone();
 
-                    let tags = match tag::get_all_tag_ids() {
+                    let tags = match tagging::get_all_tag_ids() {
                         Ok(v) => v,
                         Err(err) => return send_message!(error_message(
                             format!("Failed to get tags list:\n{}", err)
@@ -528,7 +532,7 @@ impl TagEditScreen {
 
     /// Add the entry `path` to the current tag's [`Entries`] and notify any errors via a [`Command`]
     fn add_entry(&mut self, path: PathBuf) -> Command<AppMessage> {
-        use tag::AddEntryError;
+        use tagging::AddEntryError;
 
         match self.tag.add_entry(&path) {
             Ok(()) => self.save(),
@@ -549,7 +553,7 @@ impl TagEditScreen {
 
     fn filter_duplicate_entries(&mut self) -> Command<AppMessage> {
         Command::batch(
-            self.tag.entries.filter_duplicates()
+            self.tag.entries.remove_duplicates()
                 .into_iter()
                 .map(|pb| 
                     send_message!(info_message(

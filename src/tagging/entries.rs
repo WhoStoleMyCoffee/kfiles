@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
@@ -124,7 +124,7 @@ impl Entries {
 
     /// Remove and return any duplicate entries
     #[must_use]
-    pub fn filter_duplicates(&mut self) -> Vec<PathBuf> {
+    pub fn remove_duplicates(&mut self) -> Vec<PathBuf> {
         let mut paths: HashMap<PathBuf, bool> = HashMap::new();
 
         self.0.retain(|path| {
@@ -138,12 +138,18 @@ impl Entries {
             .map(|(p, _)| p)
             .collect()
     }
+
+    /// Remove any duplicate entries
+    /// To get the removed paths, see [`Entries::remove_duplicates()`]
+    pub fn filter_duplicates(&mut self) {
+        let mut paths: HashSet<PathBuf> = HashSet::new();
+        self.0.retain(|path| paths.insert(path.clone()));
+    }
     
     /// Creates a new [`Entries`] that's the minimum of all paths in `self`
     /// Removes:
     /// - Any duplicate entries
     /// - Entries that are sub-paths of other entries
-    #[must_use]
     pub fn trim(mut self) -> Entries {
         let paths: Vec<PathBuf> = self.0.drain(..) .collect();
         let mut new_entries = Entries::new();
@@ -160,36 +166,7 @@ impl Entries {
         new_entries
     }
 
-
-    /// Remove and return any duplicate entries
-    /// TODO
-    /// also find a better name for this function
-    #[must_use]
-    pub fn sterilize(&mut self) -> Vec<PathBuf> {
-        println!("TODO Reminder: sterilize()");
-        let entries: Vec<PathBuf> = self.0.drain(..) .collect();
-        let mut duplicates: Vec<PathBuf> = Vec::new();
-
-        for path in entries {
-            if self.contains(&path) {
-                duplicates.push(path);
-                continue;
-            }
-
-            self.0.retain(|pb| {
-                if pb.starts_with(&path) {
-                    duplicates.push(pb.clone());
-                    false
-                } else {
-                    true
-                }
-            });
-            self.0.push(path);
-        }
-
-        duplicates
-    }
-
+    /// Converts this [`Entries`] into a list of paths separated by new line breaks
     pub fn to_string_list(&self) -> String {
         let v: Vec<String> = self.0.iter()
             .map(|pb| pb.to_pretty_string())
@@ -197,6 +174,8 @@ impl Entries {
         v.join("\n")
     }
 
+    /// Creates a new [`Entries`] from a list of paths separated by new line breaks
+    /// Also removes any duplicates in the process
     pub fn from_string_list(str: &str) -> Self {
         Entries::from(str.lines()
             .map(|s| s.trim())

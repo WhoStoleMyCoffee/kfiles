@@ -202,7 +202,7 @@ impl Tag {
     }
 
     pub fn load(id: &TagID) -> Result<Tag, LoadError> {
-        Tag::load_from_path(id.get_path())
+        Tag::load_from_path(&id.get_path())
     }
 
     /// Also removes the old file
@@ -228,19 +228,14 @@ impl Tag {
         Ok(true)
     }
 
-    /// TODO un-generic this mf
-    pub fn load_from_path<P>(path: P) -> Result<Tag, LoadError>
-    where
-        P: AsRef<Path>,
-    {
+    pub fn load_from_path(path: &Path) -> Result<Tag, LoadError> {
         let mut contents = String::new();
-        File::open(&path)?
+        File::open(path)?
             .read_to_string(&mut contents)?;
         let mut tag: Tag = SerTag::deserialize_json(&contents)?
             .into();
 
-        let file_name: &str = path.as_ref()
-            .file_stem()
+        let file_name: &str = path.file_stem()
             .and_then(|osstr| osstr.to_str())
             .ok_or(LoadError::InvalidName)?;
         tag.id = TagID(file_name.to_string());

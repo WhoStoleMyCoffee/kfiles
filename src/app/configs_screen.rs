@@ -1,6 +1,6 @@
 use iced::event::Status;
 use iced::widget::{
-    button, column, container, row, scrollable, text, Column, Container, Row, Slider, Text
+    button, column, container, row, scrollable, text, Container, Row, Slider, Text
 };
 use iced::{Color, Command, Element, Event, Length};
 
@@ -25,9 +25,11 @@ pub const DESCRIPTION_TEXT_COLOR: Color = Color {
 };
 
 
+/// Creates a new `NumberInput` with the given `value`, maxxing at `ty::MAX`,
+/// firing the given [`Message`]`::Variant` as an [`AppMessage`]
 /// Usage:
 /// ```
-/// number_input!(config.field, usize, MessageVariant)
+/// number_input!(value, ty, Variant)
 /// ```
 /// That's a weird lookin macro lol
 macro_rules! number_input {
@@ -42,8 +44,7 @@ macro_rules! number_input {
 
 
 
-/// TODO documentation
-/// Could use `Into<Element>` but I wanna avoid too many generics
+/// Create a configurable entry
 fn config_entry<'a>(
     name: &str,
     description: Element<'a, AppMessage>,
@@ -131,7 +132,7 @@ impl ConfigsScreen {
 
             Message::OpenThumbnailCacheDir => {
                 let path = thumbnail::get_cache_dir_or_create();
-                if let Err(err) = opener::open(&path) {
+                if let Err(err) = opener::open(path) {
                     return send_message!(error_message(
                         format!("Failed to open {}:\n{}", path.to_pretty_string(), err)
                     ));
@@ -214,8 +215,6 @@ impl ConfigsScreen {
         let c: &Configs = &self.configs;
         let default = Configs::default();
 
-        // TODO do the list rendering inside Configs struct?
-        // TODO use macro?
         container(scrollable(
             column![
                 // Update rate

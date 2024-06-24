@@ -85,7 +85,7 @@ pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
 mod tests {
     use std::{collections::HashSet, path::{Path, PathBuf}};
 
-    use crate::tag::{entries::{AddEntryError, Entries}, id::TagID, tag::{SelfReferringSubtag, Tag}};
+    use crate::tagging::{entries::{AddEntryError, Entries}, id::TagID, tag::{SelfReferringSubtag, Tag}};
 
     #[test]
     fn serde() {
@@ -147,7 +147,7 @@ mod tests {
             PathBuf::from("C:/Users/ddxte/Documents/"),
         ]);
 
-        let duplicates = e.filter_duplicates();
+        let duplicates = e.remove_duplicates();
         assert_eq!(duplicates, &[
             PathBuf::from("C:/Users/ddxte/Documents/"),
         ]);

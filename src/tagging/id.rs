@@ -60,7 +60,7 @@ impl TagID {
     }
 
     pub fn is_subtag_of(&self, tag: &Tag) -> bool {
-        tag.subtags.contains(&self)
+        tag.subtags.contains(self)
     }
 }
 

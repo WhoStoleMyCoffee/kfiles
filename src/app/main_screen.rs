@@ -4,15 +4,14 @@ use std::sync::mpsc::Receiver;
 use iced::event::Status;
 use iced::keyboard::Key;
 use iced::widget::scrollable::Viewport;
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, Column, Container};
-use iced::window::{self, close};
+use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, Column};
 use iced::{self, keyboard, Element, Event, Length, Rectangle};
 use iced::Command;
 use iced_aw::Wrap;
 use rand::Rng;
 
 use crate::search::Query;
-use crate::tag::{self, tag::Tag, id::TagID};
+use crate::tagging::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{theme, Message as AppMessage};
@@ -105,7 +104,7 @@ impl MainScreen {
         let mut command = MainScreen::fetch_results_bounds()
             .map(|m| m.into());
 
-        let tags_cache = match tag::get_all_tag_ids() {
+        let tags_cache = match tagging::get_all_tag_ids() {
             Ok(v) => v,
             Err(err) => {
                 command = Command::batch(vec![

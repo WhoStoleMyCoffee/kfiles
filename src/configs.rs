@@ -9,12 +9,6 @@ static GLOBAL: OnceLock<Mutex<Configs>> = OnceLock::new();
 
 
 #[derive(Debug, Error)]
-pub enum SaveError {
-    #[error(transparent)]
-    IO(#[from] io::Error),
-}
-
-#[derive(Debug, Error)]
 pub enum LoadError {
     #[error("invalid file name")]
     InvalidName,
@@ -26,7 +20,7 @@ pub enum LoadError {
 
 
 
-/// TODO documentation
+/// Gets the save path of the configs file
 pub fn get_save_path() -> PathBuf {
     use crate::APP_NAME;
 
@@ -38,7 +32,7 @@ pub fn get_save_path() -> PathBuf {
 }
 
 
-/// TODO documentation
+/// Load the configs file from disk
 pub fn load_configs() -> Result<Configs, LoadError> {
     let mut contents = String::new();
     let path = get_save_path();
@@ -50,8 +44,8 @@ pub fn load_configs() -> Result<Configs, LoadError> {
     Ok(configs)
 }
 
-/// TODO documentation
-pub fn save_configs(configs: &Configs) -> Result<(), SaveError> {
+/// Save the given [`Configs`] to disk, creating directories if necessary
+pub fn save_configs(configs: &Configs) -> io::Result<()> {
     let path = get_save_path();
     if !path.exists() {
         let dir = path.parent().expect("could not get parent dir");
@@ -66,23 +60,33 @@ pub fn save_configs(configs: &Configs) -> Result<(), SaveError> {
 
 
 
-/// TODO documentation
+/// Gets the global [`Configs`] instance
+/// This returns a [`MutexGuard`], so it will lock it until dropped
+///
+/// # Panics
+///
+/// Panics if the [`GLOBAL`] static is not initialized
+/// See [`set_global`]
 pub fn global() -> MutexGuard<'static, Configs> {
     let mutex = GLOBAL.get()
         .expect("global configs not initialized");
     mutex.lock()
         .unwrap_or_else(|mut err| {
-            println!("TODO error handling: mutex was poisonned");
+            println!("Error while getting global Configs instance:\n Mutex was poisonned");
             **err.get_mut() = Configs::default();
             mutex.clear_poison();
             err.into_inner()
         })
 }
 
-/// TODO documentation
+/// Attempts to set the global [`Configs`] instance
+/// If already set, it will be unchanged, and this function will return the inputted `configs`
 pub fn set_global(configs: Configs) -> Result<(), Configs> {
+    #[allow(clippy::unwrap_used)]
     GLOBAL.set( Mutex::new(configs) )
-        .map_err(|m| m.into_inner() .unwrap() )
+        .map_err(|m| m.into_inner()
+            .unwrap() // Will not panic because there are no other users of the Mutex
+        )
 }
 
 
@@ -99,7 +103,7 @@ pub struct Configs {
 
 impl Configs {
     #[inline]
-    pub fn save(&self) -> Result<(), SaveError> {
+    pub fn save(&self) -> io::Result<()> {
         save_configs(self)
     }
 }

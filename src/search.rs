@@ -6,7 +6,7 @@ use walkdir::{DirEntry, WalkDir};
 
 use crate::app::main_screen::Item;
 use crate::strmatch::Sublime;
-use crate::tag::{ entries::Entries, Tag };
+use crate::tagging::{ entries::Entries, Tag };
 
 use self::constraint::{ConstraintList, Score};
 
@@ -153,7 +153,7 @@ impl Query {
 
         let handle = thread::spawn(move ||
             if constraints.is_empty() {
-                let _ = entries.filter_duplicates();
+                let _ = entries.remove_duplicates();
                 send_entries(tx, entries)
             } else {
                 search_entries(tx, entries.trim(), constraints)
@@ -400,8 +400,8 @@ mod constraint {
         pub fn parse(str: &mut String) -> Vec<Contains> {
             static REGEX: OnceLock<Regex> = OnceLock::new();
 
+            #[allow(clippy::unwrap_used)]
             let re: &Regex = REGEX.get_or_init(||
-                // TODO this could be improved
                 Regex::new(r#" ?(?<invert>!)?"(?<inner>[^"]+)("( |$)|$)"#)
                     .unwrap() // Will never fail
                // (?<invert>!)?     Optional `!` to invert
@@ -413,7 +413,13 @@ mod constraint {
             let mut drain_ranges = Vec::new();
             // Parse
             for cap in re.captures_iter(str) {
-                let inner_match = cap.name("inner") .unwrap(); // Should not fail
+                let inner_match = match cap.name("inner") {
+                    Some(m) => m,
+                    None => {
+                        println!("Error on constraint::Contains::parse():\n Failed to get inner match group");
+                        continue;
+                    },
+                };
                 let inner: &str = inner_match.as_str();
                 let mut range = inner_match.range();
 

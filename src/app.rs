@@ -12,7 +12,7 @@ pub mod tag_list_screen;
 pub mod tag_edit_screen;
 pub mod configs_screen;
 
-use crate::tag::Tag;
+use crate::tagging::Tag;
 use crate::widget::notification_card::NotificationCard;
 use crate::{configs, ToPrettyString};
 

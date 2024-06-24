@@ -4,7 +4,7 @@ use iced::{ Application, Settings};
 
 pub mod app;
 pub mod search;
-pub mod tag;
+pub mod tagging;
 pub mod thumbnail;
 pub mod widget;
 pub mod strmatch;
@@ -18,10 +18,15 @@ static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 
 fn main() -> iced::Result {
-    // TODO handle errors
+    // Load configs
     let configs = configs::load_configs()
         .unwrap_or_else(|err| {
-            println!("TODO error handling: {err}");
+            match err {
+                configs::LoadError::IO(err)
+                    if err.kind() == io::ErrorKind::NotFound =>
+                    println!("Configs file not found, using default Configs instead"),
+                err => println!("Failed to load Configs: {:?}", err),
+            }
             configs::Configs::default()
         });
 
@@ -48,7 +53,9 @@ fn main() -> iced::Result {
     }
 
     // Save configs
-    configs::global().save() .unwrap();
+    if let Err(err) = configs::global().save() {
+        println!("ERROR: Failed to save Configs:\n {err:?}");
+    }
 
     res
 }
