@@ -17,10 +17,15 @@ pub enum AddEntryError {
 }
 
 
-/// TODO hashset?
-/// - Duplicate entries are not allowed, but subpaths are
-///   E.g. `[ a/b/, a/b/ ]` is not allowed, but `[ a/b/, a/b/c ]` is
-///   TODO also why
+
+/// List of paths which a [`Tag`] contains
+///
+/// Duplicate entries are not allowed (obviously), but subpaths are
+/// E.g. `[ a/b/, a/b/ ]` is not allowed, but `[ a/b/, a/b/c ]` is
+/// The user will get to see the list of paths when they aren't searching / querying anything,
+/// and they'll get squished together anyways when they are
+/// E.g. `[ a/b/, a/b/c ]` -- User makes a query --> Search through `[ a/b/ ]`
+/// Also, maybe use a hashset instead?
 #[derive(Debug, Clone, Default)]
 pub struct Entries(pub(super) Vec<PathBuf>);
 

@@ -8,6 +8,9 @@ use super::get_save_dir;
 use super::tag::{LoadError, Tag};
 
 
+/// Always in kebab case because yes
+/// The tag data for `TagId("my-tag")` will be saved at
+/// "Appdata/Roaming/kfiles/tags/my-tag.json"
 #[derive(Debug, Default, PartialEq, Eq, Clone, Hash)]
 pub struct TagID(pub(super) String);
 

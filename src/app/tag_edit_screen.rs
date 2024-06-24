@@ -5,7 +5,7 @@ use std::time::Duration;
 use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::widget::text_editor::{Action, Content};
-use iced::widget::{self, button, checkbox, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, vertical_space, Column, Row};
+use iced::widget::{self, button, checkbox, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, vertical_rule, vertical_space, Column, Row};
 use iced::{Alignment, Color, Command, Element, Event, Length};
 
 use iced_aw::{Bootstrap, Spinner};
@@ -213,7 +213,6 @@ impl TagEditScreen {
                     return Command::none();
                 };
 
-                // TODO handle unwrap
                 match Tag::load(tag_id) {
                     Ok(tag) => return send_message!(AppMessage::SwitchToTagEditScreen(tag)),
                     Err(err) => {
@@ -366,7 +365,7 @@ impl TagEditScreen {
         row![
             // Context menu button
             ContextMenu::new(
-                button("t") .on_press(AppMessage::Empty),
+                button( icon!(Bootstrap::BookmarkPlus) ) .on_press(AppMessage::Empty),
                 || container(scrollable(column(
                     self.tags_cache.iter()
                         .filter(|id| **id != self.tag.id)
@@ -382,6 +381,7 @@ impl TagEditScreen {
                 .into()
             )
             .left_click_release_activated(),
+            text(" - "),
         ]
         // List
         .extend(self.tag.get_subtags().iter().enumerate()
@@ -391,6 +391,7 @@ impl TagEditScreen {
                     .into()
             )
         )
+        .spacing(8)
         .align_items(Alignment::Center)
     }
 

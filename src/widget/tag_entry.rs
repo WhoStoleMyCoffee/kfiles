@@ -1,10 +1,11 @@
 use iced::{Alignment, Color, Element, Length};
-use iced::widget::{ column, component, container, horizontal_space, row, text, Column, Component, Container, Row
+use iced::widget::{ button, column, component, container, horizontal_space, row, scrollable, text, Column, Component, Container, Row, Scrollable
 };
 use iced::widget::container::Appearance;
 use iced_aw::Bootstrap;
 
 use crate::app::theme;
+use crate::tag::id::TagID;
 use crate::tag::Tag;
 use crate::ToPrettyString;
 use crate::{ icon, simple_button };
@@ -38,6 +39,7 @@ pub enum Event {
     Empty,
     ToggleExpand,
     EditPressed,
+    SubtagPressed(usize),
 }
 
 #[derive(Debug, Default)]
@@ -55,6 +57,7 @@ pub struct State {
 pub struct TagEntry<'a, Message: Clone> {
     tag: &'a Tag,
     on_edit_pressed: Option<Message>,
+    on_subtag_pressed: Option< Box<dyn Fn(TagID) -> Message + 'a > >,
     /// Cache containing the indices of entries that don't exist
     erroneous_entries: Vec<usize>,
 }
@@ -64,6 +67,7 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
         TagEntry {
             tag,
             on_edit_pressed: None,
+            on_subtag_pressed: None,
             erroneous_entries: tag.entries.as_ref().iter().enumerate()
                 .filter(|(_, pb)| !pb.exists())
                 .map(|(i, _)| i)
@@ -73,6 +77,13 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
 
     pub fn on_edit_pressed(mut self, message: Message) -> Self {
         self.on_edit_pressed = Some(message);
+        self
+    }
+
+    pub fn on_subtag_pressed<F>(mut self, f: F) -> Self
+    where F: 'a + Fn(TagID) -> Message,
+    {
+        self.on_subtag_pressed = Some(Box::new(f));
         self
     }
 
@@ -110,6 +121,12 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
             .push_maybe((!self.erroneous_entries.is_empty()).then(||
                 icon!(Bootstrap::ExclamationCircleFill, theme::WARNING_COLOR)
             ))
+
+            // Subtags, if enabled
+            .push_maybe(self.on_subtag_pressed.is_some()
+                .then(|| self.view_subtags_list(state))
+            )
+
             .push(horizontal_space())
             // Edit button
             .push_maybe(self.on_edit_pressed.is_some().then(||
@@ -122,6 +139,29 @@ impl<'a, Message: Clone> TagEntry<'a, Message> {
         .style( TOP_BAR_APPEARANCE() )
         .width(Length::Fill)
         .padding(8.0)
+    }
+
+    fn view_subtags_list(&self, _state: &State) -> Scrollable<Event> {
+        use iced::widget::scrollable::{ Direction, Properties };
+
+        scrollable(
+            row(
+                self.tag.get_subtags()
+                .iter()
+                .enumerate()
+                .map(|(i, tag_id)|
+                     button(text(tag_id.to_string()))
+                     .on_press(Event::SubtagPressed(i))
+                     .into()
+                )
+            )
+            .spacing(4)
+        )
+        .direction(Direction::Horizontal(
+            Properties::default()
+                .width(2)
+                .scroller_width(2)
+        ))
     }
 
     fn is_entry_index_erroneous(&self, index: &usize) -> bool {
@@ -149,6 +189,13 @@ impl<'a, Message: Clone> Component<Message> for TagEntry<'a, Message> {
 
             Event::EditPressed => {
                 self.on_edit_pressed.clone()
+            }
+
+            Event::SubtagPressed(index) => {
+                let callback = self.on_subtag_pressed.as_ref()?;
+                let tag_id = self.tag.get_subtags().get(index)?
+                    .clone();
+                Some(callback(tag_id))
             }
         }
     }

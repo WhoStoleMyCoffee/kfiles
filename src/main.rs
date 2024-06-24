@@ -39,14 +39,12 @@ fn main() -> iced::Result {
     // Trim thumbnail cache once we're done
     println!("Trimming thumbnail cache...");
     match thumbnail::trim_cache( configs::global().thumbnail_cache_size ) {
-        Ok(bytes) if bytes > 0 => {
-            println!("Sucessfully trimmed thumbnail cache by {} bytes", bytes)
-        }
+        Ok(0) => println!("Thumbnail cache already clear"),
+        Ok(bytes) => println!("Sucessfully trimmed thumbnail cache by {} bytes", bytes),
         Err(err) => match err.kind() {
             io::ErrorKind::NotFound => println!("Thumbnail cache already clear"),
             _ => println!("ERROR: failed to trim thumbnail cache:\n{}", err),
         }
-        _ => {}
     }
 
     // Save configs

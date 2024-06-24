@@ -153,6 +153,12 @@ impl TagListScreen {
                 // aaa i dont like the cloning
                 TagEntryWidget::new(t)
                     .on_edit_pressed(AppMessage::SwitchToTagEditScreen(t.clone()))
+                    .on_subtag_pressed(|id| match id.load() {
+                        Ok(tag) => AppMessage::SwitchToTagEditScreen(tag),
+                        Err(err) => error_message(
+                            format!("Failed to load tag \"{}\".\n{:?}", id, err)
+                        ),
+                    })
                     .into()
             ))
             .width(Length::Fill)

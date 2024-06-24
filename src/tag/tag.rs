@@ -54,13 +54,18 @@ impl Display for SelfReferringSubtag {
 
 #[derive(Debug, Clone)]
 pub struct Tag {
+    /// Corresponds with file name in which the data is stored
     pub id: TagID,
 
+    /// Paths that this tag contains
+    /// Automatically goes inside folders during search, and ignores those that
+    /// start with "." (e.g. ".git/")
     pub entries: Entries,
 
     /// All tags that are tagged with this tag
-    /// E.g. tag `"pictures"` could have `subtags = [ "trip", "cats" ]`
-    /// Then, searching for tag `"pictures"` would reveal dirs from all 3 tags
+    /// E.g. tag `"pictures"` could have `subtags = [ "animals", "memes" ]`
+    /// Then, searching for tag `"pictures"` would reveal entries from all 3 tags,
+    /// but `"animals"` and `"memes"` would only reveal entries from themselves
     pub(super) subtags: Vec<TagID>,
 }
 
