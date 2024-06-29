@@ -1,5 +1,5 @@
+use std::iter;
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
 
 use iced::event::Status;
 use iced::keyboard::Key;
@@ -89,7 +89,6 @@ pub struct MainScreen {
     query: Query,
     query_text: String,
     items: Vec<Item>,
-    receiver: Option<Receiver<Item>>,
     /// Tuple with the item index it's trying to build and the builder itself
     thumbnail_builder: (usize, ThumbnailBuilder),
     thumbnail_update_prob: f64,
@@ -124,7 +123,6 @@ impl MainScreen {
                 query: Query::empty(),
                 query_text: String::default(),
                 items: Vec::new(),
-                receiver: None,
                 thumbnail_builder: (
                     0,
                     ThumbnailBuilder::new(cfg.thumbnail_thread_count)
@@ -150,7 +148,9 @@ impl MainScreen {
     pub fn try_receive_results(&mut self) -> Option<RecvItemsResult> {
         use std::sync::mpsc::TryRecvError;
 
-        let rx = self.receiver.as_mut()?;
+        let has_search = !self.query.is_empty();
+        let rx = self.query.receiver.as_mut()?;
+
         let (max_result_count, max_this_tick) = {
             let cfg = configs::global();
             (cfg.max_result_count, cfg.max_results_per_tick)
@@ -158,25 +158,25 @@ impl MainScreen {
 
         // Already full
         if self.items.len() >= max_result_count {
-            self.receiver = None;
+            self.query.receiver = None;
             return Some(RecvItemsResult::Full);
         }
 
+        // We `try_recv()` first before `try_iter()` to check if the sender has disconnected
+        // Because if it has, we also want to drop the receiver
+        let first = match rx.try_recv() {
+            Ok(item) => item,
+            Err(TryRecvError::Empty) => return Some(RecvItemsResult::Empty),
+            Err(TryRecvError::Disconnected) => {
+                self.query.receiver = None;
+                return Some(RecvItemsResult::Disconnected);
+            }
+        };
+
         // If there is no query, just append normally
         // I didn't mean for it to rhyme, I'm just low on time
-        if self.query.is_empty() {
-            // We `try_recv()` first before `try_iter()` to check if the sender has disconnected
-            // Because if it has, we also want to drop the receiver
-            let item = match rx.try_recv() {
-                Ok(item) => item,
-                Err(TryRecvError::Empty) => return Some(RecvItemsResult::Empty),
-                Err(TryRecvError::Disconnected) => {
-                    self.receiver = None;
-                    return Some(RecvItemsResult::Disconnected);
-                }
-            };
-
-            self.items.push(item);
+        if !has_search {
+            self.items.push(first);
             self.items.append(&mut rx.try_iter()
                 .take(max_this_tick)
                 .collect()
@@ -185,19 +185,10 @@ impl MainScreen {
             return Some(RecvItemsResult::Ok);
         }
 
-        for _ in 0..max_this_tick {
-            // We do a loop of `try_recv()` insead of `try_iter()` for the same reasons
-            // same match statement as above...
-            let item = match rx.try_recv() {
-                Ok(item) => item,
-                Err(TryRecvError::Empty) => return Some(RecvItemsResult::Empty),
-                Err(TryRecvError::Disconnected) => {
-                    self.receiver = None;
-                    return Some(RecvItemsResult::Disconnected);
-                }
-            };
-
-            // Insert
+        // Add new items in sorted order
+        let it = iter::once(first)
+            .chain( rx.try_iter().take(max_this_tick) );
+        for item in it {
             let index = self.items.partition_point(|&Item(score, _)| score > item.0);
             self.items.insert(index, item);
         }
@@ -374,7 +365,7 @@ impl MainScreen {
             None => Wrap::new(),
         };
 
-        if self.receiver.is_some() {
+        if self.query.receiver.is_some() {
             wrap = wrap.push(iced_aw::Spinner::new()
                 .width(Length::Fixed(ITEM_SIZE.0))
                 .height(Length::Fixed(ITEM_SIZE.1))
@@ -437,7 +428,7 @@ impl MainScreen {
 
     pub fn reset_search(&mut self) {
         self.items.clear();
-        self.receiver = Some(self.query.search());
+        self.query.search();
         self.scroll = 0.0;
         self.hovered_path = None;
     }
@@ -461,6 +452,7 @@ impl MainScreen {
                 // Other keys
                 match key {
                     // Open first item
+                    // TODO bug where this registers when you press ENTER to close another app, which then refocuses on kf
                     Key::Named(Named::Enter) if modifiers.is_empty() && status == Status::Ignored => {
                         return self.open_first_result() .unwrap_or(Command::none());
                     }
@@ -492,3 +484,6 @@ impl MainScreen {
         Command::none()
     }
 }
+
+
+

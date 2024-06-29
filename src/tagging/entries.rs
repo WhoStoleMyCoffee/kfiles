@@ -119,7 +119,7 @@ impl Entries {
     /// `entries.as_ref().iter()`
     #[inline]
     pub fn iter(self) -> Box<dyn Iterator<Item = PathBuf>> {
-        search::iter_entries(self)
+        search::iter_entries( self.into() )
     }
 
     /// Remove and return any duplicate entries
@@ -212,18 +212,24 @@ impl DerefMut for Entries {
     }
 }
 
-impl<T: Into<Vec<PathBuf>>> From<T> for Entries {
-    fn from(value: T) -> Self {
-        Entries(value.into())
-    }
-}
-
 impl IntoIterator for Entries {
     type Item = PathBuf;
     type IntoIter = <Vec<PathBuf> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
+    }
+}
+
+impl From<Vec<PathBuf>> for Entries {
+    fn from(value: Vec<PathBuf>) -> Self {
+        Entries(value.into())
+    }
+}
+
+impl From<Entries> for Vec<PathBuf> {
+    fn from(value: Entries) -> Self {
+        value.0
     }
 }
 

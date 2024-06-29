@@ -23,7 +23,7 @@ fn is_direntry_hidden(entry: &DirEntry) -> bool {
 
 /// Iterates through all the paths within an [`Entries`]
 /// See also [`Searcher`]
-pub fn iter_entries(entries: Entries) -> Box<dyn Iterator<Item = PathBuf>> {
+pub fn iter_entries(entries: Vec<PathBuf>) -> Box<dyn Iterator<Item = PathBuf>> {
     // Files and folders merged with subtags
     let (files, folders) = entries.into_iter()
         .partition::<Vec<PathBuf>, _>(|pb| pb.is_file());
@@ -51,21 +51,11 @@ pub struct Searcher {
 }
 
 impl Searcher {
-    pub fn new(entries: Entries, constraints: ConstraintList) -> Self {
+    pub fn new(entries: Vec<PathBuf>, constraints: ConstraintList) -> Self {
         Searcher {
             iter: iter_entries(entries),
             constraints,
         }
-    }
-
-    pub fn fuzzy_search(entries: Entries, matcher: Sublime) -> Self {
-        Searcher::new(
-            entries,
-            ConstraintList {
-                score: Some(Score { matcher, inverted: false }),
-                ..Default::default()
-            }
-        )
     }
 }
 
@@ -89,6 +79,7 @@ impl Iterator for Searcher {
 pub struct Query {
     pub tags: Vec<Tag>,
     pub constraints: ConstraintList,
+    pub receiver: Option< Receiver<Item> >,
     search_handle: Option<JoinHandle<()>>,
 }
 
@@ -101,6 +92,7 @@ impl Query {
         Query {
             tags: Vec::new(),
             constraints: ConstraintList::parse(query),
+            receiver: None,
             search_handle: None,
         }
     }
@@ -143,31 +135,34 @@ impl Query {
     }
 
     /// Begins the search.
-    pub fn search(&mut self) -> Receiver<Item> {
+    pub fn search(&mut self) {
         let (tx, rx) = mpsc::channel::<Item>();
 
         let constraints = self.constraints.clone();
-        let mut entries = Entries::intersection_of(self.tags.iter()
-            .map(|tag| tag.get_all_entries())
+        let entries = Entries::intersection_of(
+            self.tags.iter()
+                .map(|tag| tag.get_all_entries())
         );
 
-        let handle = thread::spawn(move ||
-            if constraints.is_empty() {
-                let _ = entries.remove_duplicates();
-                send_entries(tx, entries)
-            } else {
-                search_entries(tx, entries.trim(), constraints)
-            }
-        );
+        let handle = if constraints.is_empty() {
+            thread::spawn(move || {
+                send_entries(tx, entries.into());
+            })
+        } else {
+            thread::spawn(move || {
+                search_entries(tx, entries.trim().into(), constraints)
+            })
+        };
 
         self.search_handle = Some(handle);
-
-        rx
+        self.receiver = Some(rx);
     }
 }
 
 impl Drop for Query {
     fn drop(&mut self) {
+        self.receiver = None;
+
         // Join threads
         if let Some(handle) = self.search_handle.take() {
             if let Err(err) = handle.join() {
@@ -180,7 +175,10 @@ impl Drop for Query {
 
 
 /// Send entries in `entries` over `sender`
-fn send_entries(sender: Sender<Item>, entries: Entries) {
+fn send_entries(
+    sender: Sender<Item>,
+    entries: Vec<PathBuf>,
+) {
     let it = entries.into_iter()
         .filter(|pb| pb.exists())
         .map(|pb| Item(0, pb));
@@ -192,11 +190,13 @@ fn send_entries(sender: Sender<Item>, entries: Entries) {
     }
 }
 
-/// Searches through all paths in [`Entries`], with the given [`ConstraintList`], and sends it over
+/// Searches through all paths in in `entries` with the given [`ConstraintList`], and sends it over
 /// a `sender`
+/// Since the search can potentially take a while, also specify a break switch that will stop the
+/// searching if set to `true`
 fn search_entries(
     sender: Sender<Item>,
-    entries: Entries,
+    entries: Vec<PathBuf>,
     constraints: ConstraintList,
 ) {
     for item in Searcher::new(entries, constraints) {
