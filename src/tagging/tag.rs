@@ -8,7 +8,7 @@ use nanoserde::{DeJson, DeJsonErr, SerJson};
 
 use crate::app::main_screen::Item;
 
-use super::entries::{AddEntryError, Entries};
+use super::entries::{NonexistentPath, Entries};
 use super::id::TagID;
 
 
@@ -99,8 +99,9 @@ impl Tag {
     }
 
     /// Add an entry to this [`Tag`]
+    /// See also [`Entries::push`]
     #[inline]
-    pub fn add_entry<P>(&mut self, path: P) -> Result<(), AddEntryError>
+    pub fn add_entry<P>(&mut self, path: P) -> Result<bool, NonexistentPath>
         where P: Into<PathBuf>
     {
         self.entries.push(path.into())
@@ -173,17 +174,16 @@ impl Tag {
         // Merge subtags' entries into this one
         // TODO hmm i dont like the double-loading... once in get_all_subtags(), once again in
         // filter_map
-        for subtag in self.get_all_subtags()
+        let it = self.get_all_subtags()
             .into_iter()
-            .filter_map(|id| Tag::load(&id).ok())
-        {
-            entries = entries.or(&subtag.entries);
+            .filter_map(|id| Tag::load(&id).ok());
+        for mut subtag in it {
+            entries.as_mut().append(&mut subtag.entries);
         }
 
-        entries
+        entries.filter_duplicates()
     }
 
-    /// Saves this [`Tag`] to the disk
     pub fn save(&self) -> Result<(), SaveError> {
         let path = self.get_save_path();
         if self.id.is_empty() {
@@ -328,7 +328,7 @@ impl From<&Tag> for SerTag {
 impl From<SerTag> for Tag {
     fn from(value: SerTag) -> Self {
         Tag {
-            id: TagID::new("uninitialized-tag"),
+            id: TagID( String::new() ),
             entries: value.entries.into_iter()
                 .map(PathBuf::from)
                 .collect::<Vec<PathBuf>>()

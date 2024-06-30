@@ -532,20 +532,20 @@ impl TagEditScreen {
 
     /// Add the entry `path` to the current tag's [`Entries`] and notify any errors via a [`Command`]
     fn add_entry(&mut self, path: PathBuf) -> Command<AppMessage> {
-        use tagging::AddEntryError;
+        use tagging::entries::NonexistentPath;
 
         match self.tag.add_entry(&path) {
-            Ok(()) => self.save(),
-            Err(AddEntryError::DuplicateEntry) => {
+            Ok(true) => self.save(),
+            Ok(false) => {
                 let pathstr: String = path.to_pretty_string();
                 send_message!(info_message(
                     format!("Entry \"{}\" is already contained", pathstr)
                 ))
             }
-            Err(err) => {
+            Err(NonexistentPath) => {
                 let pathstr: String = path.to_pretty_string();
                 send_message!(error_message(
-                    format!("Failed to add entry \"{}\":\n{}", pathstr, err)
+                    format!("Failed to add entry \"{}\":\nPath does not exist", pathstr)
                 ))
             }
         }

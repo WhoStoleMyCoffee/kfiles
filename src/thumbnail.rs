@@ -68,7 +68,8 @@ impl Thumbnail for &Path {
     }
 
     fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
-        let img = ImageReader::open(self)?.decode()?;
+        let img = ImageReader::open(self)?
+            .decode()?;
 
         let (w, h) = ThumbnailSize::Icon.size();
         img.thumbnail(w, h)
@@ -94,6 +95,8 @@ impl Thumbnail for PathBuf {
 
 type Worker = JoinHandle<Result<(), ThumbnailError>>;
 
+/// Builds thumbnails.
+/// You're welcome
 #[derive(Debug)]
 pub struct ThumbnailBuilder {
     workers: Vec<Option<Worker>>,

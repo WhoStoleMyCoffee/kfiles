@@ -41,10 +41,8 @@ const MAIN_RESULTS_ID: fn() -> container::Id = || { container::Id::new("main_res
 pub enum Message {
     QueryTextChanged(String),
     QuerySubmit,
-    ToggleQueryTag {
-        tag_id: TagID,
-        clear_input: bool,
-    },
+    ToggleQueryTag(TagID),
+    QueryTagPressed(TagID),
     FocusQuery,
     ResultsScrolled(Viewport),
     ResultsBoundsFetched(Option<Rectangle>),
@@ -87,7 +85,7 @@ pub enum RecvItemsResult {
 #[derive(Debug)]
 pub struct MainScreen {
     query: Query,
-    query_text: String,
+    query_input: String,
     items: Vec<Item>,
     /// Tuple with the item index it's trying to build and the builder itself
     thumbnail_builder: (usize, ThumbnailBuilder),
@@ -100,18 +98,17 @@ pub struct MainScreen {
 
 impl MainScreen {
     pub fn new() -> (Self, Command<AppMessage>) {
-        let mut command = MainScreen::fetch_results_bounds()
-            .map(|m| m.into());
+        let mut commands: Vec<Command<AppMessage>> = vec![
+            MainScreen::fetch_results_bounds() .map(|m| m.into()),
+            text_input::focus( QUERY_INPUT_ID() ),
+        ];
 
         let tags_cache = match tagging::get_all_tag_ids() {
             Ok(v) => v,
             Err(err) => {
-                command = Command::batch(vec![
-                    command,
-                    send_message!(error_message(
-                        format!("Failed to load tags:\n{}", err),
-                    )),
-                ]);
+                commands.push(send_message!(error_message(
+                    format!("Failed to load tags:\n{}", err)
+                )));
                 Vec::new()
             }
         };
@@ -121,7 +118,7 @@ impl MainScreen {
         (
             MainScreen {
                 query: Query::empty(),
-                query_text: String::default(),
+                query_input: String::default(),
                 items: Vec::new(),
                 thumbnail_builder: (
                     0,
@@ -133,7 +130,7 @@ impl MainScreen {
                 hovered_path: None,
                 tags_cache,
             },
-            command,
+            Command::batch(commands),
         )
     }
 
@@ -221,8 +218,7 @@ impl MainScreen {
             }
 
             Message::QueryTextChanged(new_text) => {
-                let has_changed = self.query.parse_query(&new_text);
-                self.query_text = new_text;
+                let has_changed: bool = self.set_query_input(new_text);
                 if has_changed {
                     self.reset_search();
                 }
@@ -232,29 +228,33 @@ impl MainScreen {
                 return self.open_first_result() .unwrap_or(Command::none());
             }
 
-            Message::ToggleQueryTag { tag_id, clear_input } => {
+            Message::ToggleQueryTag(tag_id) => {
                 let removed: bool = self.query.remove_tag(&tag_id);
                 // If not removed, then add it
                 if !removed {
                     let tag: Tag = match tag_id.load() {
                         Ok(t) => t,
                         Err(err) => return send_message!(error_message(
-                            format!("Failed to load tag {}:\n{}", tag_id, err)
+                            format!("Failed to load tag `{}`:\n{}", tag_id, err)
                         )),
                     };
 
-                    if self.query.add_tag(tag) {
-                        self.query.constraints.clear();
-                        self.reset_search();
-                    }
+                    self.query.add_tag(tag);
                 }
 
-                if clear_input {
-                    self.query_text.clear();
-                }
+                self.set_query_input(String::new());
                 self.reset_search();
             }
 
+            Message::QueryTagPressed(tag_id) => {
+                let tag = match tag_id.load() {
+                    Ok(tag) => tag,
+                    Err(err) => return send_message!(error_message(
+                        format!("Failed to load tag `{}`:\n{:?}", tag_id, err)
+                    )),
+                };
+                return send_message!(AppMessage::SwitchToTagEditScreen(tag));
+            }
 
             Message::OpenPath(path) => {
                 return KFiles::open_path(&path);
@@ -316,22 +316,16 @@ impl MainScreen {
             row(self.query.tags.iter().map(|tag| {
                 let id = &tag.id;
                 button(text(id).size(14))
-                    .on_press(Message::ToggleQueryTag {
-                        tag_id: id.clone(),
-                        clear_input: false,
-                    }.into())
+                    .on_press( Message::QueryTagPressed(id.clone()).into() )
                     .into()
             })),
 
             // Fuzzy text input
             FuzzyInput::new(
                 "Query...",
-                &self.query_text,
+                &self.query_input,
                 &self.tags_cache,
-                |tag_id| Message::ToggleQueryTag {
-                    tag_id,
-                    clear_input: true,
-                }.into(),
+                |tag_id| Message::ToggleQueryTag(tag_id).into(),
             )
             .text_input(|text_input| {
                 text_input
@@ -431,6 +425,12 @@ impl MainScreen {
         self.query.search();
         self.scroll = 0.0;
         self.hovered_path = None;
+    }
+
+    pub fn set_query_input(&mut self, new_text: String) -> bool {
+        let has_changed: bool = self.query.parse_query(&new_text);
+        self.query_input = new_text;
+        has_changed
     }
 
     pub fn handle_event(&mut self, event: Event, status: Status) -> Command<AppMessage> {

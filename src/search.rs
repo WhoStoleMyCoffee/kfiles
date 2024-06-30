@@ -21,9 +21,9 @@ fn is_direntry_hidden(entry: &DirEntry) -> bool {
 
 
 
-/// Iterates through all the paths within an [`Entries`]
+/// Iterates through all paths in the filesystem within an [`Entries`]
 /// See also [`Searcher`]
-pub fn iter_entries(entries: Vec<PathBuf>) -> Box<dyn Iterator<Item = PathBuf>> {
+pub fn iter_entries(entries: Entries) -> Box<dyn Iterator<Item = PathBuf>> {
     // Files and folders merged with subtags
     let (files, folders) = entries.into_iter()
         .partition::<Vec<PathBuf>, _>(|pb| pb.is_file());
@@ -43,7 +43,7 @@ pub fn iter_entries(entries: Vec<PathBuf>) -> Box<dyn Iterator<Item = PathBuf>> 
 
 
 
-/// Iteratively searches through some [`Entries`] with a [`StringMatcher`]
+/// Iteratively searches through some [`Entries`]
 /// See also [`iter_entries`]
 pub struct Searcher {
     iter: Box<dyn Iterator<Item = PathBuf>>,
@@ -51,7 +51,7 @@ pub struct Searcher {
 }
 
 impl Searcher {
-    pub fn new(entries: Vec<PathBuf>, constraints: ConstraintList) -> Self {
+    pub fn new(entries: Entries, constraints: ConstraintList) -> Self {
         Searcher {
             iter: iter_entries(entries),
             constraints,
@@ -139,19 +139,26 @@ impl Query {
         let (tx, rx) = mpsc::channel::<Item>();
 
         let constraints = self.constraints.clone();
-        let entries = Entries::intersection_of(
-            self.tags.iter()
-                .map(|tag| tag.get_all_entries())
-        );
+
+        let it = self.tags.iter()
+            .map(|tag| tag.get_all_entries());
 
         let handle = if constraints.is_empty() {
-            thread::spawn(move || {
-                send_entries(tx, entries.into());
-            })
+            let entries = if self.tags.len() > 1 {
+                Entries::intersection_of(it)
+            } else {
+                Entries::from( it.flatten().collect::<Vec<PathBuf>>() )
+                    .filter_duplicates()
+            };
+
+            thread::spawn(move ||
+                send_entries(tx, entries)
+            )
         } else {
-            thread::spawn(move || {
-                search_entries(tx, entries.trim().into(), constraints)
-            })
+            let entries = Entries::intersection_of(it);
+            thread::spawn(move ||
+                search_entries(tx, entries, constraints)
+            )
         };
 
         self.search_handle = Some(handle);
@@ -177,7 +184,7 @@ impl Drop for Query {
 /// Send entries in `entries` over `sender`
 fn send_entries(
     sender: Sender<Item>,
-    entries: Vec<PathBuf>,
+    entries: Entries,
 ) {
     let it = entries.into_iter()
         .filter(|pb| pb.exists())
@@ -196,7 +203,7 @@ fn send_entries(
 /// searching if set to `true`
 fn search_entries(
     sender: Sender<Item>,
-    entries: Vec<PathBuf>,
+    entries: Entries,
     constraints: ConstraintList,
 ) {
     for item in Searcher::new(entries, constraints) {
@@ -237,11 +244,15 @@ mod constraint {
     /// ```
     #[derive(Debug, Clone, PartialEq, Eq, Default)]
     pub struct ConstraintList {
+        /// Score target path using a fuzzy search
         pub score: Option<Score>,
+        /// Look for specific strings in target
         /// All AND-ed together
         pub contains: Vec<Contains>,
-        // All OR-ed together
+        /// Look for specific file extensions
+        /// All OR-ed together
         pub extensions: Vec<Extension>,
+        /// Filter files or folders
         pub filetype: Option<FileType>,
     }
 

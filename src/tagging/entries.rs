@@ -2,30 +2,18 @@ use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
-use thiserror::Error;
-
 use crate::{search, ToPrettyString};
 
 
 
-#[derive(Debug, Error)]
-pub enum AddEntryError {
-    #[error("path does not exist")]
-    NonexistentPath,
-    #[error("already contained")]
-    DuplicateEntry,
-}
+#[derive(Debug)]
+pub struct NonexistentPath;
 
 
 
 /// List of paths which a [`Tag`] contains
-///
-/// Duplicate entries are not allowed (obviously), but subpaths are
-/// E.g. `[ a/b/, a/b/ ]` is not allowed, but `[ a/b/, a/b/c ]` is
-/// The user will get to see the list of paths when they aren't searching / querying anything,
-/// and they'll get squished together anyways when they are
-/// E.g. `[ a/b/, a/b/c ]` -- User makes a query --> Search through `[ a/b/ ]`
-/// Also, maybe use a hashset instead?
+/// All contained paths are guaranteed to exist
+/// Duplicate entries are not allowed
 #[derive(Debug, Clone, Default)]
 pub struct Entries(pub(super) Vec<PathBuf>);
 
@@ -35,80 +23,25 @@ impl Entries {
         Entries::default()
     }
 
-    pub fn push(&mut self, path: PathBuf) -> Result<(), AddEntryError> {
+    /// Adds an entry to this [`Entries`] list
+    /// Returns `Err(NonexistentPath)` if the path doesn't exist
+    /// Returns `Ok(bool)` containing whether it was added. i.e. `Ok(false)` if the entry is
+    /// already contained
+    pub fn push(&mut self, path: PathBuf) -> Result<bool, NonexistentPath> {
         if !path.exists() {
-            return Err(AddEntryError::NonexistentPath);
+            return Err(NonexistentPath);
         }
 
         if self.0.contains(&path) {
-            return Err(AddEntryError::DuplicateEntry);
+            return Ok(false);
         }
 
         self.0.push(path);
-        Ok(())
+        Ok(true)
     }
 
-    /// Create a new [`Entries`] that's a union of all `entries`, which means that
-    /// it contains all of their paths
-    pub fn union_of<I>(entries: I) -> Entries
-    where I: IntoIterator<Item = Entries>
-    {
-        entries.into_iter()
-            .reduce(|acc, e| acc.or(&e))
-            .unwrap_or_default()
-    }
-
-    /// Create a new [`Entries`] that's an intersection of all `entries`, which
-    /// means that it only contains paths that are shared between them
-    pub fn intersection_of<I>(entries: I) -> Entries
-    where
-        I: IntoIterator<Item = Entries>
-    {
-        entries.into_iter()
-            .reduce(|acc, e| acc.and(&e))
-            .unwrap_or_default()
-    }
-
-    /// Combines this `Entry` with `other` by union
-    pub fn or<E>(&self, other: &E) -> Entries
-    where
-        E: AsRef<Vec<PathBuf>>,
-    {
-        let c: Vec<PathBuf> = self.0.iter()
-            .filter(|&ap| !other.as_ref().iter()
-                .any(|bp| ap.starts_with(bp) || ap == bp)
-            )
-            .chain(other.as_ref().iter()
-                .filter(|bp| !self.0.iter()
-                    .any(|ap| bp.starts_with(ap))
-                )
-            )
-            .cloned()
-            .collect();
-
-        Entries(c)
-    }
-
-    /// Combines this `Entry` with `other` by intersection
-    pub fn and<E>(&self, other: &E) -> Entries
-    where
-        E: AsRef<Vec<PathBuf>>,
-    {
-        let c: Vec<PathBuf> = self.0.iter()
-            .filter(|&ap| other.as_ref().iter()
-                .any(|bp| ap.starts_with(bp) || ap == bp)
-            )
-            .chain(other.as_ref().iter()
-                .filter(|bp| self.0.iter()
-                    .any(|ap| bp.starts_with(ap))
-                )
-            )
-            .cloned()
-            .collect();
-
-        Entries(c)
-    }
-
+    /// Returns whether the given `path` is contained in this [`Entries`] list
+    /// To get whether a path is an entry in this list, please use `entries.as_ref().contains()`
     pub fn contains(&self, path: &Path) -> bool {
         self.0.iter().any(|p| path.starts_with(p))
     }
@@ -119,10 +52,11 @@ impl Entries {
     /// `entries.as_ref().iter()`
     #[inline]
     pub fn iter(self) -> Box<dyn Iterator<Item = PathBuf>> {
-        search::iter_entries( self.into() )
+        search::iter_entries(self)
     }
 
     /// Remove and return any duplicate entries
+    /// See also [`Entries::filter_duplicates`]
     #[must_use]
     pub fn remove_duplicates(&mut self) -> Vec<PathBuf> {
         let mut paths: HashMap<PathBuf, bool> = HashMap::new();
@@ -141,29 +75,10 @@ impl Entries {
 
     /// Remove any duplicate entries
     /// To get the removed paths, see [`Entries::remove_duplicates()`]
-    pub fn filter_duplicates(&mut self) {
+    pub fn filter_duplicates(mut self) -> Self {
         let mut paths: HashSet<PathBuf> = HashSet::new();
         self.0.retain(|path| paths.insert(path.clone()));
-    }
-    
-    /// Creates a new [`Entries`] that's the minimum of all paths in `self`
-    /// Removes:
-    /// - Any duplicate entries
-    /// - Entries that are sub-paths of other entries
-    pub fn trim(mut self) -> Entries {
-        let paths: Vec<PathBuf> = self.0.drain(..) .collect();
-        let mut new_entries = Entries::new();
-
-        for path in paths.into_iter() {
-            if new_entries.contains(&path) {
-                continue;
-            }
-
-            new_entries.0.retain(|pb| !pb.starts_with(&path));
-            new_entries.0.push(path);
-        }
-
-        new_entries
+        self
     }
 
     /// Converts this [`Entries`] into a list of paths separated by new line breaks
@@ -184,6 +99,70 @@ impl Entries {
             .collect::<Vec<PathBuf>>())
     }
 
+    /// Creates a new [`Entries`] that's the minimum of all paths in `self`
+    /// Removes:
+    /// - Any duplicate entries
+    /// - Entries that are sub-paths of other entries
+    pub fn trim(self) -> Entries {
+        let mut new_entries = Entries::new();
+
+        for path in self.0.into_iter() {
+            if new_entries.contains(&path) {
+                continue;
+            }
+
+            new_entries.0.retain(|pb| !pb.starts_with(&path));
+            new_entries.0.push(path);
+        }
+
+        new_entries
+    }
+
+    /// Create a new [`Entries`] that's a union of all `paths`, which means that
+    /// it contains all of their paths, and covers a larger or equal area
+    /// TODO optimize in the future
+    pub fn union_of<I>(entries: I) -> Entries
+    where I: IntoIterator<Item = Entries>
+    {
+        let mut new_entries = Entries::new();
+
+        for path in entries.into_iter().flatten() {
+            if new_entries.contains(&path) {
+                continue;
+            }
+
+            new_entries.0.retain(|pb| !pb.starts_with(&path));
+            new_entries.0.push(path);
+        }
+
+        new_entries
+    }
+
+    /// Create a new [`Entries`] that's an intersection of all `paths`, which
+    /// means that it only contains paths that are shared between them
+    /// The resulting [`Entries`] will cover a smaller or equal area
+    /// TODO optimize in the future
+    pub fn intersection_of<I>(entries: I) -> Entries
+    where I: IntoIterator<Item = Entries>
+    {
+        let mut it = entries.into_iter();
+        let mut new_entries = it.next().unwrap_or_default();
+
+        for e in it {
+            let (mut e, f) = e.into_iter()
+                .partition::<Vec<PathBuf>, _>(|bp| new_entries.0.iter()
+                    .any(|ap| bp.starts_with(ap) && ap != bp)
+                );
+
+            new_entries.retain(|ap|
+                e.iter().chain(&f)
+                    .any(|bp| ap.starts_with(bp) || ap == bp)
+            );
+            new_entries.append(&mut e);
+        }
+
+        new_entries.trim()
+    }
 }
 
 impl AsRef<Vec<PathBuf>> for Entries {
@@ -232,4 +211,8 @@ impl From<Entries> for Vec<PathBuf> {
         value.0
     }
 }
+
+
+
+
 
