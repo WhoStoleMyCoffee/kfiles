@@ -5,10 +5,9 @@ use std::thread::{self, JoinHandle};
 use walkdir::{DirEntry, WalkDir};
 
 use crate::app::main_screen::Item;
-use crate::strmatch::Sublime;
 use crate::tagging::{ entries::Entries, Tag };
 
-use self::constraint::{ConstraintList, Score};
+use self::constraint::ConstraintList;
 
 
 fn is_direntry_hidden(entry: &DirEntry) -> bool {
@@ -239,13 +238,13 @@ mod constraint {
     /// ```
     /// "Hello \"World\"" // Score paths with "Hello", but only those that contain "World"
     /// "!.import \"all the rest" // Only files that contain "all the rest" that aren't .import files
-    /// "-d !foo" // Search only directories, and discourage those that score "foo"
+    /// "-d !foo" // Search only directories, and exclude those that score "foo"
     /// "dino .png .ase" // Score paths with "dino", but only .png or .ase files
     /// ```
     #[derive(Debug, Clone, PartialEq, Eq, Default)]
     pub struct ConstraintList {
         /// Score target path using a fuzzy search
-        pub score: Option<Score>,
+        pub score: Option<Fuzzy>,
         /// Look for specific strings in target
         /// All AND-ed together
         pub contains: Vec<Contains>,
@@ -290,7 +289,7 @@ mod constraint {
             }
 
             if !score_query.is_empty() {
-                constraints.score = Some(Score::parse(&score_query));
+                constraints.score = Some(Fuzzy::parse(&score_query));
             }
 
             constraints
@@ -370,19 +369,19 @@ mod constraint {
     }
 
     /// Score using the [`Sublime`] matcher
-    /// Can be inverted to discourage matches instead
+    /// Can be inverted to exclude matches instead
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct Score {
+    pub struct Fuzzy {
         pub matcher: Sublime,
         pub inverted: bool,
     }
 
-    impl Score {
-        pub fn parse(str: &str) -> Score {
+    impl Fuzzy {
+        pub fn parse(str: &str) -> Fuzzy {
             let (str, inverted) = str.strip_prefix('!')
                 .map_or((str, false), |s| (s, true));
 
-            Score {
+            Fuzzy {
                 matcher: Sublime::default() .with_query(str),
                 inverted,
             }

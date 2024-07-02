@@ -84,7 +84,7 @@ pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
 mod tests {
     use std::{collections::HashSet, path::{Path, PathBuf}};
 
-    use crate::tagging::{entries::{AddEntryError, Entries}, id::TagID, tag::{SelfReferringSubtag, Tag}};
+    use crate::tagging::{entries::Entries, id::TagID, tag::{SelfReferringSubtag, Tag}};
 
     #[test]
     fn serde() {
@@ -119,14 +119,14 @@ mod tests {
         // Adding already tagged dirs
         let add_err = tag.add_entry("C:/Users/ddxte/Documents/");
         match add_err {
-            Err(AddEntryError::DuplicateEntry) => {},
-            other => panic!("Expected add_err to be Err(AddEntryError::AlreadyContained). Found {:?}", other),
+            Ok(false) => {},
+            other => panic!("Expected add_err to be Ok(false). Found {:?}", other),
         }
 
         let add_err = tag.add_entry("C:/Users/ddxte/Documents/Projects/music_tools.exe");
         match add_err {
-            Ok(()) => {},
-            other => panic!("Expected add_err to be Ok(()). Found {:?}", other),
+            Ok(true) => {},
+            other => panic!("Expected add_err to be Ok(true). Found {:?}", other),
         }
 
         // Entries haven't changed
@@ -321,7 +321,8 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
         tag2.save().unwrap();
 
         assert!(tag2.is_direct_subtag_of(&tag));
-        assert!( tag.get_all_subtags().contains(&tag2.id) );
+        let mut it = tag.iter_all_subtags().map(|t| t.id);
+        assert!( it.any(|id| id == tag2.id) );
 
         {
             let res = Tag::create(tag.id.clone()) .as_subtag_of(&mut tag);
@@ -330,6 +331,25 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
                 "Expected Err(SelfReferringSubtag) but found {:?}", res
             );
         }
+    }
+
+    #[test]
+    fn subtags_deep() {
+        let mut tag = Tag::create("test-subtags-deep");
+        let mut tag2 = Tag::create("test-subtags-deep-2")
+            .as_subtag_of(&mut tag)
+            .unwrap();
+        let tag3 = Tag::create("test-subtags-deep-3")
+            .as_subtag_of(&mut tag2)
+            .unwrap();
+
+        tag.save().unwrap();
+        tag2.save().unwrap();
+        tag3.save().unwrap();
+
+        assert_eq!(tag.iter_all_subtags().count(), 2);
+        assert_eq!(tag2.iter_all_subtags().count(), 1);
+        assert_eq!(tag3.iter_all_subtags().count(), 0);
     }
 
     #[test]
@@ -378,6 +398,10 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
 
     #[test]
     fn cyclic_subtags() {
+        fn get_subtags(tag: &Tag) -> Vec<TagID> {
+            tag.iter_all_subtags().map(|t| t.id).collect()
+        }
+
         // A <=> B
         let mut tag_a = Tag::create("cyclic-a");
         let mut tag_b = Tag::create("cyclic-b");
@@ -387,8 +411,8 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
         tag_a.save() .unwrap();
         tag_b.save() .unwrap();
 
-        assert_eq!(tag_a.get_all_subtags(), vec![ tag_b.id.clone() ]);
-        assert_eq!(tag_b.get_all_subtags(), vec![ tag_a.id.clone() ]);
+        assert_eq!(get_subtags(&tag_a), vec![ tag_b.id.clone() ]);
+        assert_eq!(get_subtags(&tag_b), vec![ tag_a.id.clone() ]);
 
         // A <=> B => C
         let mut tag_c = Tag::create("cyclic-c");
@@ -396,11 +420,11 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
         tag_b.save() .unwrap();
         tag_c.save() .unwrap();
 
-        assert_eq!(tag_a.get_all_subtags(), vec![
+        assert_eq!(get_subtags(&tag_a), vec![
             tag_b.id.clone(),
             tag_c.id.clone(),
         ]);
-        assert_eq!(tag_b.get_all_subtags(), vec![
+        assert_eq!(get_subtags(&tag_b), vec![
             tag_a.id.clone(),
             tag_c.id.clone(),
         ]);
@@ -410,15 +434,15 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
         tag_c.save() .unwrap();
         tag_a.save() .unwrap();
 
-        assert_eq!(tag_a.get_all_subtags(), vec![
+        assert_eq!(get_subtags(&tag_a), vec![
             tag_b.id.clone(),
             tag_c.id.clone(),
         ]);
-        assert_eq!(tag_b.get_all_subtags(), vec![
+        assert_eq!(get_subtags(&tag_b), vec![
             tag_a.id.clone(),
             tag_c.id.clone(),
         ]);
-        assert_eq!(tag_c.get_all_subtags(), vec![
+        assert_eq!(get_subtags(&tag_c), vec![
             tag_a.id.clone(),
             tag_b.id.clone(),
         ]);
@@ -430,15 +454,15 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
         tag_b.save() .unwrap();
         tag_c.save() .unwrap();
 
-        assert_eq!(tag_a.get_all_subtags(), vec![
+        assert_eq!(get_subtags(&tag_a), vec![
             tag_b.id.clone(),
             tag_c.id.clone(),
         ]);
-        assert_eq!(tag_b.get_all_subtags(), vec![
+        assert_eq!(get_subtags(&tag_b), vec![
             tag_a.id.clone(),
             tag_c.id.clone(),
         ]);
-        assert_eq!(tag_c.get_all_subtags(), vec![
+        assert_eq!(get_subtags(&tag_c), vec![
             tag_a.id.clone(),
             tag_b.id.clone(),
         ]);

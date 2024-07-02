@@ -1,3 +1,4 @@
+use std::collections::{HashSet, VecDeque};
 use std::fmt::Display;
 use std::fs::{create_dir_all, remove_file, File};
 use std::io::{self, Read, Write};
@@ -172,13 +173,8 @@ impl Tag {
         let mut entries = self.entries.clone();
 
         // Merge subtags' entries into this one
-        // TODO hmm i dont like the double-loading... once in get_all_subtags(), once again in
-        // filter_map
-        let it = self.get_all_subtags()
-            .into_iter()
-            .filter_map(|id| Tag::load(&id).ok());
-        for mut subtag in it {
-            entries.as_mut().append(&mut subtag.entries);
+        for mut tag in self.iter_all_subtags() {
+            entries.as_mut().append(&mut tag.entries);
         }
 
         entries.filter_duplicates()
@@ -258,10 +254,9 @@ impl Tag {
 
     /// Get all of this tag's subtags, that is, including subtags' subtags
     /// Avoids infinite loops
-    pub fn get_all_subtags(&self) -> Vec<TagID> {
-        let mut results = vec![ self.id.clone() ];
-        _get_subtags_recursive(self, &mut results);
-        results[1..].to_vec()
+    #[inline]
+    pub fn iter_all_subtags(&self) -> Subtags {
+        Subtags::new(&self)
     }
 
     /// Returns whether the subtag was successfully added (i.e. whether it wasn't already contained)
@@ -342,13 +337,40 @@ impl From<SerTag> for Tag {
 
 
 
-fn _get_subtags_recursive(tag: &Tag, results: &mut Vec<TagID>) {
-    for subtag_id in tag.subtags.iter() {
-        if results.contains(subtag_id) { continue; }
 
-        results.push(subtag_id.clone());
-        let Ok(subtag) = Tag::load(subtag_id) else { continue };
-        _get_subtags_recursive(&subtag, results);
+
+/// TODO optimizations perhaps?
+pub struct Subtags {
+    memo: HashSet<TagID>,
+    queue: VecDeque<TagID>,
+}
+
+impl Subtags {
+    fn new(tag: &Tag) -> Subtags {
+        Subtags {
+            memo: HashSet::from([ tag.id.clone() ]),
+            queue: VecDeque::from(tag.subtags.clone()),
+        }
     }
 }
+
+impl Iterator for Subtags {
+    type Item = Tag;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut tag_id = self.queue.pop_front()?;
+        while self.memo.contains(&tag_id) {
+            tag_id = self.queue.pop_front()?;
+        }
+
+        let tag = tag_id.load().ok()?;
+
+        self.memo.insert(tag_id);
+        self.queue.extend( tag.subtags.clone() );
+
+        Some(tag)
+    }
+}
+
+
 
