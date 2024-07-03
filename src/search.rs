@@ -244,7 +244,7 @@ mod constraint {
     #[derive(Debug, Clone, PartialEq, Eq, Default)]
     pub struct ConstraintList {
         /// Score target path using a fuzzy search
-        pub fuzzy: Option<Fuzzy>,
+        pub fuzzy: Vec<Fuzzy>,
         /// Look for specific strings in target
         /// All AND-ed together
         pub contains: Vec<Contains>,
@@ -267,7 +267,6 @@ mod constraint {
             // Contains constraint
             constraints.contains = Contains::parse(&mut str);
 
-            let mut score_query: String = String::new();
             for arg in str.split(' ')
                 .map(|str| str.trim())
                 .filter(|str| !str.is_empty())
@@ -285,11 +284,7 @@ mod constraint {
                 }
 
                 // Everything else -> Score constraint (aka fuzzy search)
-                score_query += arg;
-            }
-
-            if !score_query.is_empty() {
-                constraints.fuzzy = Some(Fuzzy::parse(&score_query));
+                constraints.fuzzy.push(Fuzzy::parse(arg));
             }
 
             constraints
@@ -309,13 +304,11 @@ mod constraint {
 
                 let mut any_match: bool = false;
                 for constraint in self.extensions.iter() {
-                    let matches = constraint.matches(ext);
-
-                    // --.png .png => (true, false) => any match = true; break
-                    // --.png .jpg => (false, false) => no match; continue
-                    // !--.png .png => (false, true) => exclude; return
-                    // !--.png .jpg => (true, true)
-                    match (matches, constraint.inverted) {
+                    // .png .png => (true, false) => any match = true; break
+                    // .png .jpg => (false, false) => no match; continue
+                    // !.png .png => (false, true) => exclude; return
+                    // !.png .jpg => (true, true) => any match = true; continue
+                    match (constraint.matches(ext), constraint.inverted) {
                         // Match!
                         (true, false) => {
                             any_match = true;
@@ -344,24 +337,26 @@ mod constraint {
 
             let length_penalty: isize = pathstr.len() as isize;
             
-            // 4. OR score
-            let Some(score_constraint) = &self.fuzzy else {
+            // 4. Score fuzzy
+            if self.fuzzy.is_empty() {
                 return Some(-length_penalty);
-            };
+            }
 
-            score_constraint.score(&pathstr)
+            self.fuzzy.iter()
+                .filter_map(|f| f.score(&pathstr))
+                .reduce(|acc, s| acc + s)
                 .map(|s| s - length_penalty)
         }
 
         pub fn is_empty(&self) -> bool {
-            self.fuzzy.is_none()
+            self.fuzzy.is_empty()
                 && self.contains.is_empty()
                 && self.extensions.is_empty()
                 && self.filetype.is_none()
         }
 
         pub fn clear(&mut self) {
-            self.fuzzy = None;
+            self.fuzzy.clear();
             self.contains.clear();
             self.extensions.clear();
             self.filetype = None;
@@ -389,10 +384,10 @@ mod constraint {
 
         fn score(&self, str: &str) -> Option<isize> {
             match (self.matcher.score(&str), self.inverted) {
-                (None, true) => Some(0),
                 (None, false) => None,
-                (Some(_), true) => None,
                 (Some(s), false) => Some(s),
+                (None, true) => Some(0),
+                (Some(s), true) => Some(-s),
             }
         }
     }
