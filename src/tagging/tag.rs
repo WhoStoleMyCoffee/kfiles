@@ -85,8 +85,14 @@ impl Tag {
 
     /// Make this tag a subtag of `parent_tag`
     pub fn as_subtag_of(self, parent_tag: &mut Tag) -> Result<Self, SelfReferringSubtag> {
+        panic!("Deprecated, remove this pls");
         parent_tag.add_subtag(&self.id)?;
         Ok(self)
+    }
+
+    pub fn with_entries(mut self, entries: Entries) -> Self {
+        self.entries = entries;
+        self
     }
 
     #[inline]
@@ -181,11 +187,11 @@ impl Tag {
     }
 
     pub fn save(&self) -> Result<(), SaveError> {
-        let path = self.get_save_path();
         if self.id.is_empty() {
             return Err(SaveError::NoID);
         }
 
+        let path = self.get_save_path();
         if !path.exists() {
             let dir = path.parent().expect("could not get parent dir");
             create_dir_all(dir)?;

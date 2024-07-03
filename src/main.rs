@@ -1,5 +1,6 @@
 use std::{io, path::{Path, PathBuf}, sync::OnceLock};
 
+use configs::Configs;
 use iced::{ Application, Settings};
 
 pub mod app;
@@ -11,6 +12,7 @@ pub mod strmatch;
 pub mod configs;
 
 use app::KFiles;
+use tagging::{entries::Entries, id::TagID, Tag};
 
 const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
 
@@ -19,16 +21,13 @@ static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 fn main() -> iced::Result {
     // Load configs
-    let configs = configs::load_configs()
-        .unwrap_or_else(|err| {
-            match err {
-                configs::LoadError::IO(err)
-                    if err.kind() == io::ErrorKind::NotFound =>
-                    println!("Configs file not found, using default Configs instead"),
-                err => println!("Failed to load Configs: {:?}", err),
-            }
-            configs::Configs::default()
-        });
+    let configs = load_configs();
+
+    // Initialize tags
+    if should_reinit_tags() {
+        println!("Initializing default tags...");
+        init_default_tags();
+    }
 
     configs::set_global(configs) .expect("failed to initialize configs");
 
@@ -72,6 +71,80 @@ pub fn get_temp_dir() -> &'static PathBuf {
     }
 
     path
+}
+
+
+fn load_configs() -> Configs {
+    configs::load_configs()
+        .unwrap_or_else(|err| {
+            match err {
+                configs::LoadError::IO(err)
+                    if err.kind() == io::ErrorKind::NotFound =>
+                    println!("Initializing default configs..."),
+                err => println!("Failed to load Configs: {:?}", err),
+            }
+            configs::Configs::default()
+        })
+}
+
+
+fn should_reinit_tags() -> bool {
+    let path = tagging::get_save_dir();
+    match path.read_dir() {
+        Ok(mut it) => it.next().is_none(),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => true,
+        Err(err) => {
+            eprintln!("[should_reinit_tags()] Failed to read save dir: {err:?}");
+            true
+        }
+    }
+}
+
+
+fn init_default_tags() {
+    let user_dirs = directories::UserDirs::new() .unwrap();
+
+    let tags = [
+        ("documents", user_dirs.document_dir()),
+        ("pictures", user_dirs.picture_dir()),
+        ("videos", user_dirs.video_dir()),
+        ("music", user_dirs.audio_dir()),
+    ];
+    let tags = tags.into_iter()
+        .flat_map(|(id, p)|
+            p.map(|p| (id, p.to_path_buf()) )
+        )
+        .map(|(id, p)| {
+            Tag::create(id) .with_entries(Entries::from(vec![ p ]))
+        })
+        .filter(|tag| match tag.save() {
+            Ok(()) => true,
+            Err(err) => {
+                eprintln!("Failed to save default tag \"{}\": {:?}", &tag.id, err);
+                false
+            },
+        })
+        .collect::<Vec<Tag>>();
+
+    let home_dirs = [
+        user_dirs.desktop_dir(),
+        user_dirs.download_dir(),
+    ];
+    let mut home = Tag::create("home")
+        .with_entries(Entries::from_iter(
+            home_dirs.into_iter()
+                .flatten()
+                .map(|p| p.to_path_buf())
+        ));
+
+    for t in tags.iter() {
+        home.add_subtag(&t.id) .expect("failed to add subtag");
+    }
+
+
+    if let Err(err) = home.save() {
+        println!("Failed to save default tag \"{}\": {:?}", home.id, err);
+    }
 }
 
 

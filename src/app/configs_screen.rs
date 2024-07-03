@@ -1,16 +1,16 @@
 use iced::event::Status;
 use iced::widget::{
-    button, column, container, row, scrollable, text, Container, Row, Slider, Text
+    button, column, container, row, scrollable, text, Column, Container, Row, Slider, Text
 };
 use iced::{Color, Command, Element, Event, Length};
 
-use iced_aw::Bootstrap;
+use iced_aw::{Bootstrap, Wrap};
 use iced_aw::widgets::NumberInput;
 
 use crate::app::notification::info_message;
 use crate::app::Message as AppMessage;
 use crate::configs::{self, Configs};
-use crate::{ icon, send_message, simple_button, thumbnail, ToPrettyString };
+use crate::{ icon, send_message, simple_button, tagging, thumbnail, ToPrettyString };
 
 use super::notification::error_message;
 
@@ -40,6 +40,23 @@ macro_rules! number_input {
             |v| Message::$msg(v).into()
         )
     };
+}
+
+
+/// Create a configurable entry
+fn config_row<'a>(
+    name: &str,
+    inner: Element<'a, AppMessage>,
+) -> Column<'a, AppMessage>
+{
+    column![
+        text(name),
+        container(inner)
+            .padding([8, 24]),
+    ]
+    .spacing(4)
+    .width(Length::Fill)
+    .padding([4, 48, 4, 24])
 }
 
 
@@ -75,6 +92,9 @@ fn config_entry<'a>(
     .padding([4, 48, 4, 24])
 }
 
+
+
+
 /// Dimmed text for descriptions
 fn desc_text(text: &str) -> Text {
     Text::new(text)
@@ -96,6 +116,7 @@ pub enum Message {
     ThumbnailCacheSizeInput(u64),
     ThumbnailThreadCountInput(u8),
     ThumbnailUpdateProbInput(f32),
+    OpenTagsDir,
 }
 
 impl From<Message> for AppMessage {
@@ -134,7 +155,7 @@ impl ConfigsScreen {
                 let path = thumbnail::get_cache_dir_or_create();
                 if let Err(err) = opener::open(path) {
                     return send_message!(error_message(
-                        format!("Failed to open {}:\n{}", path.to_pretty_string(), err)
+                        format!("Failed to open {}:\n{:?}", path.to_pretty_string(), err)
                     ));
                 }
             }
@@ -147,7 +168,7 @@ impl ConfigsScreen {
                     Err(err) => match err.kind() {
                         ErrorKind::NotFound => {},
                         _ => return send_message!(error_message(
-                            format!("Failed to delete cache:\n{err}")
+                            format!("Failed to delete cache:\n{err:?}")
                         ))
                     }
                 }
@@ -181,6 +202,21 @@ impl ConfigsScreen {
             Message::ThumbnailUpdateProbInput(input) => {
                 self.is_dirty = true;
                 self.configs.thumbnail_update_prob = input;
+            }
+
+            Message::OpenTagsDir => {
+                let path = match tagging::get_save_dir_or_create() {
+                    Ok(p) => p,
+                    Err(err) => return send_message!(error_message(
+                        format!("Failed to get tags save dir:\n{:?}", err)
+                    )),
+                };
+
+                if let Err(err) = opener::open(&path) {
+                    return send_message!(error_message(
+                        format!("Failed to open {}:\n{:?}", path.to_pretty_string(), err)
+                    ));
+                }
             }
 
         }
@@ -286,6 +322,17 @@ Useful if you make changes to an image file while this app is open, but will cau
                         Slider::new(0.0..=1.0, c.thumbnail_update_prob, |v| Message::ThumbnailUpdateProbInput(v).into())
                             .step(0.01)
                     ]
+                    .into()
+                ),
+
+                // Tags dir
+                config_row(
+                    "Tags",
+                    Wrap::with_elements(vec![
+                        button("Open save dir")
+                            .on_press(Message::OpenTagsDir.into())
+                            .into(),
+                    ])
                     .into()
                 ),
 

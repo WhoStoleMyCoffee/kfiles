@@ -212,6 +212,12 @@ impl From<Entries> for Vec<PathBuf> {
     }
 }
 
+impl FromIterator<PathBuf> for Entries {
+    fn from_iter<T: IntoIterator<Item = PathBuf>>(iter: T) -> Self {
+        Entries(Vec::from_iter(iter))
+    }
+}
+
 
 
 
