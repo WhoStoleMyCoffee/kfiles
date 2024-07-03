@@ -244,7 +244,7 @@ mod constraint {
     #[derive(Debug, Clone, PartialEq, Eq, Default)]
     pub struct ConstraintList {
         /// Score target path using a fuzzy search
-        pub score: Option<Fuzzy>,
+        pub fuzzy: Option<Fuzzy>,
         /// Look for specific strings in target
         /// All AND-ed together
         pub contains: Vec<Contains>,
@@ -289,7 +289,7 @@ mod constraint {
             }
 
             if !score_query.is_empty() {
-                constraints.score = Some(Fuzzy::parse(&score_query));
+                constraints.fuzzy = Some(Fuzzy::parse(&score_query));
             }
 
             constraints
@@ -345,7 +345,7 @@ mod constraint {
             let length_penalty: isize = pathstr.len() as isize;
             
             // 4. OR score
-            let Some(score_constraint) = &self.score else {
+            let Some(score_constraint) = &self.fuzzy else {
                 return Some(-length_penalty);
             };
 
@@ -354,14 +354,14 @@ mod constraint {
         }
 
         pub fn is_empty(&self) -> bool {
-            self.score.is_none()
+            self.fuzzy.is_none()
                 && self.contains.is_empty()
                 && self.extensions.is_empty()
                 && self.filetype.is_none()
         }
 
         pub fn clear(&mut self) {
-            self.score = None;
+            self.fuzzy = None;
             self.contains.clear();
             self.extensions.clear();
             self.filetype = None;
@@ -527,8 +527,8 @@ mod constraint {
         #[test]
         fn parsing() {
             let c = ConstraintList::parse("score .rs .png");
-            dbg!(&c.score);
-            assert!(c.score.is_some());
+            dbg!(&c.fuzzy);
+            assert!(c.fuzzy.is_some());
             assert_eq!(c.contains, vec![]);
             assert_eq!(c.extensions, vec![
                 Extension { extension: OsString::from("rs"), inverted: false },
@@ -538,8 +538,8 @@ mod constraint {
 
 
             let c = ConstraintList::parse("score \"contains\" .txt -f --wot");
-            dbg!(&c.score);
-            assert!(c.score.is_some());
+            dbg!(&c.fuzzy);
+            assert!(c.fuzzy.is_some());
             assert_eq!(c.contains, vec![
                 Contains { query: "contains".to_string(), inverted: false }
             ]);
@@ -551,8 +551,8 @@ mod constraint {
 
             // Invalid queryies
             let c = ConstraintList::parse("\"\"");
-            dbg!(&c.score);
-            assert!(c.score.is_some());
+            dbg!(&c.fuzzy);
+            assert!(c.fuzzy.is_some());
             assert_eq!(c.contains, vec![]);
             assert_eq!(c.extensions, vec![]);
             assert_eq!(c.filetype, None);

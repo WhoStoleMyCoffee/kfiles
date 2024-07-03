@@ -35,6 +35,7 @@ const TOTAL_ITEM_SIZE: (f32, f32) = (ITEM_SIZE.0 + ITEM_SPACING.0, ITEM_SIZE.1 +
 // Ids
 const QUERY_INPUT_ID: fn() -> text_input::Id = || { text_input::Id::new("query_input") };
 const MAIN_RESULTS_ID: fn() -> container::Id = || { container::Id::new("main_results") };
+const MAIN_SCROLLABLE_ID: fn() -> scrollable::Id = || { scrollable::Id::new("main_scrollable") };
 
 
 #[derive(Debug, Clone)]
@@ -220,7 +221,7 @@ impl MainScreen {
             Message::QueryTextChanged(new_text) => {
                 let has_changed: bool = self.set_query_input(new_text);
                 if has_changed {
-                    self.reset_search();
+                    return self.reset_search();
                 }
             }
 
@@ -243,7 +244,7 @@ impl MainScreen {
                 }
 
                 self.set_query_input(String::new());
-                self.reset_search();
+                return self.reset_search();
             }
 
             Message::QueryTagPressed(tag_id) => {
@@ -294,6 +295,7 @@ impl MainScreen {
                 text("Results:"),
                 container(
                     scrollable(results)
+                        .id(MAIN_SCROLLABLE_ID())
                         .direction(Direction::Vertical(Properties::default()))
                         .width(Length::Fill)
                         .height(Length::Fill)
@@ -420,11 +422,16 @@ impl MainScreen {
         Some(start..end)
     }
 
-    pub fn reset_search(&mut self) {
+    pub fn reset_search(&mut self) -> Command<AppMessage> {
         self.items.clear();
         self.query.search();
         self.scroll = 0.0;
         self.hovered_path = None;
+
+        iced::widget::scrollable::snap_to(
+            MAIN_SCROLLABLE_ID(),
+            scrollable::RelativeOffset { x: 0.0, y: 0.0 }
+        )
     }
 
     pub fn set_query_input(&mut self, new_text: String) -> bool {
