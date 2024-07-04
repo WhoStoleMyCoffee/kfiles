@@ -202,7 +202,7 @@ impl IntoIterator for Entries {
 
 impl From<Vec<PathBuf>> for Entries {
     fn from(value: Vec<PathBuf>) -> Self {
-        Entries(value.into())
+        Entries(value)
     }
 }
 

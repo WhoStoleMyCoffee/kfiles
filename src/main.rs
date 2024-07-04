@@ -103,7 +103,10 @@ fn should_reinit_tags() -> bool {
 
 
 fn init_default_tags() {
-    let user_dirs = directories::UserDirs::new() .unwrap();
+    let Some(user_dirs) = directories::UserDirs::new() else {
+        eprintln!("[init_default_tags()] Failed to get user dirs.");
+        return;
+    };
 
     let tags = [
         ("documents", user_dirs.document_dir()),

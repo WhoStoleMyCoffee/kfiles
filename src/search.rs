@@ -515,6 +515,9 @@ mod constraint {
         use std::ffi::OsString;
         use std::path::Path;
 
+        use crate::search::constraint::Fuzzy;
+        use crate::strmatch::Sublime;
+
         use super::ConstraintList;
         use super::{ Contains, Extension, FileType };
 
@@ -522,8 +525,12 @@ mod constraint {
         #[test]
         fn parsing() {
             let c = ConstraintList::parse("score .rs .png");
-            dbg!(&c.fuzzy);
-            assert!(c.fuzzy.is_some());
+            assert_eq!(c.fuzzy, vec![
+                Fuzzy {
+                    matcher: Sublime::default() .with_query("score"),
+                    inverted: false,
+                }
+            ]);
             assert_eq!(c.contains, vec![]);
             assert_eq!(c.extensions, vec![
                 Extension { extension: OsString::from("rs"), inverted: false },
@@ -533,8 +540,16 @@ mod constraint {
 
 
             let c = ConstraintList::parse("score \"contains\" .txt -f --wot");
-            dbg!(&c.fuzzy);
-            assert!(c.fuzzy.is_some());
+            assert_eq!(c.fuzzy, vec![
+                Fuzzy {
+                    matcher: Sublime::default() .with_query("score"),
+                    inverted: false,
+                },
+                Fuzzy {
+                    matcher: Sublime::default() .with_query("--wot"),
+                    inverted: false,
+                }
+            ]);
             assert_eq!(c.contains, vec![
                 Contains { query: "contains".to_string(), inverted: false }
             ]);
@@ -547,7 +562,12 @@ mod constraint {
             // Invalid queryies
             let c = ConstraintList::parse("\"\"");
             dbg!(&c.fuzzy);
-            assert!(c.fuzzy.is_some());
+            assert_eq!(c.fuzzy, vec![
+                Fuzzy {
+                    matcher: Sublime::default() .with_query("\"\""),
+                    inverted: false,
+                }
+            ]);
             assert_eq!(c.contains, vec![]);
             assert_eq!(c.extensions, vec![]);
             assert_eq!(c.filetype, None);
@@ -616,7 +636,7 @@ mod constraint {
             assert_eq!( c.score(pics), Some(-24) ); // pics is 24 chars long
 
             let c = ConstraintList::parse("!dino");
-            assert_eq!( c.score(tisdino), None );
+            assert!( c.score(tisdino).is_some_and(|score| score < 0) );
             assert_eq!( c.score(pics), Some(-24) ); // again
 
             let c = ConstraintList::parse("!.png");

@@ -311,9 +311,8 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
         tag.add_entry("C:/Users/ddxte/Pictures/bread.JPG") .unwrap();
 
         // Creating subtag
-        let mut tag2 = Tag::create("test-subtags-2")
-            .as_subtag_of(&mut tag)
-            .unwrap();
+        let mut tag2 = Tag::create("test-subtags-2");
+        tag.add_subtag(&tag2.id) .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/") .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/Projects/") .unwrap();
 
@@ -325,7 +324,8 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
         assert!( it.any(|id| id == tag2.id) );
 
         {
-            let res = Tag::create(tag.id.clone()) .as_subtag_of(&mut tag);
+            let tagid = tag.id.clone();
+            let res = tag.add_subtag(&tagid);
             assert!(
                 matches!(res, Err(SelfReferringSubtag)),
                 "Expected Err(SelfReferringSubtag) but found {:?}", res
@@ -336,12 +336,10 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
     #[test]
     fn subtags_deep() {
         let mut tag = Tag::create("test-subtags-deep");
-        let mut tag2 = Tag::create("test-subtags-deep-2")
-            .as_subtag_of(&mut tag)
-            .unwrap();
-        let tag3 = Tag::create("test-subtags-deep-3")
-            .as_subtag_of(&mut tag2)
-            .unwrap();
+        let mut tag2 = Tag::create("test-subtags-deep-2");
+        tag.add_subtag(&tag2.id) .unwrap();
+        let tag3 = Tag::create("test-subtags-deep-3");
+        tag2.add_subtag(&tag3.id) .unwrap();
 
         tag.save().unwrap();
         tag2.save().unwrap();
@@ -361,9 +359,8 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
             .unwrap();
 
         // Creating subtag
-        let mut tag2 = Tag::create("test-subtags-entries-2")
-            .as_subtag_of(&mut tag)
-            .unwrap();
+        let mut tag2 = Tag::create("test-subtags-entries-2");
+        tag.add_subtag(&tag2.id) .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/Apps/KFiles/screenshots/")
             .unwrap();
         tag2.add_entry("C:/Users/ddxte/Documents/Projects/")

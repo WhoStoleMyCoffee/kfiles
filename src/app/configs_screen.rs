@@ -12,7 +12,7 @@ use iced_aw::widgets::NumberInput;
 use crate::app::notification::info_message;
 use crate::app::Message as AppMessage;
 use crate::configs::{self, Configs};
-use crate::{ icon, send_message, simple_button, tagging, thumbnail, ToPrettyString, VERSION };
+use crate::{ icon, send_message, simple_button, thumbnail, ToPrettyString, VERSION };
 
 use super::notification::error_message;
 

@@ -83,13 +83,6 @@ impl Tag {
         }
     }
 
-    /// Make this tag a subtag of `parent_tag`
-    pub fn as_subtag_of(self, parent_tag: &mut Tag) -> Result<Self, SelfReferringSubtag> {
-        panic!("Deprecated, remove this pls");
-        parent_tag.add_subtag(&self.id)?;
-        Ok(self)
-    }
-
     pub fn with_entries(mut self, entries: Entries) -> Self {
         self.entries = entries;
         self
@@ -262,7 +255,7 @@ impl Tag {
     /// Avoids infinite loops
     #[inline]
     pub fn iter_all_subtags(&self) -> Subtags {
-        Subtags::new(&self)
+        Subtags::new(self)
     }
 
     /// Returns whether the subtag was successfully added (i.e. whether it wasn't already contained)
