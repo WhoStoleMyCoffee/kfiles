@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use iced::event::Status;
 use iced::widget::{
     button, column, container, row, scrollable, text, Column, Container, Row, Slider, Text
@@ -10,7 +12,7 @@ use iced_aw::widgets::NumberInput;
 use crate::app::notification::info_message;
 use crate::app::Message as AppMessage;
 use crate::configs::{self, Configs};
-use crate::{ icon, send_message, simple_button, tagging, thumbnail, ToPrettyString };
+use crate::{ icon, send_message, simple_button, tagging, thumbnail, ToPrettyString, VERSION };
 
 use super::notification::error_message;
 
@@ -116,7 +118,7 @@ pub enum Message {
     ThumbnailCacheSizeInput(u64),
     ThumbnailThreadCountInput(u8),
     ThumbnailUpdateProbInput(f32),
-    OpenTagsDir,
+    OpenSaveDir,
 }
 
 impl From<Message> for AppMessage {
@@ -204,17 +206,12 @@ impl ConfigsScreen {
                 self.configs.thumbnail_update_prob = input;
             }
 
-            Message::OpenTagsDir => {
-                let path = match tagging::get_save_dir_or_create() {
-                    Ok(p) => p,
-                    Err(err) => return send_message!(error_message(
-                        format!("Failed to get tags save dir:\n{:?}", err)
-                    )),
-                };
+            Message::OpenSaveDir => {
+                let path: PathBuf = configs::get_save_path();
 
-                if let Err(err) = opener::open(&path) {
+                if let Err(err) = opener::reveal(&path) {
                     return send_message!(error_message(
-                        format!("Failed to open {}:\n{:?}", path.to_pretty_string(), err)
+                        format!("Failed to open \"{}\":\n{:?}", path.to_pretty_string(), err)
                     ));
                 }
             }
@@ -236,10 +233,12 @@ impl ConfigsScreen {
                     .on_press_maybe( self.is_dirty.then_some(Message::Save.into()) ),
 
                 text("Settings") .size(24),
-                // horizontal_space(),
-                // button("Open save directory") .on_press(Message::OpenTagsDir.into())
             ]
             .spacing(12),
+
+            text(format!("Version {}", VERSION))
+                .size(11),
+
             self.view_entries(),
         ]
         .width(Length::Fill)
@@ -325,12 +324,12 @@ Useful if you make changes to an image file while this app is open, but will cau
                     .into()
                 ),
 
-                // Tags dir
+                // Open save dir
                 config_row(
-                    "Tags",
+                    "Miscellaneous",
                     Wrap::with_elements(vec![
                         button("Open save dir")
-                            .on_press(Message::OpenTagsDir.into())
+                            .on_press(Message::OpenSaveDir.into())
                             .into(),
                     ])
                     .into()

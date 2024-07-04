@@ -335,7 +335,6 @@ impl MainScreen {
                     .on_input(|text| Message::QueryTextChanged(text).into())
                     .on_submit(Message::QuerySubmit.into())
             })
-            .hide_on_empty()
             .style(theme::Simple),
         ]
     }

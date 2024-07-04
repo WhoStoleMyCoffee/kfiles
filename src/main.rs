@@ -12,9 +12,10 @@ pub mod strmatch;
 pub mod configs;
 
 use app::KFiles;
-use tagging::{entries::Entries, id::TagID, Tag};
+use tagging::{entries::Entries, Tag};
 
 const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
+const VERSION: &str = std::env!("CARGO_PKG_VERSION");
 
 static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 
