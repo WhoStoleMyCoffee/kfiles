@@ -1,5 +1,5 @@
-use std::path::Path;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use iced::event::Status;
 use iced::widget::{column, scrollable};
@@ -22,7 +22,6 @@ use tag_edit_screen::TagEditScreen;
 use tag_list_screen::TagListScreen;
 
 use self::configs_screen::ConfigsScreen;
-
 
 
 /// Creates a [`iced::Command`] that produces the given message(s)
@@ -58,12 +57,14 @@ pub enum Message {
     Event(Event, Status),
     Screen(ScreenMessage),
     IconsFontLoaded(Result<(), iced::font::Error>),
+    CloseNotification(usize),
+    Notify(Notification),
+    OpenPath(PathBuf),
+
     SwitchToMainScreen,
     SwitchToTagListScreen,
     SwitchToTagEditScreen(Tag),
     SwitchToConfigScreen,
-    CloseNotification(usize),
-    Notify(Notification),
 }
 
 
@@ -71,6 +72,7 @@ pub enum Message {
 pub struct KFiles {
     current_screen: Screen,
     notifications: Vec<Notification>,
+    has_focus: Option<Instant>,
 }
 
 impl Application for KFiles {
@@ -86,6 +88,7 @@ impl Application for KFiles {
             KFiles {
                 current_screen: Screen::Main(main_screen),
                 notifications: Vec::new(),
+                has_focus: None,
             },
             Command::batch(vec![
                 iced::font::load(iced_aw::BOOTSTRAP_FONT_BYTES).map(Message::IconsFontLoaded),
@@ -114,9 +117,9 @@ impl Application for KFiles {
 
             Message::IconsFontLoaded(res) => {
                 if let Err(err) = res {
-                    println!("ERROR Failed to load icons font: {err:?}");
+                    eprintln!("ERROR Failed to load icons font: {err:?}");
                 } else {
-                    println!("INFO: Icons font loaded");
+                    eprintln!("INFO: Icons font loaded");
                 }
                 Command::none()
             }
@@ -155,6 +158,10 @@ impl Application for KFiles {
             Message::Notify(notification) => {
                 self.notifications.push(notification);
                 Command::none()
+            }
+
+            Message::OpenPath(path) => {
+                self.open_path(&path)
             }
         }
     }
@@ -196,7 +203,25 @@ impl Application for KFiles {
 }
 
 impl KFiles {
+    /// Don't register window focuses for this long
+    /// This is necessary to avoid bugs caused by some input events being registered too quickly.
+    /// E.g. `:q<ENTER>` closes a VIM window, which re-focuses this app, and the same `<ENTER>` key
+    /// press getting registered to open the first search result in [`MainScreen`]
+    const FOCUS_BUFFER: Duration = Duration::from_millis(500);
+
     fn handle_event(&mut self, event: Event, status: Status) -> Command<Message> {
+        use iced::window::Event as WindowEvent;
+
+        match event {
+            Event::Window(_, WindowEvent::Focused) => {
+                self.has_focus = Some(Instant::now());
+            },
+            Event::Window(_, WindowEvent::Unfocused) => {
+                self.has_focus = None;
+            },
+            _ => {},
+        }
+
         self.current_screen.handle_event(event, status)
     }
 
@@ -205,7 +230,13 @@ impl KFiles {
         self.notifications.retain(|n| !n.is_expired());
     }
 
-    pub fn open_path(path: &Path) -> Command<Message> {
+    /// Opens the given `path` using [`opener`], and returns any errors as [`Command`]s containing
+    /// [`Notification`]s
+    pub fn open_path(&self, path: &Path) -> Command<Message> {
+        if !self.has_focus() {
+            return Command::none();
+        }
+
         let Err(err) = opener::open(path) else {
             return Command::none();
         };
@@ -227,6 +258,10 @@ impl KFiles {
         }
 
         command
+    }
+
+    pub fn has_focus(&self) -> bool {
+        self.has_focus.is_some_and(|t| t.elapsed() > KFiles::FOCUS_BUFFER)
     }
 }
 

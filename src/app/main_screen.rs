@@ -18,7 +18,6 @@ use crate::app::{theme, Message as AppMessage};
 use crate::{configs, send_message, ToPrettyString};
 
 use super::notification::error_message;
-use super::KFiles;
 
 
 // TODO make these configurable
@@ -47,7 +46,6 @@ pub enum Message {
     FocusQuery,
     ResultsScrolled(Viewport),
     ResultsBoundsFetched(Option<Rectangle>),
-    OpenPath(PathBuf),
     EntryHovered(PathBuf),
 }
 
@@ -209,7 +207,8 @@ impl MainScreen {
 
     pub fn open_first_result(&self) -> Option<Command<AppMessage>> {
         let Item(_, path) = self.items.first()?;
-        Some(KFiles::open_path(path))
+        let path = path.to_path_buf();
+        Some(send_message!( AppMessage::OpenPath(path) ))
     }
 
     pub fn update(&mut self, message: Message) -> Command<AppMessage> {
@@ -255,10 +254,6 @@ impl MainScreen {
                     )),
                 };
                 return send_message!(AppMessage::SwitchToTagEditScreen(tag));
-            }
-
-            Message::OpenPath(path) => {
-                return KFiles::open_path(&path);
             }
 
             Message::EntryHovered(path) => {
@@ -348,7 +343,7 @@ impl MainScreen {
                         .cull(!range.contains(&i))
                         .width(ITEM_SIZE.0)
                         .height(ITEM_SIZE.1)
-                        .on_select(Message::OpenPath(pb.clone()).into())
+                        .on_select(AppMessage::OpenPath(pb.clone()))
                         .on_hover(Message::EntryHovered(pb.clone()).into())
                         .into()
                 })
