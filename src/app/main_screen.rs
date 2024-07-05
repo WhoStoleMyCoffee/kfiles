@@ -395,10 +395,7 @@ impl MainScreen {
         }
 
         // Build
-        // println!("building {}", path.display());
-        if let Err(err) = builder.build_for_path(path) {
-            println!("Failed to build thumbnail for {}: {}", path.display(), err);
-        }
+        builder.build_for_path(path);
     }
 
     /// Get the range of items which are visible in the main view
@@ -453,7 +450,6 @@ impl MainScreen {
                 // Other keys
                 match key {
                     // Open first item
-                    // TODO bug where this registers when you press ENTER to close another app, which then refocuses on kf
                     Key::Named(Named::Enter) if modifiers.is_empty() && status == Status::Ignored => {
                         return self.open_first_result() .unwrap_or(Command::none());
                     }

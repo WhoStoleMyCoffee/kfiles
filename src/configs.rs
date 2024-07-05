@@ -3,6 +3,8 @@ use std::{fs::{create_dir_all, File}, io::{self, Read, Write}, path::PathBuf, sy
 use nanoserde::{DeJson, DeJsonErr, SerJson};
 use thiserror::Error;
 
+use crate::{error, log, APP_NAME};
+
 
 static GLOBAL: OnceLock<Mutex<Configs>> = OnceLock::new();
 
@@ -18,24 +20,23 @@ pub enum LoadError {
     ParseError(#[from] DeJsonErr),
 }
 
-
-
 /// Gets the save path of the configs file
-pub fn get_save_path() -> PathBuf {
-    use crate::APP_NAME;
-
-    directories::BaseDirs::new()
-        .expect("failed to get base dirs")
+/// Returns `None` if no [`directories::BaseDirs`] was found
+pub fn get_save_path() -> io::Result<PathBuf> {
+    Ok(directories::BaseDirs::new()
+        .ok_or_else(||
+            io::Error::new(io::ErrorKind::NotFound, "Failed to get BaseDirs instance")
+        )?
         .config_dir()
         .to_path_buf()
-        .join( format!("{APP_NAME}/configs.json") )
+        .join(format!("{}/configs.json", APP_NAME)))
 }
 
 
 /// Load the configs file from disk
 pub fn load_configs() -> Result<Configs, LoadError> {
     let mut contents = String::new();
-    let path = get_save_path();
+    let path = get_save_path()?;
     File::open(path)?
         .read_to_string(&mut contents)?;
 
@@ -46,9 +47,9 @@ pub fn load_configs() -> Result<Configs, LoadError> {
 
 /// Save the given [`Configs`] to disk, creating directories if necessary
 pub fn save_configs(configs: &Configs) -> io::Result<()> {
-    let path = get_save_path();
+    let path = get_save_path()?;
     if !path.exists() {
-        let dir = path.parent().expect("could not get parent dir");
+        let dir = path.parent().expect("configs path should not be root or empty");
         create_dir_all(dir)?;
     }
 
@@ -69,10 +70,10 @@ pub fn save_configs(configs: &Configs) -> io::Result<()> {
 /// See [`set_global`]
 pub fn global() -> MutexGuard<'static, Configs> {
     let mutex = GLOBAL.get()
-        .expect("global configs not initialized");
+        .expect("global configs should be initialized");
     mutex.lock()
         .unwrap_or_else(|mut err| {
-            println!("Error while getting global Configs instance:\n Mutex was poisonned");
+            error!("Error while getting global Configs instance:\n Mutex was poisonned");
             **err.get_mut() = Configs::default();
             mutex.clear_poison();
             err.into_inner()

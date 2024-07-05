@@ -5,6 +5,7 @@ use std::thread::{self, JoinHandle};
 use walkdir::{DirEntry, WalkDir};
 
 use crate::app::main_screen::Item;
+use crate::{ error,log };
 use crate::tagging::{ entries::Entries, Tag };
 
 use self::constraint::ConstraintList;
@@ -172,7 +173,7 @@ impl Drop for Query {
         // Join threads
         if let Some(handle) = self.search_handle.take() {
             if let Err(err) = handle.join() {
-                println!("[Query::drop()] Failed to join search handle:\n {err:?}");
+                error!("[Query::drop()] Failed to join search handle:\n {err:?}");
             }
         }
     }
@@ -418,13 +419,8 @@ mod constraint {
             let mut drain_ranges = Vec::new();
             // Parse
             for cap in re.captures_iter(str) {
-                let inner_match = match cap.name("inner") {
-                    Some(m) => m,
-                    None => {
-                        println!("Error on constraint::Contains::parse():\n Failed to get inner match group");
-                        continue;
-                    },
-                };
+                #[allow(clippy::unwrap_used)]
+                let inner_match = cap.name("inner").unwrap();
                 let inner: &str = inner_match.as_str();
                 let mut range = inner_match.range();
 

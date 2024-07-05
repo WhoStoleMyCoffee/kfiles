@@ -264,7 +264,6 @@ mod tests {
         let intersection_ba = Entries::intersection_of(vec![ b.clone(), a.clone() ]);
         assert_eq!(HashSet::from_iter(intersection_ba), expected );
 
-        println!("FROM HERE");
         let expected: HashSet<PathBuf> = HashSet::from_iter(vec![
             PathBuf::from("C:/Users/ddxte/Documents/Projects/TankInSands/"),
             PathBuf::from("C:/Users/ddxte/Pictures/bread.jpg"),

@@ -207,7 +207,12 @@ impl ConfigsScreen {
             }
 
             Message::OpenSaveDir => {
-                let path: PathBuf = configs::get_save_path();
+                let path: PathBuf = match configs::get_save_path() {
+                    Ok(p) => p,
+                    Err(err) => return send_message!(error_message(
+                        format!("Failed to get configs path:\n{err:?}")
+                    )),
+                };
 
                 if let Err(err) = opener::reveal(&path) {
                     return send_message!(error_message(

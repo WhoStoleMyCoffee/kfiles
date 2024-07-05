@@ -1,3 +1,6 @@
+// #![windows_subsystem = "windows"]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::{io, path::{Path, PathBuf}, sync::OnceLock};
 
 use configs::Configs;
@@ -10,8 +13,10 @@ pub mod thumbnail;
 pub mod widget;
 pub mod strmatch;
 pub mod configs;
+pub mod log;
 
 use app::KFiles;
+use log::Log;
 use tagging::{entries::Entries, Tag};
 
 const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
@@ -21,12 +26,15 @@ static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 
 fn main() -> iced::Result {
+    Log::init();
+    Log::remove_old_logs(7);
+
     // Load configs
     let configs = load_configs();
 
     // Initialize tags
     if should_reinit_tags() {
-        println!("Initializing default tags...");
+        info!("Initializing default tags...");
         init_default_tags();
     }
 
@@ -42,19 +50,16 @@ fn main() -> iced::Result {
     });
 
     // Trim thumbnail cache once we're done
-    println!("Trimming thumbnail cache...");
+    trace!("Trimming thumbnail cache...");
     match thumbnail::trim_cache( configs::global().thumbnail_cache_size ) {
-        Ok(0) => println!("Thumbnail cache already clear"),
-        Ok(bytes) => println!("Sucessfully trimmed thumbnail cache by {} bytes", bytes),
-        Err(err) => match err.kind() {
-            io::ErrorKind::NotFound => println!("Thumbnail cache already clear"),
-            _ => println!("ERROR: failed to trim thumbnail cache:\n{}", err),
-        }
+        Ok(bytes) => info!("Sucessfully trimmed thumbnail cache by {} bytes", bytes),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => trace!("Thumbnail cache already clear"),
+        Err(err) => error!("Failed to trim thumbnail cache:\n {err:?}"),
     }
 
     // Save configs
     if let Err(err) = configs::global().save() {
-        println!("ERROR: Failed to save Configs:\n {err:?}");
+        error!("Failed to save Configs:\n {err:?}");
     }
 
     res
@@ -67,7 +72,7 @@ pub fn get_temp_dir() -> &'static PathBuf {
 
     if !path.exists() {
         if let Err(err) = std::fs::create_dir_all(path) {
-            eprintln!("Failed to create temp directory: {:?}", err);
+            error!("Failed to create temp directory: {:?}", err);
         }
     }
 
@@ -81,8 +86,8 @@ fn load_configs() -> Configs {
             match err {
                 configs::LoadError::IO(err)
                     if err.kind() == io::ErrorKind::NotFound =>
-                    println!("Initializing default configs..."),
-                err => println!("Failed to load Configs: {:?}", err),
+                    info!("Initializing default configs."),
+                err => error!("Failed to load Configs:\n {:?}", err),
             }
             configs::Configs::default()
         })
@@ -95,7 +100,7 @@ fn should_reinit_tags() -> bool {
         Ok(mut it) => it.next().is_none(),
         Err(err) if err.kind() == io::ErrorKind::NotFound => true,
         Err(err) => {
-            eprintln!("[should_reinit_tags()] Failed to read save dir: {err:?}");
+            error!("[should_reinit_tags()] Failed to read save dir:\n {err:?}");
             true
         }
     }
@@ -104,7 +109,7 @@ fn should_reinit_tags() -> bool {
 
 fn init_default_tags() {
     let Some(user_dirs) = directories::UserDirs::new() else {
-        eprintln!("[init_default_tags()] Failed to get user dirs.");
+        error!("[init_default_tags()] Failed to get user dirs.");
         return;
     };
 
@@ -124,7 +129,7 @@ fn init_default_tags() {
         .filter(|tag| match tag.save() {
             Ok(()) => true,
             Err(err) => {
-                eprintln!("Failed to save default tag \"{}\": {:?}", &tag.id, err);
+                error!("Failed to save default tag \"{}\":\n {:?}", &tag.id, err);
                 false
             },
         })
@@ -147,7 +152,7 @@ fn init_default_tags() {
 
 
     if let Err(err) = home.save() {
-        println!("Failed to save default tag \"{}\": {:?}", home.id, err);
+        error!("Failed to save default tag \"{}\":\n {:?}", home.id, err);
     }
 }
 
@@ -245,3 +250,19 @@ mod fs {
     // There is no ModificationWatcher;
     // Creation and deletion may not be instant, but modification apparently is
 }
+
+
+
+
+#[test]
+fn test_log() {
+    Log::init();
+
+    trace!();
+    trace!("Hello, World!");
+    trace!("Hello, {}!", "World");
+    warn!("Do not the cat.");
+    info!("The cat is called \"{}\" btw", "Blasphemous rumours");
+    error!("He the cat {}.", "😔");
+}
+

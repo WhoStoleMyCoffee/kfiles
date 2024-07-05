@@ -2014,6 +2014,7 @@ dependencies = [
 name = "kfiles"
 version = "2.0.0"
 dependencies = [
+ "chrono",
  "convert_case",
  "directories",
  "iced",

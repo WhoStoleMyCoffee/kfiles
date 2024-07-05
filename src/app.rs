@@ -14,7 +14,7 @@ pub mod configs_screen;
 
 use crate::tagging::Tag;
 use crate::widget::notification_card::NotificationCard;
-use crate::{configs, ToPrettyString};
+use crate::{configs, error, info, log, ToPrettyString};
 
 use notification::Notification;
 use main_screen::MainScreen;
@@ -117,9 +117,9 @@ impl Application for KFiles {
 
             Message::IconsFontLoaded(res) => {
                 if let Err(err) = res {
-                    eprintln!("ERROR Failed to load icons font: {err:?}");
+                    error!("Failed to load icons font:\n {err:?}");
                 } else {
-                    eprintln!("INFO: Icons font loaded");
+                    info!("Icons font successfully loaded");
                 }
                 Command::none()
             }
@@ -515,12 +515,15 @@ pub mod notification {
         pub const DEFAULT_LIFETIME: f32 = 10.0;
 
         /// Create a new [`Notification`]
+        /// Also logs `contents` (see [`log::Log`] )
         pub fn new(notification_type: Type, content: String) -> Self {
-            Notification {
+            let n = Notification {
                 notification_type,
                 content,
                 expire_at: Some(Instant::now() + Duration::from_secs_f32(Notification::DEFAULT_LIFETIME)),
-            }
+            };
+            n.log();
+            n
         }
 
         pub fn no_expiration(mut self) -> Self {
@@ -532,10 +535,6 @@ pub mod notification {
             self.expire_at = Some(Instant::now() + Duration::from_secs_f32(duration_seconds));
             self
         }
-
-        /* pub fn will_expire(&self) -> bool {
-            self.expire_at.is_some()
-        } */
 
         pub fn is_expired(&self) -> bool {
             if let Some(expiration) = self.expire_at {
@@ -553,9 +552,18 @@ pub mod notification {
         pub fn get_icon(&self) -> Option<Text> {
             self.notification_type.get_icon()
         }
+
+        pub fn log(&self) {
+            use crate::{ error, info, warn, trace, log };
+
+            match &self.notification_type {
+                Type::Text(title) => trace!("[Notification: {}] {}", title, self.content),
+                Type::Info => info!("{}", self.content),
+                Type::Warning => warn!("{}", self.content),
+                Type::Error => error!("{}", self.content),
+            }
+        }
     }
-
-
 
 }
 

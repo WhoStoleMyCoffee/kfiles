@@ -10,7 +10,7 @@ use image::{ImageError, ImageFormat};
 use iced::widget;
 use thiserror::Error;
 
-use crate::get_temp_dir;
+use crate::{error, get_temp_dir, log, warn};
 
 static CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -93,7 +93,7 @@ impl Thumbnail for PathBuf {
 
 
 
-type Worker = JoinHandle<Result<(), ThumbnailError>>;
+type Worker = JoinHandle<()>;
 
 /// Builds thumbnails.
 /// You're welcome
@@ -109,14 +109,11 @@ impl ThumbnailBuilder {
         }
     }
 
-    /// Builds a thumbnail for `path` on a thread, replacing a previous worker in the pool
-    /// - `Ok(bool)` containing whether the job was accepted
-    /// - `Err(`[`ThumbnailError`]`)` containing any error that occured during the previous
-    ///   building process (of the replaced worker)
-    pub fn build_for_path(&mut self, path: &Path) -> Result<bool, ThumbnailError> {
+    /// Builds a thumbnail for `path` on a thread
+    /// Returns whether the job was accepted
+    pub fn build_for_path(&mut self, path: &Path) -> bool {
         for worker_maybe in self.workers.iter_mut() {
-            let is_done = worker_maybe
-                .as_ref()
+            let is_done = worker_maybe.as_ref()
                 .map(|h| h.is_finished())
                 .unwrap_or(true);
             if !is_done {
@@ -125,18 +122,22 @@ impl ThumbnailBuilder {
 
             let handle = ThumbnailBuilder::build(path);
             if let Some(old_worker) = worker_maybe.replace(handle) {
-                old_worker.join() .expect("Couldn't join thumbnail builder thread")?;
+                old_worker.join() .expect("Couldn't join thumbnail builder thread");
             }
 
-            return Ok(true);
+            return true;
         }
 
-        Ok(false)
+        false
     }
 
     fn build(path: &Path) -> Worker {
         let path = path.to_path_buf();
-        thread::spawn(move || path.create_thumbnail())
+        thread::spawn(move || {
+            if let Err(err) = path.create_thumbnail() {
+                warn!("Failed to create thumbnail for \"{}\":\n {:?}", path.display(), err);
+            }
+        })
     }
 
     pub fn join_threads(&mut self) {
@@ -146,7 +147,7 @@ impl ThumbnailBuilder {
             };
 
             if let Err(err) = handle.join() {
-                println!("[ThumbnailBuilder::drop()] Failed to join worker thread:\n {err:?}");
+                error!("[ThumbnailBuilder::drop()] Failed to join worker thread:\n {err:?}");
             }
         }
     }
@@ -171,7 +172,7 @@ pub fn get_cache_dir_or_create() -> &'static PathBuf {
 
     if !path.exists() {
         if let Err(err) = create_dir(path) {
-            eprintln!("Failed to create thumbnail cache dir: {:?}", err);
+            error!("Failed to create thumbnail cache dir:\n {:?}", err);
         }
     }
 
