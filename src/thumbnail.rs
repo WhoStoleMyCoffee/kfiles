@@ -10,10 +10,9 @@ use image::{ImageError, ImageFormat};
 use iced::widget;
 use thiserror::Error;
 
-use crate::{error, get_temp_dir, log, warn};
+use crate::{error, get_temp_dir, log};
 
 static CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
-
 
 
 #[derive(Debug, Error)]
@@ -91,9 +90,13 @@ impl Thumbnail for PathBuf {
 }
 
 
+#[derive(Debug)]
+pub struct BuildError {
+    pub path: PathBuf,
+    pub error: ThumbnailError,
+}
 
-
-type Worker = JoinHandle<()>;
+type Worker = JoinHandle<Result<(), BuildError>>;
 
 /// Builds thumbnails.
 /// You're welcome
@@ -109,21 +112,39 @@ impl ThumbnailBuilder {
         }
     }
 
-    /// Builds a thumbnail for `path` on a thread
-    /// Returns whether the job was accepted
-    pub fn build_for_path(&mut self, path: &Path) -> bool {
+    /// Updates the thread pool and return results from the joined threads
+    /// See also [`ThumbnailBuilder::build`]
+    #[must_use]
+    pub fn update(&mut self) -> Vec<Result<(), BuildError>> {
+        let mut results = Vec::new();
+
         for worker_maybe in self.workers.iter_mut() {
-            let is_done = worker_maybe.as_ref()
-                .map(|h| h.is_finished())
-                .unwrap_or(true);
-            if !is_done {
+            // bro i want `take_if()`
+            let Some(handle) = worker_maybe else { continue; };
+            if !handle.is_finished() {
+                continue; 
+            }
+
+            // SAFETY: we already checked above that `worker_maybe` is `Some`
+            let handle = unsafe { worker_maybe.take().unwrap_unchecked() };
+            let res = handle.join() .expect("Couldn't join thumbnail worker thread");
+            results.push(res);
+        }
+
+        results
+    }
+
+    /// Builds a thumbnail for `path` on a thread, replacing empty slots in the thread pool
+    /// Ideally, you'd call [`ThumbnailBuilder::update`] to join finished threads first
+    /// Returns whether the job was accepted
+    pub fn build(&mut self, path: &Path) -> bool {
+        for worker_maybe in self.workers.iter_mut() {
+            if worker_maybe.is_some() {
                 continue;
             }
 
-            let handle = ThumbnailBuilder::build(path);
-            if let Some(old_worker) = worker_maybe.replace(handle) {
-                old_worker.join() .expect("Couldn't join thumbnail builder thread");
-            }
+            let handle = ThumbnailBuilder::build_for_path(path);
+            *worker_maybe = Some(handle);
 
             return true;
         }
@@ -131,12 +152,11 @@ impl ThumbnailBuilder {
         false
     }
 
-    fn build(path: &Path) -> Worker {
+    fn build_for_path(path: &Path) -> Worker {
         let path = path.to_path_buf();
         thread::spawn(move || {
-            if let Err(err) = path.create_thumbnail() {
-                warn!("Failed to create thumbnail for \"{}\":\n {:?}", path.display(), err);
-            }
+            path.create_thumbnail()
+                .map_err(|error| BuildError { path, error })
         })
     }
 

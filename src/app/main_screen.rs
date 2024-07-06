@@ -1,4 +1,6 @@
+use std::collections::HashSet;
 use std::iter;
+use std::ops::Range;
 use std::path::PathBuf;
 
 use iced::event::Status;
@@ -10,12 +12,13 @@ use iced::Command;
 use iced_aw::Wrap;
 use rand::Rng;
 
+use crate::configs::Configs;
 use crate::search::Query;
 use crate::tagging::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{theme, Message as AppMessage};
-use crate::{configs, send_message, ToPrettyString};
+use crate::{configs, send_message, warn, log, ToPrettyString};
 
 use super::notification::error_message;
 
@@ -86,9 +89,7 @@ pub struct MainScreen {
     query: Query,
     query_input: String,
     items: Vec<Item>,
-    /// Tuple with the item index it's trying to build and the builder itself
-    thumbnail_builder: (usize, ThumbnailBuilder),
-    thumbnail_update_prob: f64,
+    thumbnail_handler: ThumbnailHandler,
     scroll: f32,
     results_container_bounds: Option<Rectangle>,
     hovered_path: Option<PathBuf>,
@@ -119,11 +120,7 @@ impl MainScreen {
                 query: Query::empty(),
                 query_input: String::default(),
                 items: Vec::new(),
-                thumbnail_builder: (
-                    0,
-                    ThumbnailBuilder::new(cfg.thumbnail_thread_count)
-                ),
-                thumbnail_update_prob: cfg.thumbnail_update_prob as f64,
+                thumbnail_handler: ThumbnailHandler::new(&cfg),
                 scroll: 0.0,
                 results_container_bounds: None,
                 hovered_path: None,
@@ -134,7 +131,10 @@ impl MainScreen {
     }
 
     pub fn tick(&mut self) -> Command<AppMessage> {
-        self.build_thumbnails();
+        self.thumbnail_handler.update();
+        if let Some(range) = self.get_visible_items_range() {
+            self.thumbnail_handler.build(&mut self.items, range);
+        }
         self.try_receive_results();
 
         Command::none()
@@ -365,39 +365,6 @@ impl MainScreen {
         wrap
     }
 
-    fn build_thumbnails(&mut self) {
-        let Some(range) = self.get_visible_items_range() else {
-            return;
-        };
-        let (index, builder) = &mut self.thumbnail_builder;
-
-        let Some(Item(_score, path)) = self.items.get(*index) else {
-            *index = 0;
-            return;
-        };
-
-        // Move on to the next one
-        *index += 1;
-        if !range.contains(index) {
-            *index = range.start;
-        }
-
-        if path.is_dir() || !thumbnail::is_file_supported(path) {
-            return;
-        }
-
-        // If thumbnail already exists, don't try to rebuild it some percentage of the time
-        // (configurable)
-        if path.get_thumbnail_cache_path().exists()
-            && !rand::thread_rng().gen_bool(self.thumbnail_update_prob)
-        {
-            return;
-        }
-
-        // Build
-        builder.build_for_path(path);
-    }
-
     /// Get the range of items which are visible in the main view
     /// come to think of it, there was probably a better way to do all this culling thing
     fn get_visible_items_range(&self) -> Option<std::ops::Range<usize>> {
@@ -479,6 +446,79 @@ impl MainScreen {
         }
 
         Command::none()
+    }
+}
+
+
+
+
+#[derive(Debug)]
+struct ThumbnailHandler {
+    index: usize,
+    builder: ThumbnailBuilder,
+    update_prob: f64,
+    failed_paths: HashSet<PathBuf>,
+}
+
+impl ThumbnailHandler {
+    fn new(configs: &Configs) -> ThumbnailHandler {
+        ThumbnailHandler {
+            index: 0,
+            builder: ThumbnailBuilder::new(configs.thumbnail_thread_count),
+            update_prob: configs.thumbnail_update_prob as f64,
+            failed_paths: HashSet::new(),
+        }
+    }
+
+    fn update(&mut self) {
+        use thumbnail::BuildError;
+
+        for BuildError { path, error } in self.builder.update().into_iter() .filter_map(|r| r.err())
+        {
+            warn!("Failed to build thumbnail for \"{}\":\n {:?}", path.display(), error);
+            self.failed_paths.insert(path);
+        }
+
+    }
+
+    fn build(
+        &mut self,
+        items: &mut Vec<Item>,
+        visible_items_range: Range<usize>,
+    ) {
+        let Some(Item(_, path)) = items.get(self.index) else {
+            self.index = 0;
+            return;
+        };
+
+        // Move on to the next one
+        self.index += 1;
+        if !visible_items_range.contains(&self.index) {
+            self.index = visible_items_range.start;
+        }
+
+        if path.is_dir() || !thumbnail::is_file_supported(path) {
+            return;
+        }
+
+        // If thumbnail already exists, don't try to rebuild it some percentage
+        // of the time (configurable)
+        if path.get_thumbnail_cache_path().exists()
+            && !rand::thread_rng().gen_bool(self.update_prob)
+        {
+            return;
+        }
+
+        // Don't rebuild those that have failed before, but do give them a little chance
+        if self.failed_paths.contains(path) {
+            if !rand::thread_rng().gen_bool(self.update_prob) {
+                return;
+            }
+            self.failed_paths.remove(path);
+        }
+
+        // Build
+        self.builder.build(path);
     }
 }
 
