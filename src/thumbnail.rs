@@ -1,7 +1,6 @@
-use std::fs::create_dir;
+use std::fs::create_dir_all;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::thread::JoinHandle;
 use std::{io, thread};
 
@@ -11,8 +10,6 @@ use iced::widget;
 use thiserror::Error;
 
 use crate::{error, get_temp_dir, log};
-
-static CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 
 #[derive(Debug, Error)]
@@ -181,21 +178,17 @@ impl Drop for ThumbnailBuilder {
 }
 
 
-pub fn get_cache_dir() -> &'static PathBuf {
-    CACHE_DIR.get_or_init(||
-        get_temp_dir().join("thumbnails/")
-    )
+pub fn get_cache_dir() -> PathBuf {
+    get_temp_dir().join("thumbnails/")
 }
 
-pub fn get_cache_dir_or_create() -> &'static PathBuf {
+pub fn get_cache_dir_or_create() -> PathBuf {
     let path = get_cache_dir();
-
     if !path.exists() {
-        if let Err(err) = create_dir(path) {
+        if let Err(err) = create_dir_all(&path) {
             error!("Failed to create thumbnail cache dir:\n {:?}", err);
         }
     }
-
     path
 }
 

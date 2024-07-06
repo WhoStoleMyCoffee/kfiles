@@ -155,7 +155,7 @@ impl ConfigsScreen {
 
             Message::OpenThumbnailCacheDir => {
                 let path = thumbnail::get_cache_dir_or_create();
-                if let Err(err) = opener::open(path) {
+                if let Err(err) = opener::open(&path) {
                     return send_message!(error_message(
                         format!("Failed to open {}:\n{:?}", path.to_pretty_string(), err)
                     ));

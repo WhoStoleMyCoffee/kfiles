@@ -1,7 +1,7 @@
-// #![windows_subsystem = "windows"]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{io, path::{Path, PathBuf}, sync::OnceLock};
+use std::path::{Path, PathBuf};
+use std::io;
 
 use configs::Configs;
 use iced::{ Application, Settings};
@@ -21,8 +21,6 @@ use tagging::{entries::Entries, Tag};
 
 const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
 const VERSION: &str = std::env!("CARGO_PKG_VERSION");
-
-static TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 
 fn main() -> iced::Result {
@@ -65,18 +63,9 @@ fn main() -> iced::Result {
     res
 }
 
-pub fn get_temp_dir() -> &'static PathBuf {
-    let path = TEMP_DIR.get_or_init(||
-        std::env::temp_dir().join(env!("CARGO_PKG_NAME"))
-    );
 
-    if !path.exists() {
-        if let Err(err) = std::fs::create_dir_all(path) {
-            error!("Failed to create temp directory: {:?}", err);
-        }
-    }
-
-    path
+pub fn get_temp_dir() -> PathBuf {
+    std::env::temp_dir().join(env!("CARGO_PKG_NAME"))
 }
 
 
