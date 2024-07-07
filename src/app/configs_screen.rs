@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 
 use iced::event::Status;
@@ -12,7 +13,7 @@ use iced_aw::widgets::NumberInput;
 use crate::app::notification::info_message;
 use crate::app::Message as AppMessage;
 use crate::configs::{self, Configs};
-use crate::{ icon, send_message, simple_button, thumbnail, ToPrettyString, VERSION };
+use crate::{ icon, log, send_message, simple_button, thumbnail, ToPrettyString, VERSION };
 
 use super::notification::error_message;
 
@@ -118,7 +119,9 @@ pub enum Message {
     ThumbnailCacheSizeInput(u64),
     ThumbnailThreadCountInput(u8),
     ThumbnailUpdateProbInput(f32),
-    OpenSaveDir,
+    ThumbnailCheckCountInput(u32),
+    OpenConfigsDir,
+    OpenLogsDir,
 }
 
 impl From<Message> for AppMessage {
@@ -165,7 +168,7 @@ impl ConfigsScreen {
             Message::ClearThumbnailCache => {
                 use std::io::ErrorKind;
 
-                match thumbnail::clear_thumbnails() {
+                match thumbnail::clear_thumbnails_cache() {
                     Ok(()) => return send_message!(info_message( "Thumbnail cache cleared".to_string() )),
                     Err(err) => match err.kind() {
                         ErrorKind::NotFound => {},
@@ -206,7 +209,12 @@ impl ConfigsScreen {
                 self.configs.thumbnail_update_prob = input;
             }
 
-            Message::OpenSaveDir => {
+            Message::ThumbnailCheckCountInput(input) => {
+                self.is_dirty = true;
+                self.configs.thumbnail_check_count = input;
+            }
+
+            Message::OpenConfigsDir => {
                 let path: PathBuf = match configs::get_save_path() {
                     Ok(p) => p,
                     Err(err) => return send_message!(error_message(
@@ -219,6 +227,31 @@ impl ConfigsScreen {
                         format!("Failed to open \"{}\":\n{:?}", path.to_pretty_string(), err)
                     ));
                 }
+            }
+
+            Message::OpenLogsDir => {
+                let Some(path) = log::get_logs_dir() else {
+                    return send_message!(error_message(
+                        format!("Failed to get logs path")
+                    ));
+                };
+
+                // The logs dir should already exist because it gets created in `Log::get_sink()`
+                // This is just in case the user deletes it while the app is running
+                if !path.exists() {
+                    if let Err(err) = fs::create_dir_all(&path) {
+                        return send_message!(error_message(
+                            format!("Failed create logs path:\n{:?}", err)
+                        ));
+                    }
+                }
+
+                if let Err(err) = opener::open(&path) {
+                    return send_message!(error_message(
+                        format!("Failed to open \"{}\":\n{:?}", path.to_pretty_string(), err)
+                    ));
+                }
+                
             }
 
         }
@@ -257,7 +290,7 @@ impl ConfigsScreen {
 
         container(scrollable(
             column![
-                // Update rate
+                // UPDATE RATE
                 config_entry(
                     "Update rate",
                     desc_text("Application's update rate, in milliseconds").into(),
@@ -267,7 +300,7 @@ impl ConfigsScreen {
                         .into()
                 ),
 
-                // Max results per tick
+                // MAX RESULTS PER TICK
                 config_entry(
                     "Max results per tick",
                     desc_text("How many search results to take every update tick").into(),
@@ -277,7 +310,7 @@ impl ConfigsScreen {
                         .into()
                 ),
 
-                // Max result count
+                // MAX RESULT COUNT
                 config_entry(
                     "Max result count",
                     desc_text("How many results to show all at once").into(),
@@ -287,7 +320,7 @@ impl ConfigsScreen {
                         .into()
                 ),
 
-                // Thumbnail cache size
+                // THUMBNAIL CACHE SIZE
                 config_entry(
                     "Thumbnail cache size",
                     column![
@@ -304,7 +337,7 @@ impl ConfigsScreen {
                     number_input!(c.thumbnail_cache_size, u64, ThumbnailCacheSizeInput) .into()
                 ),
 
-                // Thumbnail thread count
+                // THUMBNAIL THREAD COUNT
                 config_entry(
                     "Thumbnail builder thread count",
                     desc_text("How many threads to use for building thumbnails") .into(),
@@ -314,7 +347,7 @@ impl ConfigsScreen {
                         .into()
                 ),
 
-                // Thumbnail rebuild prob
+                // THUMBNAIL REBUILD PROB
                 config_entry(
                     "Thumbnail update prob",
                     desc_text("The probability that a file's thumbnail will be updated. 
@@ -329,14 +362,25 @@ Useful if you make changes to an image file while this app is open, but will cau
                     .into()
                 ),
 
-                // Open save dir
+                // THUMBNAIL MAX CHECK DEPTH
+                config_entry(
+                    "Thumbnail max check count",
+                    desc_text("How many items to check at a time for building thumbnails").into(),
+                    Some(format!( "{} items", default.thumbnail_check_count )),
+                    number_input!(c.thumbnail_check_count, u32, ThumbnailCheckCountInput)
+                        .min(1)
+                        .into()
+                ),
+
+                // MISCELLANEOUS
+                // TODO use iced_aw::Grid
                 config_row(
                     "Miscellaneous",
-                    Wrap::with_elements(vec![
-                        button("Open save dir")
-                            .on_press(Message::OpenSaveDir.into())
-                            .into(),
-                    ])
+                    column![
+                        button("Open configs directory").on_press(Message::OpenConfigsDir.into()),
+                        button("Open logs directory").on_press(Message::OpenLogsDir.into()),
+                    ]
+                    .spacing(4)
                     .into()
                 ),
 

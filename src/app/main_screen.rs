@@ -15,7 +15,7 @@ use rand::Rng;
 use crate::configs::Configs;
 use crate::search::Query;
 use crate::tagging::{self, tag::Tag, id::TagID};
-use crate::thumbnail::{self, Thumbnail, ThumbnailBuilder};
+use crate::thumbnail::{self, get_thumbnail_cache_path, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{theme, Message as AppMessage};
 use crate::{configs, send_message, warn, log, ToPrettyString};
@@ -367,7 +367,7 @@ impl MainScreen {
 
     /// Get the range of items which are visible in the main view
     /// come to think of it, there was probably a better way to do all this culling thing
-    fn get_visible_items_range(&self) -> Option<std::ops::Range<usize>> {
+    fn get_visible_items_range(&self) -> Option<Range<usize>> {
         let Rectangle { width, height, .. } = self.results_container_bounds?;
 
         let items_per_row: usize = (width / TOTAL_ITEM_SIZE.0) as usize;
@@ -454,23 +454,29 @@ impl MainScreen {
 
 #[derive(Debug)]
 struct ThumbnailHandler {
+    /// Current index in [`MainScreen::items`]
     index: usize,
     builder: ThumbnailBuilder,
     update_prob: f64,
+    /// List of paths that have previously failed to have their thumbnails built, so we don't
+    /// try to rebuild them repeatedly
     failed_paths: HashSet<PathBuf>,
+    /// How far to check for available paths
+    max_check_depth: u32,
 }
 
 impl ThumbnailHandler {
-    fn new(configs: &Configs) -> ThumbnailHandler {
+    pub fn new(configs: &Configs) -> ThumbnailHandler {
         ThumbnailHandler {
             index: 0,
             builder: ThumbnailBuilder::new(configs.thumbnail_thread_count),
             update_prob: configs.thumbnail_update_prob as f64,
             failed_paths: HashSet::new(),
+            max_check_depth: 10,
         }
     }
 
-    fn update(&mut self) {
+    pub fn update(&mut self) {
         use thumbnail::BuildError;
 
         for BuildError { path, error } in self.builder.update().into_iter() .filter_map(|r| r.err())
@@ -481,44 +487,61 @@ impl ThumbnailHandler {
 
     }
 
-    fn build(
+    pub fn build(
         &mut self,
-        items: &mut Vec<Item>,
+        items: &Vec<Item>,
         visible_items_range: Range<usize>,
     ) {
-        let Some(Item(_, path)) = items.get(self.index) else {
-            self.index = 0;
+        let Some(path) = self.next(items, visible_items_range) else {
             return;
         };
 
-        // Move on to the next one
-        self.index += 1;
-        if !visible_items_range.contains(&self.index) {
-            self.index = visible_items_range.start;
-        }
-
-        if path.is_dir() || !thumbnail::is_file_supported(path) {
-            return;
-        }
-
-        // If thumbnail already exists, don't try to rebuild it some percentage
-        // of the time (configurable)
-        if path.get_thumbnail_cache_path().exists()
-            && !rand::thread_rng().gen_bool(self.update_prob)
-        {
-            return;
-        }
-
-        // Don't rebuild those that have failed before, but do give them a little chance
-        if self.failed_paths.contains(path) {
-            if !rand::thread_rng().gen_bool(self.update_prob) {
-                return;
-            }
-            self.failed_paths.remove(path);
-        }
-
-        // Build
         self.builder.build(path);
+    }
+
+    fn next<'a>(
+        &mut self,
+        items: &'a Vec<Item>,
+        visible_items_range: Range<usize>,
+    ) -> Option<&'a PathBuf>
+    {
+        for _ in 0..self.max_check_depth {
+            let Some(Item(_, path)) = items.get(self.index) else {
+                self.index = visible_items_range.start;
+                return None;
+            };
+            
+            if !visible_items_range.contains(&self.index) {
+                self.index = visible_items_range.start;
+                return None;
+            }
+
+            self.index += 1;
+
+            if path.is_dir() || !thumbnail::is_file_supported(path) {
+                continue;
+            }
+
+            // If thumbnail already exists, don't try to rebuild it some percentage
+            // of the time (configurable)
+            if get_thumbnail_cache_path(path).exists()
+                && !rand::thread_rng().gen_bool(self.update_prob)
+            {
+                continue;
+            }
+
+            // Don't rebuild those that have failed before, but do give them a little chance
+            if self.failed_paths.contains(path) {
+                if !rand::thread_rng().gen_bool(self.update_prob) {
+                    continue;
+                }
+                self.failed_paths.remove(path);
+            }
+
+            return Some(path);
+        }
+
+        None
     }
 }
 

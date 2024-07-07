@@ -11,6 +11,8 @@ use thiserror::Error;
 
 use crate::{error, get_temp_dir, log};
 
+const FORMAT: &str = "jpg";
+
 
 #[derive(Debug, Error)]
 pub enum ThumbnailError {
@@ -50,41 +52,27 @@ impl ThumbnailSize {
     }
 }
 
-/// Trait that handles thumbnail building
-pub trait Thumbnail {
-    fn get_thumbnail_cache_path(&self) -> PathBuf;
 
-    fn create_thumbnail(&self) -> Result<(), ThumbnailError>;
+
+
+/// Get the file where the thumbnail for `path` should be
+pub fn get_thumbnail_cache_path(path: &Path) -> PathBuf {
+    get_cache_dir_or_create().join(format!("{}.{}", hash_path(path), FORMAT))
 }
 
-impl Thumbnail for &Path {
-    #[inline]
-    fn get_thumbnail_cache_path(&self) -> PathBuf {
-        get_cache_dir_or_create().join(format!("{}.jpg", hash_path(self)))
-    }
+/// Create a thumbnail for `path`, assuming it is an image file
+pub fn create_thumbnail(path: &Path) -> Result<(), ThumbnailError> {
+    let img = ImageReader::open(path)?
+        .decode()?;
 
-    fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
-        let img = ImageReader::open(self)?
-            .decode()?;
-
-        let (w, h) = ThumbnailSize::Icon.size();
-        img.thumbnail(w, h)
-            .into_rgb8()
-            .save(self.get_thumbnail_cache_path())?;
-        Ok(())
-    }
+    let (w, h) = ThumbnailSize::Icon.size();
+    img.thumbnail(w, h)
+        .into_rgb8()
+        .save(get_thumbnail_cache_path(path))?;
+    Ok(())
 }
 
-impl Thumbnail for PathBuf {
-    #[inline]
-    fn get_thumbnail_cache_path(&self) -> PathBuf {
-        self.as_path().get_thumbnail_cache_path()
-    }
 
-    fn create_thumbnail(&self) -> Result<(), ThumbnailError> {
-        self.as_path().create_thumbnail()
-    }
-}
 
 
 #[derive(Debug)]
@@ -103,6 +91,7 @@ pub struct ThumbnailBuilder {
 }
 
 impl ThumbnailBuilder {
+    /// Create a new [`ThumbnailBuilder`] with `thread_count` threads
     pub fn new(thread_count: u8) -> Self {
         ThumbnailBuilder {
             workers: (0..thread_count).map(|_| None).collect(),
@@ -149,10 +138,12 @@ impl ThumbnailBuilder {
         false
     }
 
+    /// Build the thumbnail for `path` on a thread
+    /// Returns the spawned [`Worker`]
     fn build_for_path(path: &Path) -> Worker {
         let path = path.to_path_buf();
         thread::spawn(move || {
-            path.create_thumbnail()
+            create_thumbnail(&path)
                 .map_err(|error| BuildError { path, error })
         })
     }
@@ -193,20 +184,24 @@ pub fn get_cache_dir_or_create() -> PathBuf {
 }
 
 
+/// Get the hash of `path`
 fn hash_path(path: &Path) -> u64 {
     let mut s = DefaultHasher::new();
     path.hash(&mut s);
     s.finish()
 }
 
+/// Returns whether the file `path` is a valid file for thumbnailing
 pub fn is_file_supported(path: &Path) -> bool {
     ImageFormat::from_path(path).is_ok()
 }
 
-pub fn clear_thumbnails() -> std::io::Result<()> {
+/// Deletes the thumbnail cache dir
+pub fn clear_thumbnails_cache() -> std::io::Result<()> {
     std::fs::remove_dir_all(get_cache_dir())
 }
 
+/// Get the size of the thumbnail cache folder
 pub fn cache_size() -> io::Result<u64> {
     let size: u64 = get_cache_dir()
         .read_dir()?
@@ -281,7 +276,7 @@ fn trim_cache_percent(target_percentage: f64) -> io::Result<u64> {
 
 
 pub fn load_thumbnail_for_path(path: &Path) -> widget::Image<widget::image::Handle> {
-    let cache_path = path.get_thumbnail_cache_path();
+    let cache_path = get_thumbnail_cache_path(&path);
     if cache_path.exists() {
         return widget::image(cache_path);
     } else if path.is_dir() {
@@ -290,6 +285,4 @@ pub fn load_thumbnail_for_path(path: &Path) -> widget::Image<widget::image::Hand
     widget::image("assets/file_icons/file.png")
     // Custom file icons ...
 }
-
-
 
