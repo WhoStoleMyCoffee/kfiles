@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::event::Status;
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, Container};
+use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, tooltip, Container};
 use iced::{Command, Element, Event, Length};
 
 use iced_aw::spinner;
@@ -110,10 +110,18 @@ impl TagListScreen {
                     .on_press(AppMessage::SwitchToMainScreen),
                 text("Tags List") .size(24),
                 horizontal_space(),
-                button("Open save directory") .on_press(Message::OpenTagsDir.into())
+                tooltip(
+                    simple_button!(icon = Bootstrap::Folder) .on_press(Message::OpenTagsDir.into()),
+                    "Open tags directory",
+                    tooltip::Position::Bottom
+                ),
             ],
 
-            button("New tag") .on_press(Message::CreateTag.into()),
+            tooltip(
+                button( icon!(Bootstrap::BookmarkPlus) ) .on_press(Message::CreateTag.into()),
+                "Create new tag",
+                tooltip::Position::Right
+            ),
 
             list
         ]

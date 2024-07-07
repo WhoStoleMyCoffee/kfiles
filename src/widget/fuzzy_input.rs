@@ -62,7 +62,7 @@ where
     query: String,
     overlay_style: <Theme as menu::StyleSheet>::Style,
     /// Whether to show options if text input is empty
-    overlay_on_empty: bool,
+    hide_on_empty: bool,
 }
 
 
@@ -92,7 +92,7 @@ where
             on_hovered: None,
             query: text.to_string(),
             overlay_style: <Theme as menu::StyleSheet>::Style::default(),
-            overlay_on_empty: true,
+            hide_on_empty: false,
         }
     }
 
@@ -120,11 +120,11 @@ where
         self
     }
 
-    /// Hides this [`FuzzyInput`]'s dropdown menu if the query is empty
+    /// Sets whether this [`FuzzyInput`]'s dropdown menu should hide if the query is empty
     /// The menu is shown by default, so this is a way to disable it until the user types in
     /// something
-    pub fn hide_on_empty(mut self) -> Self {
-        self.overlay_on_empty = false;
+    pub fn hide_on_empty(mut self, hide: bool) -> Self {
+        self.hide_on_empty = hide;
         self
     }
 
@@ -347,7 +347,7 @@ where
         );
 
         let text_state: &widget::text_input::State<Renderer::Paragraph> = textinput_tree.state.downcast_ref();
-        let should_be_expanded: bool = if self.query.is_empty() && !self.overlay_on_empty {
+        let should_be_expanded: bool = if self.query.is_empty() && self.hide_on_empty {
             false
         } else {
             text_state.is_focused()

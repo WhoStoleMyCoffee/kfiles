@@ -365,7 +365,8 @@ Useful if you make changes to an image file while this app is open, but will cau
                 // THUMBNAIL MAX CHECK DEPTH
                 config_entry(
                     "Thumbnail max check count",
-                    desc_text("How many items to check at a time for building thumbnails").into(),
+                    desc_text("How many items to check at a time for building thumbnails
+Setting this nnumber higher may increase building speed, but could be wasteful if set too high").into(),
                     Some(format!( "{} items", default.thumbnail_check_count )),
                     number_input!(c.thumbnail_check_count, u32, ThumbnailCheckCountInput)
                         .min(1)

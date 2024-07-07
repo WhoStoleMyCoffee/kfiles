@@ -116,7 +116,7 @@ impl Default for Configs {
             thumbnail_cache_size: 500_000,
             thumbnail_thread_count: 4,
             thumbnail_update_prob: 0.01,
-            thumbnail_check_count: 10,
+            thumbnail_check_count: 4,
             max_results_per_tick: 10,
             max_result_count: 256,
             update_rate_ms: 100,

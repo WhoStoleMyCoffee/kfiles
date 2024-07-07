@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use iced::event::Status;
 use iced::keyboard::Key;
 use iced::widget::scrollable::Viewport;
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, Column};
+use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, tooltip, Column};
 use iced::{self, keyboard, Element, Event, Length, Rectangle};
 use iced::Command;
-use iced_aw::Wrap;
+use iced_aw::{Bootstrap, Wrap};
 use rand::Rng;
 
 use crate::configs::Configs;
@@ -18,7 +18,7 @@ use crate::tagging::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, get_thumbnail_cache_path, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{theme, Message as AppMessage};
-use crate::{configs, send_message, warn, log, ToPrettyString};
+use crate::{configs, icon, log, send_message, simple_button, warn, ToPrettyString};
 
 use super::notification::error_message;
 
@@ -282,9 +282,18 @@ impl MainScreen {
             column![
                 row![
                     horizontal_space(),
-                    button("tags") .on_press(AppMessage::SwitchToTagListScreen),
-                    button("settings") .on_press(AppMessage::SwitchToConfigScreen),
-                ],
+                    tooltip(
+                        button( icon!(Bootstrap::BookmarkStar) ) .on_press(AppMessage::SwitchToTagListScreen),
+                        "Tags",
+                        tooltip::Position::Bottom
+                    ),
+                    tooltip(
+                        button( icon!(Bootstrap::GearFill) ) .on_press(AppMessage::SwitchToConfigScreen),
+                        "Settings",
+                        tooltip::Position::Bottom
+                    )
+                ]
+                .spacing(8),
 
                 query_input,
                 text("Results:"),
@@ -330,6 +339,7 @@ impl MainScreen {
                     .on_input(|text| Message::QueryTextChanged(text).into())
                     .on_submit(Message::QuerySubmit.into())
             })
+            .hide_on_empty( !self.query.tags.is_empty() )
             .style(theme::Simple),
         ]
     }
