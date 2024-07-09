@@ -12,11 +12,11 @@ pub mod tag_list_screen;
 pub mod tag_edit_screen;
 pub mod configs_screen;
 
+use crate::log::notification::Notification;
 use crate::tagging::Tag;
 use crate::widget::notification_card::NotificationCard;
-use crate::{configs, error, info, log, ToPrettyString};
+use crate::{configs, error, info, trace, ToPrettyString};
 
-use notification::Notification;
 use main_screen::MainScreen;
 use tag_edit_screen::TagEditScreen;
 use tag_list_screen::TagListScreen;
@@ -33,16 +33,14 @@ use self::configs_screen::ConfigsScreen;
 /// ```
 #[macro_export]
 macro_rules! send_message {
-    ($msg:expr) => {
-        Command::perform(async {}, move |_| $msg)
+    (notif = $notif:expr) => {
+        Command::perform(async {}, move |_|
+            $crate::app::Message::Notify($notif)
+        )
     };
 
-    ($($msg:expr),*$(,)?) => {
-        Command::batch(vec![
-            $(
-                Command::perform(async{}, move |_| $msg),
-             )*
-        ])
+    ($msg:expr) => {
+        Command::perform(async {}, move |_| $msg)
     };
 }
 
@@ -156,7 +154,7 @@ impl Application for KFiles {
             }
 
             Message::Notify(notification) => {
-                self.notifications.push(notification);
+                self.notify(notification);
                 Command::none()
             }
 
@@ -230,6 +228,11 @@ impl KFiles {
         self.notifications.retain(|n| !n.is_expired());
     }
 
+    #[inline]
+    pub fn notify(&mut self, notification: Notification) {
+        self.notifications.push(notification);
+    }
+
     /// Opens the given `path` using [`opener`], and returns any errors as [`Command`]s containing
     /// [`Notification`]s
     pub fn open_path(&self, path: &Path) -> Command<Message> {
@@ -237,22 +240,34 @@ impl KFiles {
             return Command::none();
         }
 
+        trace!("[KFiles::open_path()] Opening path \"{}\"", path.display());
         let Err(err) = opener::open(path) else {
             return Command::none();
         };
 
+        // Open path
         let pathstr: String = path.to_pretty_string();
-        let mut command = send_message!(Message::Notify(Notification::new(
-            notification::Type::Info,
-            format!("Failed to open \"{}\":\n{}\nRevealing in file explorer instead", pathstr, err)
-        )));
+        let mut command = send_message!(notif = error!(
+            notify;
+            "Failed to open \"{}\":\n{:?}\nRevealing in file explorer instead", pathstr, err
+        ));
 
-        if let Err(err) = opener::reveal(path) {
+        // Open path failed
+        // Reveal it in parent dir insetad
+        let res = opener::reveal(path).err()
+            // If that fails, open parent dir
+            .and_then(|err| {
+                let Some(path) = path.parent() else { return Some(err); };
+                error!("Reveal path failed, opening parent dir instead");
+                opener::open(path).err()
+            });
+        if let Some(err) = res {
             let pathstr: String = path.to_pretty_string();
             command = Command::batch(vec![
                 command,
-                send_message!(notification::error_message(
-                    format!("Failed to reveal {}:\n{}", pathstr, err)
+                send_message!(notif = error!(
+                    notify;
+                    "Failed to reveal {}:\n{:?}", pathstr, err
                 )),
             ]);
         }
@@ -433,137 +448,4 @@ pub mod theme {
 
 
 
-pub mod notification {
-    use std::time::{Duration, Instant};
-    use iced::widget::Text;
-    use iced_aw::Bootstrap;
-
-    use crate::{app, icon};
-
-    /// Create a new error notification wrapped in [`app::Message::Notify`]
-    /// The created [`Notification`] will have the default lifetime
-    pub fn error_message(content: String) -> app::Message {
-        app::Message::Notify(
-            Notification::new(
-                Type::Error,
-                content,
-            )
-        )
-    }
-
-    /// Create a new warning notification wrapped in [`app::Message::Notify`]
-    /// The created [`Notification`] will have the default lifetime
-    pub fn warning_message(content: String) -> app::Message {
-        app::Message::Notify(
-            Notification::new(
-                Type::Warning,
-                content,
-            )
-        )
-    }
-    
-    /// Create a new info notification wrapped in [`app::Message::Notify`]
-    /// The created [`Notification`] will have the default lifetime
-    pub fn info_message(content: String) -> app::Message {
-        app::Message::Notify(
-            Notification::new(
-                Type::Info,
-                content,
-            )
-        )
-    }
-
-
-    #[derive(Debug, Clone)]
-    pub enum Type {
-        Text(String),
-        Info,
-        Warning,
-        Error,
-    }
-
-    impl Type {
-        pub fn get_icon(&self) -> Option<Text> {
-            use app::theme;
-            match self {
-                Type::Text(_) => None,
-                Type::Info => Some(icon!(Bootstrap::InfoCircle, theme::INFO_COLOR)),
-                Type::Warning => Some(icon!(Bootstrap::ExclamationTriangle, theme::WARNING_COLOR)),
-                Type::Error => Some(icon!(Bootstrap::ExclamationTriangleFill, theme::ERROR_COLOR)),
-            }
-        }
-
-        pub fn get_title(&self) -> &str {
-            match self {
-                Type::Text(title) => title,
-                Type::Info => "Info",
-                Type::Warning => "Warning",
-                Type::Error => "Error",
-            }
-        }
-    }
-
-
-    #[derive(Debug, Clone)]
-    pub struct Notification {
-        pub notification_type: Type,
-        pub content: String,
-        pub expire_at: Option<Instant>,
-    }
-
-    impl Notification {
-        pub const DEFAULT_LIFETIME: f32 = 10.0;
-
-        /// Create a new [`Notification`]
-        /// Also logs `contents` (see [`log::Log`] )
-        pub fn new(notification_type: Type, content: String) -> Self {
-            let n = Notification {
-                notification_type,
-                content,
-                expire_at: Some(Instant::now() + Duration::from_secs_f32(Notification::DEFAULT_LIFETIME)),
-            };
-            n.log();
-            n
-        }
-
-        pub fn no_expiration(mut self) -> Self {
-            self.expire_at = None;
-            self
-        }
-
-        pub fn with_lifetime(mut self, duration_seconds: f32) -> Self {
-            self.expire_at = Some(Instant::now() + Duration::from_secs_f32(duration_seconds));
-            self
-        }
-
-        pub fn is_expired(&self) -> bool {
-            if let Some(expiration) = self.expire_at {
-                return Instant::now() >= expiration;
-            }
-            false
-        }
-
-        #[inline]
-        pub fn get_title(&self) -> &str {
-            self.notification_type.get_title()
-        }
-
-        #[inline]
-        pub fn get_icon(&self) -> Option<Text> {
-            self.notification_type.get_icon()
-        }
-
-        pub fn log(&self) {
-            use crate::{ error, info, warn, trace, log };
-
-            match &self.notification_type {
-                Type::Text(title) => trace!("[Notification: {}] {}", title, self.content),
-                Type::Info => info!("{}", self.content),
-                Type::Warning => warn!("{}", self.content),
-                Type::Error => error!("{}", self.content),
-            }
-        }
-    }
-
-}
 

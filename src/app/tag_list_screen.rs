@@ -11,9 +11,8 @@ use iced_aw::Bootstrap;
 use crate::app::Message as AppMessage;
 use crate::tagging::{ self, Tag, id::TagID };
 use crate::widget::tag_entry::TagEntry as TagEntryWidget;
-use crate::{ icon, send_message, simple_button, ToPrettyString };
+use crate::{ error, icon, send_message, simple_button, ToPrettyString };
 
-use super::notification::error_message;
 use super::theme::ERROR_COLOR;
 
 type LoadTagsResult = Result< Vec<Tag>, Arc<tagging::LoadError> >;
@@ -73,8 +72,9 @@ impl TagListScreen {
             Message::OpenTagsDir => {
                 let path: PathBuf = tagging::get_save_dir();
                 if let Err(err) = opener::open(&path) {
-                    return send_message!(error_message(
-                        format!("Failed to open {}:\n{}", path.to_pretty_string(), err)
+                    return send_message!(notif = error!(
+                        notify, log_context = "TagListScreen::update() => OpenTagsDir";
+                        "Failed to open {}:\n{}", path.to_pretty_string(), err
                     ));
                 }
             }
@@ -87,8 +87,9 @@ impl TagListScreen {
                 let new_tag_id = TagID::new("new-tag") .make_unique_in(tag_list);
                 let tag = Tag::create(new_tag_id);
                 if let Err(err) = tag.save() {
-                    return send_message!(error_message(
-                        format!("Failed to create tag:\n{}", err)
+                    return send_message!(notif = error!(
+                        notify, log_context = "TagListScreen::update() => CreateTag";
+                        "Failed to create tag:\n{}", err
                     ));
                 }
 
@@ -163,9 +164,10 @@ impl TagListScreen {
                     .on_edit_pressed(AppMessage::SwitchToTagEditScreen(t.clone()))
                     .on_subtag_pressed(|id| match id.load() {
                         Ok(tag) => AppMessage::SwitchToTagEditScreen(tag),
-                        Err(err) => error_message(
-                            format!("Failed to load tag \"{}\".\n{:?}", id, err)
-                        ),
+                        Err(err) => AppMessage::Notify(error!(
+                            notify;
+                            "Failed to load tag \"{}\".\n{:?}", id, err
+                        )),
                     })
                     .into()
             ))

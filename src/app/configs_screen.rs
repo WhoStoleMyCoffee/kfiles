@@ -7,15 +7,12 @@ use iced::widget::{
 };
 use iced::{Color, Command, Element, Event, Length};
 
-use iced_aw::{Bootstrap, Wrap};
+use iced_aw::Bootstrap;
 use iced_aw::widgets::NumberInput;
 
-use crate::app::notification::info_message;
 use crate::app::Message as AppMessage;
 use crate::configs::{self, Configs};
-use crate::{ icon, log, send_message, simple_button, thumbnail, ToPrettyString, VERSION };
-
-use super::notification::error_message;
+use crate::{ error, icon, info, log, send_message, simple_button, thumbnail, ToPrettyString, VERSION };
 
 // IDs
 // const THUMBNAIL_CACHE_INPUT_ID: fn() -> text_input::Id = || { text_input::Id::new("thumbnail_cache_size_input") };
@@ -159,9 +156,10 @@ impl ConfigsScreen {
             Message::OpenThumbnailCacheDir => {
                 let path = thumbnail::get_cache_dir_or_create();
                 if let Err(err) = opener::open(&path) {
-                    return send_message!(error_message(
-                        format!("Failed to open {}:\n{:?}", path.to_pretty_string(), err)
-                    ));
+                    return send_message!(notif = error!(
+                        notify, log_context = "ConfigsScreen::update() => OpenThumbnailCacheDir";
+                        "Failed to open {}:\n{:?}", path.to_pretty_string(), err)
+                    );
                 }
             }
 
@@ -169,11 +167,15 @@ impl ConfigsScreen {
                 use std::io::ErrorKind;
 
                 match thumbnail::clear_thumbnails_cache() {
-                    Ok(()) => return send_message!(info_message( "Thumbnail cache cleared".to_string() )),
+                    Ok(()) => return send_message!(notif = info!(
+                        notify, log_context = "config_screen::Message::ClearThumbnailCache";
+                        "Thumbnail cache cleared"
+                    )),
                     Err(err) => match err.kind() {
                         ErrorKind::NotFound => {},
-                        _ => return send_message!(error_message(
-                            format!("Failed to delete cache:\n{err:?}")
+                        _ => return send_message!(notif = error!(
+                            notify, log_context = "ConfigsScreen::update() => ClearThumbnailCache";
+                            "Failed to delete cache:\n{err:?}"
                         ))
                     }
                 }
@@ -217,22 +219,25 @@ impl ConfigsScreen {
             Message::OpenConfigsDir => {
                 let path: PathBuf = match configs::get_save_path() {
                     Ok(p) => p,
-                    Err(err) => return send_message!(error_message(
-                        format!("Failed to get configs path:\n{err:?}")
+                    Err(err) => return send_message!(notif = error!(
+                        notify, log_context = "ConfigsScreen::update() => OpenConfigsDir";
+                        "Failed to get configs path:\n{err:?}"
                     )),
                 };
 
                 if let Err(err) = opener::reveal(&path) {
-                    return send_message!(error_message(
-                        format!("Failed to open \"{}\":\n{:?}", path.to_pretty_string(), err)
+                    return send_message!(notif = error!(
+                        notify, log_context = "ConfigsScreen::update() => OpenConfigsDir";
+                        "Failed to open \"{}\":\n{:?}", path.to_pretty_string(), err
                     ));
                 }
             }
 
             Message::OpenLogsDir => {
                 let Some(path) = log::get_logs_dir() else {
-                    return send_message!(error_message(
-                        format!("Failed to get logs path")
+                    return send_message!(notif = error!(
+                        notify, log_context = "ConfigsScreen::update() => OpenLogsDir";
+                        "Failed to get logs path: Could not get BaseDirs"
                     ));
                 };
 
@@ -240,15 +245,17 @@ impl ConfigsScreen {
                 // This is just in case the user deletes it while the app is running
                 if !path.exists() {
                     if let Err(err) = fs::create_dir_all(&path) {
-                        return send_message!(error_message(
-                            format!("Failed create logs path:\n{:?}", err)
+                        return send_message!(notif = error!(
+                            notify, log_context = "ConfigsScreen::update() => OpenLogsDir";
+                            "Failed create logs path:\n{:?}", err
                         ));
                     }
                 }
 
                 if let Err(err) = opener::open(&path) {
-                    return send_message!(error_message(
-                        format!("Failed to open \"{}\":\n{:?}", path.to_pretty_string(), err)
+                    return send_message!(notif = error!(
+                        notify, log_context = "ConfigsScreen::update() => OpenLogsDir";
+                        "Failed to open \"{}\":\n{:?}", path.to_pretty_string(), err
                     ));
                 }
                 
@@ -366,7 +373,7 @@ Useful if you make changes to an image file while this app is open, but will cau
                 config_entry(
                     "Thumbnail max check count",
                     desc_text("How many items to check at a time for building thumbnails
-Setting this nnumber higher may increase building speed, but could be wasteful if set too high").into(),
+Setting this number higher may increase building speed, but could be wasteful if set too high").into(),
                     Some(format!( "{} items", default.thumbnail_check_count )),
                     number_input!(c.thumbnail_check_count, u32, ThumbnailCheckCountInput)
                         .min(1)
@@ -403,12 +410,16 @@ Setting this nnumber higher may increase building speed, but could be wasteful i
 
         *configs::global() = self.configs.clone();
         if let Err(err) = self.configs.save() {
-            return send_message!(error_message(
-                format!("Failed to save configs:\n{}", err)
+            return send_message!(notif = error!(
+                notify;
+                "Failed to save configs:\n{}", err
             ));
         }
 
-        send_message!(info_message( "Configs saved".to_string() ))
+        send_message!(notif = info!(
+            notify;
+            "Configs saved"
+        ))
     }
 }
 

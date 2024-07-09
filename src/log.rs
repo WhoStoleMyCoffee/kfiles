@@ -9,30 +9,59 @@ use crate::{APP_NAME, VERSION};
 
 static GLOBAL: OnceLock<Mutex<Log>> = OnceLock::new();
 
-
-/// Logs at the `Level::Trace` level
-/// Valid forms:
-/// - `trace!()`
-/// - `trace!( format args... )`
+/// TODO documentation
 #[macro_export]
 macro_rules! trace {
     () => {
-        log!($crate::log::Level::Trace)
+        $crate::log::Log::global().log(
+            $crate::log::Level::Trace,
+            format_args!("[{}:{}:{}]", std::file!(), std::line!(), std::column!())
+        )
+    };
+
+    (notify, log_context = $ctx:expr; $($arg:tt)*) => {
+        $crate::log!(
+            notify, log_context = $ctx; 
+            $crate::log::Level::Trace;
+            $($arg)*
+        )
+    };
+
+    (notify; $($arg:tt)*) => {
+        $crate::log!(
+            notify;
+            $crate::log::Level::Trace;
+            $($args)*
+        )
     };
 
     ($($arg:tt)*) => {
-        log!($crate::log::Level::Trace, $($arg)* )
+        $crate::log!($crate::log::Level::Trace; $($arg)*)
     };
 }
 
 /// Logs at the `Level::Info` level
-/// Valid forms:
-/// - `info!()`
-/// - `info!( format args... )`
+/// TODO documentation
 #[macro_export]
 macro_rules! info {
+    (notify, log_context = $ctx:expr; $($arg:tt)*) => {
+        $crate::log!(
+            notify, log_context = $ctx; 
+            $crate::log::Level::Info;
+            $($arg)*
+        )
+    };
+
+    (notify; $($arg:tt)*) => {
+        $crate::log!(
+            notify;
+            $crate::log::Level::Info;
+            $($arg)*
+        )
+    };
+
     ($($arg:tt)*) => {
-        log!($crate::log::Level::Info, $($arg)* )
+        $crate::log!($crate::log::Level::Info; $($arg)*)
     };
 }
 
@@ -42,8 +71,24 @@ macro_rules! info {
 /// - `warn!( format args... )`
 #[macro_export]
 macro_rules! warn {
+    (notify, log_context = $ctx:expr; $($arg:tt)*) => {
+        $crate::log!(
+            notify, log_context = $ctx; 
+            $crate::log::Level::Warning;
+            $($arg)*
+        )
+    };
+
+    (notify; $($arg:tt)*) => {
+        $crate::log!(
+            notify;
+            $crate::log::Level::Warning;
+            $($arg)*
+        )
+    };
+
     ($($arg:tt)*) => {
-        log!($crate::log::Level::Warning, $($arg)* )
+        $crate::log!($crate::log::Level::Warning; $($arg)*)
     };
 }
 
@@ -53,27 +98,55 @@ macro_rules! warn {
 /// - `error!( format args... )`
 #[macro_export]
 macro_rules! error {
-    ($($arg:tt)*) => {
-        log!($crate::log::Level::Error, $($arg)* )
-    };
-}
-
-/// Log something
-/// yea
-/// ```
-/// log!(Level::Info); // Logs current file, line, and column
-/// log!(Level::Trace, "Hello, {}", "John");
-/// ```
-#[macro_export]
-macro_rules! log {
-    ($level:expr) => {
-        $crate::log::Log::global().log(
-            $level,
-            format_args!("[{}:{}:{}]", std::file!(), std::line!(), std::column!())
+    (notify, log_context = $ctx:expr; $($arg:tt)*) => {
+        $crate::log!(
+            notify, log_context = $ctx; 
+            $crate::log::Level::Error;
+            $($arg)*
         )
     };
 
-    ($level:expr, $($arg:tt)*) => {
+    (notify; $($arg:tt)*) => {
+        $crate::log!(
+            notify;
+            $crate::log::Level::Error;
+            $($arg)*
+        )
+    };
+
+    ($($arg:tt)*) => {
+        $crate::log!($crate::log::Level::Error; $($arg)*)
+    };
+}
+
+/// TODO documentation all of these yknow
+#[macro_export]
+macro_rules! log {
+    (notify, log_context = $ctx:expr; $level:expr; $($arg:tt)*) => {{
+        $crate::log::Log::global().log(
+            $level,
+            format_args!("[{}] {}", $ctx, format_args!( $($arg)* ) )
+        );
+
+        $crate::log::notification::Notification::new(
+            $level,
+            format!( $($arg)* )
+        )
+    }};
+
+    (notify; $level:expr; $($arg:tt)*) => {{
+        $crate::log::Log::global().log(
+            $level,
+            format_args!( $($arg)* )
+        );
+
+        $crate::log::notification::Notification::new(
+            $level,
+            format!( $($arg)* )
+        )
+    }};
+
+    ($level:expr; $($arg:tt)*) => {
         $crate::log::Log::global().log(
             $level,
             format_args!( $($arg)* )
@@ -83,10 +156,10 @@ macro_rules! log {
 
 
 
+
 /// A log level
+#[derive(Debug, Clone)]
 pub enum Level {
-    Debug,
-    /// A simple message
     Trace,
     Info,
     Warning,
@@ -96,7 +169,6 @@ pub enum Level {
 impl Display for Level {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Level::Debug => write!(f, "[DEBUG]"),
             Level::Trace => write!(f, ""),
             Level::Info => write!(f, "[INFO]"),
             Level::Warning => write!(f, "[WARNING]"),
@@ -281,6 +353,7 @@ pub fn get_log_path() -> Option<PathBuf> {
 }
 
 /// Gets the directory where logs are saved
+/// Returns `None` if no [`directories::BaseDirs`] could be created
 pub fn get_logs_dir() -> Option<PathBuf> {
     Some(
         directories::BaseDirs::new()?
@@ -290,3 +363,87 @@ pub fn get_logs_dir() -> Option<PathBuf> {
     )
 }
 
+
+
+pub mod notification {
+    use std::time::{Duration, Instant};
+    use iced::widget::Text;
+    use iced_aw::Bootstrap;
+
+    use crate::{app, icon};
+
+    use super::Level;
+
+
+    impl Level {
+        pub fn get_icon(&self) -> Option<Text> {
+            use app::theme;
+            match self {
+                Level::Info => Some(icon!(Bootstrap::InfoCircle, theme::INFO_COLOR)),
+                Level::Warning => Some(icon!(Bootstrap::ExclamationTriangle, theme::WARNING_COLOR)),
+                Level::Error => Some(icon!(Bootstrap::ExclamationTriangleFill, theme::ERROR_COLOR)),
+                _ => None,
+            }
+        }
+
+        pub fn get_title(&self) -> &str {
+            match self {
+                Level::Info => "Info",
+                Level::Warning => "Warning",
+                Level::Error => "Error",
+                _ => "",
+            }
+        }
+    }
+
+
+    #[derive(Debug, Clone)]
+    pub struct Notification {
+        pub level: Level,
+        pub content: String,
+        pub expire_at: Option<Instant>,
+    }
+
+    impl Notification {
+        pub const DEFAULT_LIFETIME: f32 = 10.0;
+
+        /// Create a new [`Notification`]
+        /// Also logs `contents` (see [`log::Log`] )
+        pub fn new(level: Level, content: String) -> Self {
+            Notification {
+                level,
+                content,
+                expire_at: Some(Instant::now() + Duration::from_secs_f32(Notification::DEFAULT_LIFETIME)),
+            }
+        }
+
+        pub fn no_expiration(mut self) -> Self {
+            self.expire_at = None;
+            self
+        }
+
+        pub fn with_lifetime(mut self, duration_seconds: f32) -> Self {
+            self.expire_at = Some(Instant::now() + Duration::from_secs_f32(duration_seconds));
+            self
+        }
+
+        pub fn is_expired(&self) -> bool {
+            if let Some(expiration) = self.expire_at {
+                return Instant::now() >= expiration;
+            }
+            false
+        }
+
+        #[inline]
+        pub fn get_title(&self) -> &str {
+            self.level.get_title()
+        }
+
+        #[inline]
+        pub fn get_icon(&self) -> Option<Text> {
+            self.level.get_icon()
+        }
+
+    }
+
+}

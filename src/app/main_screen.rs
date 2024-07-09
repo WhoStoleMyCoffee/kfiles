@@ -18,17 +18,18 @@ use crate::tagging::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, get_thumbnail_cache_path, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{theme, Message as AppMessage};
-use crate::{configs, icon, log, send_message, simple_button, warn, ToPrettyString};
-
-use super::notification::error_message;
+use crate::{configs, error, icon, send_message, warn, ToPrettyString};
 
 
-// TODO make these configurable
+/// Keys that focus the query input
+/// These are hard coded for now
+/// TODO make these configurable
 const FOCUS_QUERY_KEYS: [keyboard::Key<&str>; 3] = [
     Key::Character("s"),
     Key::Character("/"),
     Key::Named(keyboard::key::Named::Tab),
 ];
+
 
 const ITEM_SIZE: (f32, f32) = (80.0, 120.0);
 const ITEM_SPACING: (f32, f32) = (8.0, 8.0);
@@ -106,8 +107,9 @@ impl MainScreen {
         let tags_cache = match tagging::get_all_tag_ids() {
             Ok(v) => v,
             Err(err) => {
-                commands.push(send_message!(error_message(
-                    format!("Failed to load tags:\n{}", err)
+                commands.push(send_message!(notif = error!(
+                    notify, log_context = "MainScreen::new()";
+                    "Failed to load tags:\n{}", err
                 )));
                 Vec::new()
             }
@@ -234,8 +236,9 @@ impl MainScreen {
                 if !removed {
                     let tag: Tag = match tag_id.load() {
                         Ok(t) => t,
-                        Err(err) => return send_message!(error_message(
-                            format!("Failed to load tag `{}`:\n{}", tag_id, err)
+                        Err(err) => return send_message!(notif = error!(
+                            notify, log_context = "MainScreen::update() => ToggleQueryTag";
+                            "Failed to load tag `{}`:\n{}", tag_id, err
                         )),
                     };
 
@@ -249,8 +252,9 @@ impl MainScreen {
             Message::QueryTagPressed(tag_id) => {
                 let tag = match tag_id.load() {
                     Ok(tag) => tag,
-                    Err(err) => return send_message!(error_message(
-                        format!("Failed to load tag `{}`:\n{:?}", tag_id, err)
+                    Err(err) => return send_message!(notif = error!(
+                        notify, log_context = "MainScreen::update() => QueryTagPressed";
+                        "Failed to load tag `{}`:\n{:?}", tag_id, err
                     )),
                 };
                 return send_message!(AppMessage::SwitchToTagEditScreen(tag));

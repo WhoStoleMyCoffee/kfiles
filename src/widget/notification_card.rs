@@ -2,7 +2,7 @@ use iced::widget::{column, component, row, Component, Text};
 use iced::{Alignment, Element, Length};
 use iced_aw::{card, Bootstrap};
 
-use crate::app::notification::Notification;
+use crate::log::notification::Notification;
 use crate::{icon, simple_button};
 
 #[derive(Debug, Clone)]

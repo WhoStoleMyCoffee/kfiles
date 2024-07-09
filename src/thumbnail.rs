@@ -9,7 +9,7 @@ use image::{ImageError, ImageFormat};
 use iced::widget;
 use thiserror::Error;
 
-use crate::{error, get_temp_dir, log};
+use crate::{error, get_temp_dir};
 
 const FORMAT: &str = "jpg";
 

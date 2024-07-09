@@ -3,7 +3,7 @@ use std::{fs::{create_dir_all, File}, io::{self, Read, Write}, path::PathBuf, sy
 use nanoserde::{DeJson, DeJsonErr, SerJson};
 use thiserror::Error;
 
-use crate::{error, log, APP_NAME};
+use crate::{error, APP_NAME};
 
 
 static GLOBAL: OnceLock<Mutex<Configs>> = OnceLock::new();
@@ -86,7 +86,8 @@ pub fn set_global(configs: Configs) -> Result<(), Configs> {
     #[allow(clippy::unwrap_used)]
     GLOBAL.set( Mutex::new(configs) )
         .map_err(|m| m.into_inner()
-            .unwrap() // Will not panic because there are no other users of the Mutex
+            // SAFETY: Will not panic because there are no other users of the new Mutex
+            .unwrap()
         )
 }
 

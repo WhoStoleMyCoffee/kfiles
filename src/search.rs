@@ -5,7 +5,7 @@ use std::thread::{self, JoinHandle};
 use walkdir::{DirEntry, WalkDir};
 
 use crate::app::main_screen::Item;
-use crate::{ error,log };
+use crate::error;
 use crate::tagging::{ entries::Entries, Tag };
 
 use self::constraint::ConstraintList;

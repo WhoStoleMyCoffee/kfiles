@@ -19,6 +19,7 @@ use app::KFiles;
 use log::Log;
 use tagging::{entries::Entries, Tag};
 
+
 const APP_NAME: &str = std::env!("CARGO_PKG_NAME");
 const VERSION: &str = std::env!("CARGO_PKG_VERSION");
 
@@ -28,7 +29,7 @@ fn main() -> iced::Result {
     Log::remove_old_logs(7);
 
     // Load configs
-    let configs = load_configs();
+    let configs: Configs = load_configs();
 
     // Initialize tags
     if should_reinit_tags() {
@@ -36,7 +37,7 @@ fn main() -> iced::Result {
         init_default_tags();
     }
 
-    configs::set_global(configs) .expect("failed to initialize configs");
+    configs::set_global(configs) .expect("global Configs instance shouldn't be set before this");
 
     // Run program...
     let res = KFiles::run(Settings {
@@ -47,6 +48,14 @@ fn main() -> iced::Result {
         ..Default::default()
     });
 
+    trace!("Program terminated with result {:?}", res);
+    shutdown();
+
+    res
+}
+
+
+pub fn shutdown() {
     // Trim thumbnail cache once we're done
     trace!("Trimming thumbnail cache...");
     match thumbnail::trim_cache( configs::global().thumbnail_cache_size ) {
@@ -59,8 +68,6 @@ fn main() -> iced::Result {
     if let Err(err) = configs::global().save() {
         error!("Failed to save Configs:\n {err:?}");
     }
-
-    res
 }
 
 
@@ -70,16 +77,17 @@ pub fn get_temp_dir() -> PathBuf {
 
 
 fn load_configs() -> Configs {
-    configs::load_configs()
-        .unwrap_or_else(|err| {
-            match err {
-                configs::LoadError::IO(err)
-                    if err.kind() == io::ErrorKind::NotFound =>
-                    info!("Initializing default configs."),
-                err => error!("Failed to load Configs:\n {:?}", err),
+    configs::load_configs().unwrap_or_else(|err| {
+        match err {
+            configs::LoadError::IO(err) if err.kind() == io::ErrorKind::NotFound => {
+                info!("Initializing default configs.");
             }
-            configs::Configs::default()
-        })
+            err => {
+                error!("Failed to load configs file:\n {:?}", err);
+            }
+        }
+        configs::Configs::default()
+    })
 }
 
 

@@ -15,13 +15,12 @@ use iced::{Alignment, Color, Command, Element, Event, Length};
 use iced_aw::{Bootstrap, Spinner};
 use rfd::FileDialog;
 
-use crate::app::notification::{error_message, info_message, warning_message};
 use crate::app::Message as AppMessage;
 use crate::tagging::tag::SelfReferringSubtag;
 use crate::tagging::{ self, entries::Entries, Tag, id::TagID };
 use crate::widget::context_menu::ContextMenu;
 use crate::widget::tag_entry;
-use crate::{ icon, send_message, simple_button, ToPrettyString };
+use crate::{ error, icon, info, send_message, simple_button, trace, warn, ToPrettyString };
 
 use super::theme;
 
@@ -87,8 +86,9 @@ impl TagEditScreen {
             Ok(v) => (v, Command::none()),
             Err(err) => (
                 Vec::new(),
-                send_message!(error_message(
-                    format!("Failed to load tags:\n{}", err),
+                send_message!(notif = error!(
+                    notify, log_context = "TagEditScreen::new()";
+                    "Failed to load tags:\n{}", err
                 ))
             )
         };
@@ -133,15 +133,17 @@ impl TagEditScreen {
             },
 
             Message::Delete => {
+                trace!("[TagEditScreen::update() => Delete]");
+
                 self.is_loading = true;
                 let path: PathBuf = self.tag.get_save_path();
                 if path.exists() {
                     if let Err(err) = fs::remove_file(&path) {
                         let pathstr: String = path.to_pretty_string();
-                        return send_message![
-                            error_message(format!("Failed to remove file {}:\n{}", pathstr, err)),
-                            AppMessage::SwitchToTagListScreen,
-                        ]
+                        return send_message!(notif = error!(
+                            notify;
+                            "Failed to remove file {}:\n{}", pathstr, err
+                        ));
                     }
                 }
 
@@ -213,7 +215,10 @@ impl TagEditScreen {
             Message::StopLoadingMate => {}
 
             Message::SubtagPressed(index) => {
+
                 let Some(tag_id) = self.tag.get_subtags().get(index) else {
+                    trace!("[TagEditScreen::update() => SubtagPressed]");
+                    error!("Failed to get subtag at index {}. Tag as {} subtags", index, self.tag.get_subtags().len());
                     return Command::none();
                 };
 
@@ -221,8 +226,9 @@ impl TagEditScreen {
                     Ok(tag) => return send_message!(AppMessage::SwitchToTagEditScreen(tag)),
                     Err(err) => {
                         let tag_id = tag_id.clone();
-                        return send_message!(error_message(
-                            format!("Failed to load tag \"{}\":\n{}", tag_id, err)
+                        return send_message!(notif = error!(
+                            notify, log_context = "TagEditScreen::update() => SubtagPressed";
+                            "Failed to load tag \"{}\":\n{}", tag_id, err
                         ));
                     },
                 }
@@ -230,11 +236,14 @@ impl TagEditScreen {
             }
 
             Message::SubtagToggled(tag_id, is_on) => {
+                trace!("[TagEditScreen::update() => SubtagToggled]");
+
                 if is_on {
                     if let Err(SelfReferringSubtag) = self.tag.add_subtag(&tag_id) {
                         self.tag.remove_subtag(&tag_id);
-                        return send_message!(error_message(
-                            format!("Cannot to subtag \"{}\" with itself", tag_id)
+                        return send_message!(notif = error!(
+                            notify;
+                            "Cannot to subtag \"{}\" with itself", tag_id
                         ));
                     };
                 } else {
@@ -460,6 +469,8 @@ impl TagEditScreen {
     /// make the tag unique
     /// There will be *at most* 1 recursive call in case the tag already exists, and that's it
     fn rename(&mut self, new_id: TagID) -> Command<AppMessage> {
+        trace!("[TagEditScreen::rename()]");
+
         use crate::tagging::RenameError;
 
         let old_path = self.tag.get_save_path();
@@ -471,9 +482,11 @@ impl TagEditScreen {
                 self.is_loading = true;
 
                 // We don't use `self.save()` because we don't want to wait if it fails
+                // (There's kinda no way to check whether it has failed just with iced::Command)
                 if let Err(err) = self.tag.save() {
-                    return send_message!(error_message(
-                        format!("Failed to save tag:\n{}", err)
+                    return send_message!(notif = error!(
+                        notify, log_context = "branch Rename successful";
+                        "Failed to save tag:\n{}", err
                     ))
                 }
 
@@ -489,29 +502,36 @@ impl TagEditScreen {
             Err(err) => match err {
                 // Already exists; make name unique and try again
                 RenameError::AlreadyExists => {
+                    trace!("[... branch AlreadyExists]");
+
                     let id: String = new_id.as_ref().clone();
+
+                    // Already exists warning
+                    let msg = send_message!(notif = warn!(
+                        notify; "Tag \"{}\" already exists", id
+                    ));
 
                     let tags = match tagging::get_all_tag_ids() {
                         Ok(v) => v,
-                        Err(err) => return send_message!(error_message(
-                            format!("Failed to get tags list:\n{}", err)
-                        ))
+                        Err(err) => return Command::batch(vec![
+                            msg,
+                            send_message!(notif = error!(
+                                notify; "Failed to get tags list:\n{}", err
+                            ))
+                        ])
                     };
 
                     return Command::batch(vec![
-                        // Already exists warning
-                        send_message!(warning_message(
-                            format!("Tag \"{}\" already exists", id)
-                        )),
-
-                        // There will be no infinite recursion because we make the tag unique
+                        msg,
+                        // SAFETY: There will be no infinite recursion because we make the tag unique
                         self.rename(new_id.make_unique_in(&tags)) 
                     ]);
                 }
 
                 RenameError::IO(err) => {
-                    return send_message!(error_message(
-                        format!("Failed to rename tag:\n{}", err)
+                    return send_message!(notif = error!(
+                        notify, log_context = "... branch IOError";
+                        "Failed to rename tag:\n{}", err
                     ));
                 }
             }
@@ -525,8 +545,9 @@ impl TagEditScreen {
         let Err(err) = self.tag.save() else {
             return Command::none();
         };
-        send_message!(error_message(
-            format!("Failed to save tag:\n{}", err)
+        send_message!(notif = error!(
+            notify;
+            "Failed to save tag:\n{}", err
         ))
     }
 
@@ -534,18 +555,20 @@ impl TagEditScreen {
     fn add_entry(&mut self, path: PathBuf) -> Command<AppMessage> {
         use tagging::entries::NonexistentPath;
 
+        trace!("[TagEditScreen::add_entry()]");
+
         match self.tag.add_entry(&path) {
             Ok(true) => self.save(),
             Ok(false) => {
                 let pathstr: String = path.to_pretty_string();
-                send_message!(info_message(
-                    format!("Entry \"{}\" is already contained", pathstr)
+                send_message!(notif = info!(
+                    notify; "Entry \"{}\" is already contained", pathstr
                 ))
             }
             Err(NonexistentPath) => {
                 let pathstr: String = path.to_pretty_string();
-                send_message!(error_message(
-                    format!("Failed to add entry \"{}\":\nPath does not exist", pathstr)
+                send_message!(notif = error!(
+                    notify; "Failed to add entry \"{}\":\nPath does not exist", pathstr
                 ))
             }
         }
@@ -556,9 +579,10 @@ impl TagEditScreen {
             self.tag.entries.remove_duplicates()
                 .into_iter()
                 .map(|pb| 
-                    send_message!(info_message(
-                        format!("Entry \"{}\" is already contained", pb.to_pretty_string())
-                    )),
+                     send_message!(notif = info!(
+                        notify, log_context = "TagEditScreen::filter_duplicate_entries()";
+                        "Entry \"{}\" is already contained", pb.to_pretty_string()
+                    ))
                 )
         )
     }
