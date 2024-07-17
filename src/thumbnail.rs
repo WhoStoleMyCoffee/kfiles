@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::{error, get_temp_dir};
 
-const FORMAT: &str = "jpg";
+const THUMBNAIL_FORMAT: &str = "jpg";
 
 
 #[derive(Debug, Error)]
@@ -57,7 +57,7 @@ impl ThumbnailSize {
 
 /// Get the file where the thumbnail for `path` should be
 pub fn get_thumbnail_cache_path(path: &Path) -> PathBuf {
-    get_cache_dir_or_create().join(format!("{}.{}", hash_path(path), FORMAT))
+    get_cache_dir_or_create().join(format!("{}.{}", hash_path(path), THUMBNAIL_FORMAT))
 }
 
 /// Create a thumbnail for `path`, assuming it is an image file
@@ -279,10 +279,67 @@ pub fn load_thumbnail_for_path(path: &Path) -> widget::Image<widget::image::Hand
     let cache_path = get_thumbnail_cache_path(&path);
     if cache_path.exists() {
         return widget::image(cache_path);
-    } else if path.is_dir() {
-        return widget::image("assets/file_icons/folder.png");
     }
-    widget::image("assets/file_icons/file.png")
-    // Custom file icons ...
+
+    widget::image( icons::load_icon_for_path(path) )
 }
+
+
+pub mod icons {
+    use std::{collections::HashMap, ffi::{OsStr, OsString}, fs::read_dir, path::{Path, PathBuf}, sync::OnceLock};
+
+    use iced::widget::image::Handle;
+
+    use super::is_file_supported;
+
+    pub const ICONS_PATH: &str = "assets/icons/";
+    pub const FILE_ICON_PATH: &str = "assets/icons/file.png";
+    pub const FOLDER_ICON_PATH: &str = "assets/icons/folder.png";
+    pub const EXTENSIONS_PATH: &str = "assets/icons/extensions/";
+
+    // TODO optimize this shit
+    static EXTENSIONS_CACHE: OnceLock<HashMap<OsString, PathBuf>> = OnceLock::new();
+
+    pub fn load_icon_for_path(path: &Path) -> Handle {
+        if path.is_dir() {
+            return Handle::from_path(FOLDER_ICON_PATH);
+        }
+
+        path.extension()
+            .and_then(|osstr| get_icon_for_extension(osstr))
+            .map_or_else(
+                || Handle::from_path(FILE_ICON_PATH),
+                |p| Handle::from_path(p)
+            )
+    }
+
+    pub fn get_icon_for_extension(extension: &OsStr) -> Option<&PathBuf> {
+        if let Some(path) = get_cache().get(extension) {
+            return Some(path);
+        }
+
+        None
+    }
+
+    fn get_cache() -> &'static HashMap<OsString, PathBuf> {
+        // EXTENSIONS_CACHE.get_or_init(|| HashMap::new())
+
+        EXTENSIONS_CACHE.get_or_init(|| {
+            let Ok(rd) = read_dir(EXTENSIONS_PATH) else {
+                return HashMap::new();
+            };
+
+            HashMap::from_iter(
+                rd.flatten()
+                    .map(|de| de.path())
+                    .filter(|p| p.is_file() && is_file_supported(p))
+                    .filter_map(|p| p.file_stem() .map(|s| s.to_os_string()) .map(|s| (s, p)))
+                    .inspect(|x| {
+                        dbg!(&x);
+                    }),
+            )
+        })
+    }
+}
+
 
