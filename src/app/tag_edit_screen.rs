@@ -6,10 +6,9 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::widget::text_editor::{Action, Content};
 use iced::widget::{
-    self, button, checkbox, column, container, horizontal_rule,
-    horizontal_space, row, scrollable, text, text_editor, text_input,
-    vertical_space, Column, Row
+    self, button, checkbox, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, tooltip, vertical_space, Column, Row
 };
+use iced::widget::tooltip::Position as TooltipPosition;
 use iced::{Alignment, Color, Command, Element, Event, Length};
 
 use iced_aw::{Bootstrap, Spinner};
@@ -375,31 +374,58 @@ impl TagEditScreen {
     }
 
     fn view_subtags_row(&self) -> Row<AppMessage> {
+        let palette = iced::theme::Palette::CATPPUCCIN_MOCHA;
+        let dark_text_col = palette.text.inverse();
+
         row![
             // Context menu button
-            ContextMenu::new(
-                button( icon!(Bootstrap::BookmarkPlus) ) .on_press(AppMessage::Empty),
-                || container(scrollable(column(
-                    self.tags_cache.iter()
-                        .filter(|id| **id != self.tag.id)
-                        .map(|id|
-                             checkbox(id.to_string(), id.is_subtag_of(&self.tag))
-                                .on_toggle(|is_on| Message::SubtagToggled(id.clone(), is_on).into())
-                                .into()
+            tooltip(
+                ContextMenu::new(
+                    button(icon!(Bootstrap::BookmarkPlus)).on_press(AppMessage::Empty),
+                    || {
+                        // Tags list
+                        container(scrollable(column(
+                            self.tags_cache.iter()
+                                .filter(|id| **id != self.tag.id)
+                                .map(|id| {
+                                    checkbox(id.to_string(), id.is_subtag_of(&self.tag))
+                                        .on_toggle(|is_on| {
+                                            Message::SubtagToggled(id.clone(), is_on).into()
+                                        })
+                                        .into()
+                                }),
+                        )))
+                        .max_width(240)
+                        .max_height(480)
+                        .padding(4)
+                        .style(
+                            container::Appearance::default()
+                                .with_background(Color::new(0.0, 0.0, 0.1, 1.0)),
                         )
-                )))
-                .max_width(240)
-                .max_height(480)
-                .style(container::Appearance::default() .with_background(Color::BLACK))
-                .into()
-            )
-            .left_click_release_activated(),
+                        .into()
+                    }
+                )
+                .left_click_release_activated(),
+                container(text("Subtags")).padding(4).style(
+                    container::Appearance::default()
+                        .with_background(Color::new(0.0, 0.0, 0.1, 0.9))
+                ),
+                TooltipPosition::Bottom,
+            ),
+
             text(" - "),
         ]
+
         // List
         .extend(self.tag.get_subtags().iter().enumerate()
             .map(|(i, tag_id)|
-                button(text( tag_id.to_string() ))
+                button(row![
+                    button(icon!(Bootstrap::X, dark_text_col))
+                        .on_press( Message::SubtagToggled(tag_id.clone(), false).into() )
+                        .style( iced::theme::Button::Text )
+                        .padding(0),
+                    text(tag_id.to_string()),
+                ])
                     .on_press(Message::SubtagPressed(i).into())
                     .into()
             )

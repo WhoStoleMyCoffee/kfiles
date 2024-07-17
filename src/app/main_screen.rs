@@ -7,7 +7,7 @@ use iced::event::Status;
 use iced::keyboard::Key;
 use iced::widget::scrollable::Viewport;
 use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, tooltip, Column};
-use iced::{self, keyboard, Element, Event, Length, Rectangle};
+use iced::{self, keyboard, Application, Element, Event, Length, Rectangle};
 use iced::Command;
 use iced_aw::{Bootstrap, Wrap};
 use rand::Rng;
@@ -17,7 +17,7 @@ use crate::search::Query;
 use crate::tagging::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, get_thumbnail_cache_path, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
-use crate::app::{theme, Message as AppMessage};
+use crate::app::{theme, KFiles, Message as AppMessage};
 use crate::{configs, error, icon, send_message, warn, ToPrettyString};
 
 
@@ -321,14 +321,27 @@ impl MainScreen {
     }
 
     fn view_query_input(&self) -> Column<AppMessage> {
+        let palette = iced::theme::Palette::CATPPUCCIN_MOCHA;
+        let dark_text_col = palette.text.inverse();
+
         column![
             // Tags
             row(self.query.tags.iter().map(|tag| {
                 let id = &tag.id;
-                button(text(id).size(14))
-                    .on_press( Message::QueryTagPressed(id.clone()).into() )
-                    .into()
-            })),
+                button(
+                    row![
+                        button(icon!(Bootstrap::X, dark_text_col))
+                            .on_press( Message::ToggleQueryTag(id.clone()).into() )
+                            .style( iced::theme::Button::Text )
+                            .padding(0),
+                        text(id).size(14),
+                    ]
+                    .align_items(iced::Alignment::Center)
+                )
+                .on_press( Message::QueryTagPressed(id.clone()).into() )
+                .into()
+            }))
+            .spacing(2),
 
             // Fuzzy text input
             FuzzyInput::new(
