@@ -276,7 +276,7 @@ fn trim_cache_percent(target_percentage: f64) -> io::Result<u64> {
 
 
 pub fn load_thumbnail_for_path(path: &Path) -> widget::Image<widget::image::Handle> {
-    let cache_path = get_thumbnail_cache_path(&path);
+    let cache_path = get_thumbnail_cache_path(path);
     if cache_path.exists() {
         return widget::image(cache_path);
     } else if path.is_dir() {

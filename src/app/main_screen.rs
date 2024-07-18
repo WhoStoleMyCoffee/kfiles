@@ -7,7 +7,7 @@ use iced::event::Status;
 use iced::keyboard::Key;
 use iced::widget::scrollable::Viewport;
 use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, tooltip, Column};
-use iced::{self, keyboard, Application, Element, Event, Length, Rectangle};
+use iced::{self, keyboard, Element, Event, Length, Rectangle};
 use iced::Command;
 use iced_aw::{Bootstrap, Wrap};
 use rand::Rng;
@@ -17,7 +17,7 @@ use crate::search::Query;
 use crate::tagging::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, get_thumbnail_cache_path, ThumbnailBuilder};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
-use crate::app::{theme, KFiles, Message as AppMessage};
+use crate::app::{theme, Message as AppMessage};
 use crate::{configs, error, icon, send_message, warn, ToPrettyString};
 
 
@@ -46,6 +46,7 @@ pub enum Message {
     QueryTextChanged(String),
     QuerySubmit,
     ToggleQueryTag(TagID),
+    RemoveQueryTag(TagID),
     QueryTagPressed(TagID),
     FocusQuery,
     ResultsScrolled(Viewport),
@@ -135,7 +136,7 @@ impl MainScreen {
     pub fn tick(&mut self) -> Command<AppMessage> {
         self.thumbnail_handler.update();
         if let Some(range) = self.get_visible_items_range() {
-            self.thumbnail_handler.build(&mut self.items, range);
+            self.thumbnail_handler.build(&self.items, range);
         }
         self.try_receive_results();
 
@@ -222,7 +223,7 @@ impl MainScreen {
             Message::QueryTextChanged(new_text) => {
                 let has_changed: bool = self.set_query_input(new_text);
                 if has_changed {
-                    return self.reset_search();
+                    return self.restart_search();
                 }
             }
 
@@ -246,7 +247,12 @@ impl MainScreen {
                 }
 
                 self.set_query_input(String::new());
-                return self.reset_search();
+                return self.restart_search();
+            }
+
+            Message::RemoveQueryTag(tag_id) => {
+                self.query.remove_tag(&tag_id);
+                return self.restart_search();
             }
 
             Message::QueryTagPressed(tag_id) => {
@@ -331,7 +337,7 @@ impl MainScreen {
                 button(
                     row![
                         button(icon!(Bootstrap::X, dark_text_col))
-                            .on_press( Message::ToggleQueryTag(id.clone()).into() )
+                            .on_press( Message::RemoveQueryTag(id.clone()).into() )
                             .style( iced::theme::Button::Text )
                             .padding(0),
                         text(id).size(14),
@@ -407,7 +413,7 @@ impl MainScreen {
         Some(start..end)
     }
 
-    pub fn reset_search(&mut self) -> Command<AppMessage> {
+    pub fn restart_search(&mut self) -> Command<AppMessage> {
         self.items.clear();
         self.query.search();
         self.scroll = 0.0;
@@ -528,7 +534,7 @@ impl ThumbnailHandler {
 
     fn next<'a>(
         &mut self,
-        items: &'a Vec<Item>,
+        items: &'a [Item],
         visible_items_range: Range<usize>,
     ) -> Option<&'a PathBuf>
     {

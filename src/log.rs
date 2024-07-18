@@ -9,7 +9,14 @@ use crate::{APP_NAME, VERSION};
 
 static GLOBAL: OnceLock<Mutex<Log>> = OnceLock::new();
 
-/// TODO documentation
+/// Logs at the [`Level::Trace`] level
+/// Valid forms:
+/// - `trace!()` log the current file, line, and column
+/// - `trace!(...)` log the given token tree
+/// - `trace!(notify; ...)` log the given token tree, and return a [`notification::Notification`]
+/// with the same message
+/// - `trace!(notify, log_context = $ctx; ...)` same as previous one, but add the context `$ctx` in
+/// the log only
 #[macro_export]
 macro_rules! trace {
     () => {
@@ -40,8 +47,13 @@ macro_rules! trace {
     };
 }
 
-/// Logs at the `Level::Info` level
-/// TODO documentation
+/// Logs at the [`Level::Info`] level
+/// Valid forms:
+/// - `info!(...)` log the given token tree
+/// - `info!(notify; ...)` log the given token tree, and return a [`notification::Notification`]
+/// with the same message
+/// - `info!(notify, log_context = $ctx; ...)` same as previous one, but add the context `$ctx` in
+/// the log only
 #[macro_export]
 macro_rules! info {
     (notify, log_context = $ctx:expr; $($arg:tt)*) => {
@@ -65,10 +77,13 @@ macro_rules! info {
     };
 }
 
-/// Logs at the `Level::Warning` level
+/// Logs at the [`Level::Warning`] level
 /// Valid forms:
-/// - `warn!()`
-/// - `warn!( format args... )`
+/// - `warning!(...)` log the given token tree
+/// - `warning!(notify; ...)` log the given token tree, and return a [`notification::Notification`]
+/// with the same message
+/// - `warning!(notify, log_context = $ctx; ...)` same as previous one, but add the context `$ctx` in
+/// the log only
 #[macro_export]
 macro_rules! warn {
     (notify, log_context = $ctx:expr; $($arg:tt)*) => {
@@ -92,10 +107,13 @@ macro_rules! warn {
     };
 }
 
-/// Logs at the `Level::Error` level
+/// Logs at the [`Level::Error`] level
 /// Valid forms:
-/// - `error!()`
-/// - `error!( format args... )`
+/// - `error!(...)` log the given token tree
+/// - `error!(notify; ...)` log the given token tree, and return a [`notification::Notification`]
+/// with the same message
+/// - `error!(notify, log_context = $ctx; ...)` same as previous one, but add the context `$ctx` in
+/// the log only
 #[macro_export]
 macro_rules! error {
     (notify, log_context = $ctx:expr; $($arg:tt)*) => {
@@ -119,7 +137,13 @@ macro_rules! error {
     };
 }
 
-/// TODO documentation all of these yknow
+/// It logs.
+/// Valid forms:
+/// - `log!($level; ...)` log the given token tree on the `$level` level
+/// - `log!(notify; $level; ...)` log the given token tree, and return a [`notification::Notification`]
+/// with the same message. Logs on the `$level` level
+/// - `log!(notify, log_context = $ctx; $level; ...)` same as previous one, but add the context `$ctx` in
+/// the log only. Logs on the `$level` level
 #[macro_export]
 macro_rules! log {
     (notify, log_context = $ctx:expr; $level:expr; $($arg:tt)*) => {{

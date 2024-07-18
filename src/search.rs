@@ -248,7 +248,7 @@ mod constraint {
         pub fuzzy: Vec<Fuzzy>,
         /// Look for specific strings in target
         /// All AND-ed together
-        pub contains: Vec<Contains>,
+        pub exact: Vec<Exact>,
         /// Look for specific file extensions
         /// All OR-ed together
         pub extensions: Vec<Extension>,
@@ -265,8 +265,8 @@ mod constraint {
             }
 
             let mut str: String = str.to_string();
-            // Contains constraint
-            constraints.contains = Contains::parse(&mut str);
+            // Exact constraint
+            constraints.exact = Exact::parse(&mut str);
 
             for arg in str.split(' ')
                 .map(|str| str.trim())
@@ -330,9 +330,9 @@ mod constraint {
                 }
             }
 
-            // 3. AND contains
+            // 3. AND Exacts
             let pathstr = path.to_pretty_string();
-            if !self.contains.is_empty() && !self.contains.iter() .all(|c| c.matches(&pathstr)) {
+            if !self.exact.is_empty() && !self.exact.iter() .all(|c| c.matches(&pathstr)) {
                 return None;
             }
 
@@ -351,14 +351,14 @@ mod constraint {
 
         pub fn is_empty(&self) -> bool {
             self.fuzzy.is_empty()
-                && self.contains.is_empty()
+                && self.exact.is_empty()
                 && self.extensions.is_empty()
                 && self.filetype.is_none()
         }
 
         pub fn clear(&mut self) {
             self.fuzzy.clear();
-            self.contains.clear();
+            self.exact.clear();
             self.extensions.clear();
             self.filetype = None;
         }
@@ -395,15 +395,15 @@ mod constraint {
 
     /// Do a simple case insensitive `contains` check
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct Contains {
+    pub struct Exact {
         pub query: String,
         pub inverted: bool,
     }
 
-    impl Contains {
+    impl Exact {
         /// Drains the parsed sections from the string
         /// This makes it easier to deal with in [`ConstraintList::parse`]
-        pub fn parse(str: &mut String) -> Vec<Contains> {
+        pub fn parse(str: &mut String) -> Vec<Exact> {
             static REGEX: OnceLock<Regex> = OnceLock::new();
 
             #[allow(clippy::unwrap_used)]
@@ -415,7 +415,7 @@ mod constraint {
                // ("( |$)|$)        Closing quote or EOL
             );
 
-            let mut parsed: Vec<Contains> = Vec::new();
+            let mut parsed: Vec<Exact> = Vec::new();
             let mut drain_ranges = Vec::new();
             // Parse
             for cap in re.captures_iter(str) {
@@ -430,7 +430,7 @@ mod constraint {
                 }
                 drain_ranges.push(range);
 
-                parsed.push(Contains {
+                parsed.push(Exact {
                     query: inner.to_lowercase(),
                     inverted,
                 });
@@ -515,7 +515,7 @@ mod constraint {
         use crate::strmatch::Sublime;
 
         use super::ConstraintList;
-        use super::{ Contains, Extension, FileType };
+        use super::{ Exact, Extension, FileType };
 
 
         #[test]
@@ -527,7 +527,7 @@ mod constraint {
                     inverted: false,
                 }
             ]);
-            assert_eq!(c.contains, vec![]);
+            assert_eq!(c.exact, vec![]);
             assert_eq!(c.extensions, vec![
                 Extension { extension: OsString::from("rs"), inverted: false },
                 Extension { extension: OsString::from("png"), inverted: false } 
@@ -535,7 +535,7 @@ mod constraint {
             assert_eq!(c.filetype, None);
 
 
-            let c = ConstraintList::parse("score \"contains\" .txt -f --wot");
+            let c = ConstraintList::parse("score \"exact\" .txt -f --wot");
             assert_eq!(c.fuzzy, vec![
                 Fuzzy {
                     matcher: Sublime::default() .with_query("score"),
@@ -546,8 +546,8 @@ mod constraint {
                     inverted: false,
                 }
             ]);
-            assert_eq!(c.contains, vec![
-                Contains { query: "contains".to_string(), inverted: false }
+            assert_eq!(c.exact, vec![
+                Exact { query: "exact".to_string(), inverted: false }
             ]);
             assert_eq!(c.extensions, vec![
                 Extension { extension: OsString::from("txt"), inverted: false } 
@@ -564,7 +564,7 @@ mod constraint {
                     inverted: false,
                 }
             ]);
-            assert_eq!(c.contains, vec![]);
+            assert_eq!(c.exact, vec![]);
             assert_eq!(c.extensions, vec![]);
             assert_eq!(c.filetype, None);
         }
