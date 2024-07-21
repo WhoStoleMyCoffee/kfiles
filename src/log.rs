@@ -20,7 +20,7 @@ static GLOBAL: OnceLock<Mutex<Log>> = OnceLock::new();
 #[macro_export]
 macro_rules! trace {
     () => {
-        $crate::log::Log::global().log(
+        $crate::log::logger().log(
             $crate::log::Level::Trace,
             format_args!("[{}:{}:{}]", std::file!(), std::line!(), std::column!())
         )
@@ -147,7 +147,7 @@ macro_rules! error {
 #[macro_export]
 macro_rules! log {
     (notify, log_context = $ctx:expr; $level:expr; $($arg:tt)*) => {{
-        $crate::log::Log::global().log(
+        $crate::log::logger().log(
             $level,
             format_args!("[{}] {}", $ctx, format_args!( $($arg)* ) )
         );
@@ -159,7 +159,7 @@ macro_rules! log {
     }};
 
     (notify; $level:expr; $($arg:tt)*) => {{
-        $crate::log::Log::global().log(
+        $crate::log::logger().log(
             $level,
             format_args!( $($arg)* )
         );
@@ -171,7 +171,7 @@ macro_rules! log {
     }};
 
     ($level:expr; $($arg:tt)*) => {
-        $crate::log::Log::global().log(
+        $crate::log::logger().log(
             $level,
             format_args!( $($arg)* )
         )
@@ -213,13 +213,15 @@ impl Log {
     /// Create a new [`Log`]
     /// Logs to a log file if in `release` profile, or `stderr` if `dev`
     fn new() -> Log {
-        let sink = match Log::get_sink() {
+        let mut sink = match Log::get_sink() {
             Ok(s) => s,
             Err(err) => {
                 eprintln!("Failed to get logs sink: {err:?}. Returning stderr instead.");
                 Box::new(std::io::stderr())
             },
         };
+
+        let _ = writeln!(sink);
 
         Log {
             start: Instant::now(),
@@ -244,18 +246,6 @@ impl Log {
             // If `OnceLock.set()` fails, that means there's already a global `Log` instance
             error!("Global Log instance already initialized");
         }
-    }
-
-    /// Get the global [`Log`] instance
-    pub fn global() -> MutexGuard<'static, Log> {
-        let mutex = GLOBAL.get() .expect("global Logs not initialized");
-        mutex.lock()
-            .unwrap_or_else(|mut err| {
-                error!("Error while getting global Logs instance:\n Mutex was poisonned");
-                **err.get_mut() = Log::new();
-                mutex.clear_poison();
-                err.into_inner()
-            })
     }
 
     pub fn log(&mut self, level: Level, args: Arguments) {
@@ -295,12 +285,12 @@ impl Log {
         let it = match fs::read_dir(path) {
             Ok(it) => it,
             Err(err) => {
-                error!("[remove_old_logs] Failed to read logs dir:\n {err:?}");
+                error!("[remove_old_logs()] Failed to read logs dir:\n {err:?}");
                 return;
             }
         };
 
-        let max_dur = Duration::from_secs(60 * 24 * max_days);
+        let max_dur = Duration::from_secs(60 * 60 * 24 * max_days);
         
         let mut count: usize = 0;
         for de in it.flatten() {
@@ -308,14 +298,22 @@ impl Log {
                 continue;
             };
 
-            // Removal check:
-            if !created.elapsed().map_or(true, |dur| dur > max_dur) {
+            // Removal check
+            if created.elapsed().map_or(false, |dur| dur <= max_dur) {
                 continue;
             }
 
             let path = de.path();
-            if let Err(err) = fs::remove_file(&path) {
-                error!("Failed to remove log file \"{}\":\n {:?}", path.display(), err);
+            match fs::remove_file(&path) {
+                Ok(()) => {
+                    let _ = writeln!(
+                        logger(),
+                        "    Removed {}",
+                        path.display()
+                    );
+                },
+                Err(err) =>
+                    error!("Failed to remove log file \"{}\":\n {:?}", path.display(), err),
             }
             count += 1;
         }
@@ -385,6 +383,19 @@ pub fn get_logs_dir() -> Option<PathBuf> {
             .to_path_buf()
             .join(format!("{}/logs/", APP_NAME))
     )
+}
+
+
+/// Get the global [`Log`] instance
+pub fn logger() -> MutexGuard<'static, Log> {
+    let mutex = GLOBAL.get() .expect("global Logs not initialized");
+    mutex.lock()
+        .unwrap_or_else(|mut err| {
+            error!("Error while getting global Logs instance:\n Mutex was poisonned");
+            **err.get_mut() = Log::new();
+            mutex.clear_poison();
+            err.into_inner()
+        })
 }
 
 
