@@ -156,24 +156,26 @@ fn init_default_tags() {
 
 
 
+/// Trait to convert to [`String`] but pretty way
+/// Like [`Display`] but I make the rules
+/// ### Why?
+/// Because Windows uses backslashes `\\` for paths and that's ugly especially
+/// when they mix with regular slashes `/`
 trait ToPrettyString {
     fn to_pretty_string(&self) -> String;
 }
 
-impl ToPrettyString for &Path {
+impl<T> ToPrettyString for T
+where
+    T: AsRef<Path>
+{
     fn to_pretty_string(&self) -> String {
-        self.display()
+        self.as_ref()
+            .display()
             .to_string()
             .replace('\\', "/")
     }
 }
-
-impl ToPrettyString for PathBuf {
-    fn to_pretty_string(&self) -> String {
-        self.as_path().to_pretty_string()
-    }
-}
-
 
 
 
