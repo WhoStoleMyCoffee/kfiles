@@ -314,11 +314,7 @@ pub mod icons {
     }
 
     pub fn get_icon_for_extension(extension: &OsStr) -> Option<&PathBuf> {
-        if let Some(path) = get_cache().get(extension) {
-            return Some(path);
-        }
-
-        None
+        get_cache().get( &extension.to_ascii_lowercase() )
     }
 
     fn get_cache() -> &'static HashMap<OsString, PathBuf> {
@@ -334,9 +330,7 @@ pub mod icons {
                     .map(|de| de.path())
                     .filter(|p| p.is_file() && is_file_supported(p))
                     .filter_map(|p| p.file_stem() .map(|s| s.to_os_string()) .map(|s| (s, p)))
-                    .inspect(|x| {
-                        dbg!(&x);
-                    }),
+                    // .inspect(|x| { dbg!(&x); })
             )
         })
     }

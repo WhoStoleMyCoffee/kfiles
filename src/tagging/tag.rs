@@ -338,6 +338,7 @@ impl From<SerTag> for Tag {
 
 
 
+/// Iterator over the subtags of a [`Tag`]
 /// TODO optimizations perhaps?
 pub struct Subtags {
     memo: HashSet<TagID>,
