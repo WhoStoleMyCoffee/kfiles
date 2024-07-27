@@ -171,18 +171,19 @@ impl TagEditScreen {
             }
 
             Message::AddFile => {
-                let Some(pick) = FileDialog::new().pick_file() else {
+                let Some(picks) = FileDialog::new().pick_files() else {
                     return Command::none();
                 };
-                return self.add_entry(pick);
+
+                return Command::batch( picks.into_iter() .map(|p| self.add_entry(p)) );
             }
 
             Message::AddFolder => {
-                let Some(pick) = FileDialog::new().pick_folder() else {
+                let Some(picks) = FileDialog::new().pick_folders() else {
                     return Command::none();
                 };
 
-                return self.add_entry(pick);
+                return Command::batch( picks.into_iter() .map(|p| self.add_entry(p)) );
             }
 
             Message::StartRename => {
@@ -581,20 +582,23 @@ impl TagEditScreen {
     fn add_entry(&mut self, path: PathBuf) -> Command<AppMessage> {
         use tagging::entries::NonexistentPath;
 
-        trace!("[TagEditScreen::add_entry()]");
-
         match self.tag.add_entry(&path) {
-            Ok(true) => self.save(),
+            Ok(true) => {
+                trace!("[TagEditScreen::add_entry()] Added entry {}", path.display());
+                self.save()
+            },
             Ok(false) => {
                 let pathstr: String = path.to_pretty_string();
                 send_message!(notif = info!(
-                    notify; "Entry \"{}\" is already contained", pathstr
+                    notify, log_context = "[TagEditScreen::add_entry()]";
+                    "Entry \"{}\" is already contained", pathstr
                 ))
             }
             Err(NonexistentPath) => {
                 let pathstr: String = path.to_pretty_string();
                 send_message!(notif = error!(
-                    notify; "Failed to add entry \"{}\":\nPath does not exist", pathstr
+                    notify, log_context = "[TagEditScreen::add_entry()]";
+                    "Failed to add entry \"{}\":\nPath does not exist", pathstr
                 ))
             }
         }
