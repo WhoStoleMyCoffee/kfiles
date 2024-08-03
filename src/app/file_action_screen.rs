@@ -251,40 +251,51 @@ impl FileActionScreen {
         self.selected_paths.append(&mut paths);
     }
 
+    /// TODO documentation
     pub fn apply_changes(&mut self) -> Command<AppMessage> {
+        trace!("[FileActionScreen::apply_changes()] Applying changes...");
+
         let mut commands = Vec::new();
+        let selected_set = HashSet::<&TagID>::from_iter(self.selected_tags.iter());
 
-        for tag_id in self.selected_tags.iter() {
-            let mut tag = match Tag::load(tag_id) {
-                Ok(t) => t,
-                Err(err) => {
-                    let tag_id = tag_id.clone();
-                    commands.push(send_message!(notif = error!(
-                        notify, log_context = "FileActionScreen::apply_changes()";
-                        "Failed to load tag \"{}\":\n {:?}", tag_id, err
-                    )));
-                    continue;
+        for  mut tag in load_tags(&mut commands).into_iter() {
+            let mut tag_changed: bool = false;
+
+            // Add all selected paths to this tag
+            if selected_set.contains(&tag.id) {
+                for path in self.selected_paths.iter() {
+                    match tag.add_entry(path) {
+                        Err(err) => {
+                            error!("[FileActionScreen::apply_changes()] Failed to add path {}:\n {:?}",
+                                path.display(), err
+                            );
+                        }
+                        Ok(true) => {
+                            trace!("[FileActionScreen::apply_changes()] Added path {} to tag {}",
+                                path.display(), &tag.id
+                            );
+                            tag_changed = true;
+                        }
+                        Ok(false) => {}
+                    }
                 }
-            };
-
-            for path in self.selected_paths.iter() {
-                match tag.add_entry(path) {
-                    Err(err) => {
-                        error!("[FileActionScreen::apply_changes()] Failed to add path {}:\n {:?}",
-                            path.display(), err
+            } else {
+                // Remove all selected paths from this tag
+                for path in self.selected_paths.iter() {
+                    if tag.remove_entry(path) {
+                        trace!("[FileActionScreen::apply_changes()] Removed path {} from tag {}",
+                            path.display(), &tag.id
                         );
+                        tag_changed = true;
                     }
-                    Ok(true) => {
-                        trace!("[FileActionScreen::apply_changes()] Added path {} to tag {}",
-                            path.display(), tag_id
-                        );
-                    }
-                    Ok(false) => {}
                 }
             }
 
+            // Save tag if there was a change
+            if !tag_changed { continue; }
+
             if let Err(err) = tag.save() {
-                let tag_id = tag_id.clone();
+                let tag_id = tag.id.clone();
                 commands.push(send_message!(notif = error!(
                     notify, log_context = "FileActionScreen::apply_changes()";
                     "Failed to save tag \"{}\":\n {:?}", tag_id, err
