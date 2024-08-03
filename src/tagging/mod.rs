@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::fs::{create_dir_all, read_dir};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub mod entries;
 pub mod id;
@@ -72,6 +73,15 @@ pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
 }
 
 
+// TODO documentation
+pub fn get_tags_for_path<'a>(path: &Path, tags: &'a [Tag]) -> HashSet<usize> {
+    tags.iter().enumerate()
+        .filter(|(_, tag)| tag.contains(path))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+
 
 
 
@@ -85,6 +95,8 @@ mod tests {
     use std::{collections::HashSet, path::{Path, PathBuf}};
 
     use crate::tagging::{entries::Entries, id::TagID, tag::{SelfReferringSubtag, Tag}};
+
+    use super::get_tags_for_path;
 
     #[test]
     fn serde() {
@@ -485,5 +497,29 @@ C:/Users/ddxte/Desktop/temp/iced/examples/editor/fonts/icons.ttf"#);
             .make_unique_in(&ids);
 
         assert_eq!(id.as_ref(), "new-tag-3");
+    }
+
+    #[test]
+    fn path_get_tags() {
+        let mut tag_a = Tag::create("tag-a");
+        tag_a.add_entry("C:/Users/ddxte/Documents/") .unwrap();
+        let mut tag_b = Tag::create("tag-b");
+        tag_b.add_entry("C:/Users/ddxte/Documents/Projects/") .unwrap();
+        let mut tag_c = Tag::create("tag-b");
+        tag_c.add_entry("C:/Users/ddxte/Pictures/") .unwrap();
+
+        let all_tags = vec![ tag_a, tag_b, tag_c, ];
+        let path = Path::new("C:/Users/ddxte/Documents/Projects/kfiles/");
+
+        let contained_tags: HashSet<TagID> = get_tags_for_path(&path, &all_tags)
+            .into_iter()
+            .map(|i| all_tags[i].id.clone())
+            .collect();
+        let expected: HashSet<TagID> = HashSet::from_iter(vec![
+            TagID::new("tag-a"),
+            TagID::new("tag-b"),
+        ]);
+
+        assert_eq!(contained_tags, expected);
     }
 }

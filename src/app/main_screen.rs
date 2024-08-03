@@ -319,8 +319,7 @@ impl MainScreen {
             ]
             // Add hovered path text, if any
             .push_maybe(self.hovered_path.as_ref().map(|pb|
-                text(pb.to_pretty_string())
-                    .size(12)
+                text(pb.to_pretty_string()) .size(12)
             )),
         )
         .into()
@@ -371,7 +370,7 @@ impl MainScreen {
         let mut wrap = match self.get_visible_items_range() {
             Some(range) => Wrap::with_elements(
                 self.items.iter().enumerate()
-                .map(|(i, Item(_score, pb))| {
+                .map(|(i, Item(_score, pb))| 
                     DirEntry::new(pb)
                         .cull(!range.contains(&i))
                         .width(ITEM_SIZE.0)
@@ -379,7 +378,7 @@ impl MainScreen {
                         .on_select(AppMessage::OpenPath(pb.clone()))
                         .on_hover(Message::EntryHovered(pb.clone()).into())
                         .into()
-                })
+                )
                 .collect(),
             )
             .spacing(ITEM_SPACING.0)

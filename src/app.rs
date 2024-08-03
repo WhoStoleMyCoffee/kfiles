@@ -2,15 +2,16 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use iced::event::Status;
-use iced::widget::{column, scrollable};
-use iced::{self, Alignment, Element, Event};
+use iced::widget::{column, container, scrollable, text};
+use iced::{self, Alignment, Border, Color, Element, Event, Length};
 use iced::{time, Application, Command, Theme};
-use iced_aw::floating_element;
+use iced_aw::{floating_element, Spinner};
 
 pub mod main_screen;
 pub mod tag_list_screen;
 pub mod tag_edit_screen;
 pub mod configs_screen;
+pub mod file_action_screen;
 
 use crate::log::notification::Notification;
 use crate::tagging::Tag;
@@ -22,6 +23,7 @@ use tag_edit_screen::TagEditScreen;
 use tag_list_screen::TagListScreen;
 
 use self::configs_screen::ConfigsScreen;
+use self::file_action_screen::FileActionScreen;
 
 
 /// Creates a [`iced::Command`] that produces the given message(s)
@@ -29,7 +31,7 @@ use self::configs_screen::ConfigsScreen;
 /// // Send just one
 /// send_message!(Message::MyMessage)
 /// // Send multiple
-/// send_message![ Message::MyMessage, Message::MyMessage2 ]
+/// send_message!(notif = $notif)
 /// ```
 #[macro_export]
 macro_rules! send_message {
@@ -42,6 +44,20 @@ macro_rules! send_message {
     ($msg:expr) => {
         Command::perform(async {}, move |_| $msg)
     };
+}
+
+
+
+/// TODO documentation
+#[derive(Debug, Clone)]
+enum FileHoverState {
+    None,
+    Hovering(Vec<PathBuf>),
+    Dropping {
+        paths: Vec<PathBuf>,
+        expected_remaining: Option<usize>,
+        drop_start: Instant,
+    },
 }
 
 
@@ -63,7 +79,9 @@ pub enum Message {
     SwitchToTagListScreen,
     SwitchToTagEditScreen(Tag),
     SwitchToConfigScreen,
+    SwitchToFileActionScreen(Vec<PathBuf>),
 }
+
 
 
 
@@ -71,6 +89,7 @@ pub struct KFiles {
     current_screen: Screen,
     notifications: Vec<Notification>,
     has_focus: Option<Instant>,
+    hovered_files: FileHoverState,
 }
 
 impl Application for KFiles {
@@ -87,6 +106,7 @@ impl Application for KFiles {
                 current_screen: Screen::Main(main_screen),
                 notifications: Vec::new(),
                 has_focus: None,
+                hovered_files: FileHoverState::None,
             },
             Command::batch(vec![
                 iced::font::load(iced_aw::BOOTSTRAP_FONT_BYTES).map(Message::IconsFontLoaded),
@@ -105,6 +125,15 @@ impl Application for KFiles {
 
             Message::Tick => {
                 self.update_notifications();
+
+                if let FileHoverState::Dropping { paths, expected_remaining, drop_start } = &self.hovered_files {
+                    if expected_remaining.is_some_and(|x| x == 0) || drop_start.elapsed() >= KFiles::FILE_DROP_BUFFER {
+                        let paths = paths.to_vec();
+                        self.hovered_files = FileHoverState::None;
+                        return self.drop_paths(paths);
+                    }
+                }
+
                 self.current_screen.tick()
             }
 
@@ -146,6 +175,12 @@ impl Application for KFiles {
                 command
             }
 
+            Message::SwitchToFileActionScreen(paths) => {
+                let (file_action_screen, command) = FileActionScreen::new(paths);
+                self.current_screen = Screen::FileAction(file_action_screen);
+                command
+            },
+
             Message::CloseNotification(index) => {
                 if index < self.notifications.len() {
                     self.notifications.remove(index);
@@ -165,22 +200,63 @@ impl Application for KFiles {
     }
 
     fn view(&self) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
-        let screen = self.current_screen.view();
+        match &self.hovered_files {
+            FileHoverState::None => {
+                self.view_main()
+            },
 
-        let notifications = scrollable(
-            column(self.notifications.iter().enumerate()
-                .map(|(i, n)| NotificationCard::from_notification(n)
-                     .on_close(Message::CloseNotification(i))
-                     .into()
+            FileHoverState::Hovering(_) => {
+                let palette = self.theme().palette();
+                let border_color: Color = palette.primary;
+
+                container(
+                    container( text("Drop files...") )
+                        .style(container::Appearance {
+                            border: Border {
+                                color: border_color,
+                                width: 3.0,
+                                radius: 4.0.into(),
+                            },
+                            ..Default::default()
+                        })
+                        .center_x()
+                        .center_y()
+                        .width(600)
+                        .height(300)
                 )
-            )
-            .width(400)
-            .align_items(Alignment::End)
-        );
+                .center_x()
+                .center_y()
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            },
 
-        floating_element(screen, notifications)
-            .anchor(floating_element::Anchor::SouthEast)
-            .into()
+            FileHoverState::Dropping { .. } => {
+                let palette = self.theme().palette();
+                let border_color: Color = palette.text;
+
+                container(
+                    container(Spinner::new())
+                    .style(container::Appearance {
+                        border: Border {
+                            color: border_color,
+                            width: 3.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .center_x()
+                    .center_y()
+                    .width(600)
+                    .height(300)
+                )
+                .center_x()
+                .center_y()
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            },
+        }
     }
 
     fn theme(&self) -> Self::Theme {
@@ -207,16 +283,91 @@ impl KFiles {
     /// press getting registered to open the first search result in [`MainScreen`]
     const FOCUS_BUFFER: Duration = Duration::from_millis(500);
 
+    /// TODO documentation
+    const FILE_DROP_BUFFER: Duration = Duration::from_millis(2000);
+
+    fn view_main(&self) -> iced::Element<'_, Message, iced::Theme, iced::Renderer> {
+        let screen = self.current_screen.view();
+
+        let notifications = scrollable(
+            column(self.notifications.iter().enumerate().map(|(i, n)| {
+                NotificationCard::from_notification(n)
+                    .on_close(Message::CloseNotification(i))
+                    .into()
+            }))
+            .width(400)
+            .align_items(Alignment::End),
+        );
+
+        floating_element(screen, notifications)
+            .anchor(floating_element::Anchor::SouthEast)
+            .into()
+    }
+
     fn handle_event(&mut self, event: Event, status: Status) -> Command<Message> {
         use iced::window::Event as WindowEvent;
 
         match event {
-            Event::Window(_, WindowEvent::Focused) => {
-                self.has_focus = Some(Instant::now());
+            // WINDOW EVENT
+            Event::Window(_, ref window_event) => match window_event {
+                WindowEvent::Focused => {
+                    self.has_focus = Some(Instant::now());
+                }
+
+                WindowEvent::Unfocused => {
+                    self.has_focus = None;
+                },
+
+                WindowEvent::FileDropped(path) => {
+                    let path: PathBuf = path.clone();
+
+                    match &mut self.hovered_files {
+                        FileHoverState::Dropping { paths, expected_remaining, .. } => {
+                            paths.push(path);
+                            if let Some(count) = expected_remaining {
+                                *count -= 1;
+                            }
+
+                        },
+
+                        FileHoverState::Hovering(paths) => {
+                            self.hovered_files = FileHoverState::Dropping {
+                                paths: vec![ path ],
+                                expected_remaining: Some(paths.len() - 1),
+                                drop_start: Instant::now(),
+                            };
+                        },
+
+                        FileHoverState::None => {
+                            self.hovered_files = FileHoverState::Dropping {
+                                paths: vec![ path ],
+                                expected_remaining: None,
+                                drop_start: Instant::now(),
+                            };
+                        },
+                    }
+                },
+
+                WindowEvent::FileHovered(path) => {
+                    let path: PathBuf = path.clone();
+
+                    match &mut self.hovered_files {
+                        FileHoverState::Hovering(files) => {
+                            files.push(path);
+                        },
+                        _ => {
+                            self.hovered_files = FileHoverState::Hovering(vec![ path ])
+                        },
+                    }
+                },
+
+                WindowEvent::FilesHoveredLeft => {
+                    self.hovered_files = FileHoverState::None;
+                },
+
+                _ => {},
             },
-            Event::Window(_, WindowEvent::Unfocused) => {
-                self.has_focus = None;
-            },
+
             _ => {},
         }
 
@@ -278,6 +429,22 @@ impl KFiles {
     pub fn has_focus(&self) -> bool {
         self.has_focus.is_some_and(|t| t.elapsed() > KFiles::FOCUS_BUFFER)
     }
+
+    pub fn drop_paths(&mut self, paths: Vec<PathBuf>) -> Command<Message> {
+        let command = match &mut self.current_screen {
+            Screen::FileAction(file_action_screen) => {
+                file_action_screen.append(paths);
+                Command::none()
+            },
+            _ => {
+                let (file_action_screen, command) = FileActionScreen::new(paths);
+                self.current_screen = Screen::FileAction(file_action_screen);
+                command
+            }
+        };
+
+        command
+    }
 }
 
 
@@ -287,6 +454,7 @@ pub enum ScreenMessage {
     TagList(tag_list_screen::Message),
     TagEdit(tag_edit_screen::Message),
     Configs(configs_screen::Message),
+    FileAction(file_action_screen::Message),
 }
 
 impl From<ScreenMessage> for Message {
@@ -302,6 +470,7 @@ enum Screen {
     TagList(TagListScreen),
     TagEdit(TagEditScreen),
     Configs(ConfigsScreen),
+    FileAction(FileActionScreen),
 }
 
 impl Screen {
@@ -329,6 +498,10 @@ impl Screen {
             ScreenMessage::Configs(message) => if let Screen::Configs(configs) = self {
                 return configs.update(message);
             }
+
+            ScreenMessage::FileAction(message) => if let Screen::FileAction(file_action) = self {
+                return file_action.update(message);
+            }
         }
 
         Command::none()
@@ -340,6 +513,7 @@ impl Screen {
             Screen::TagList(tag_list) => tag_list.view(),
             Screen::TagEdit(tag_edit) => tag_edit.view(),
             Screen::Configs(configs) => configs.view(),
+            Screen::FileAction(file_action) => file_action.view(),
         }
     }
 
@@ -349,6 +523,7 @@ impl Screen {
             Screen::TagList(tag_list) => tag_list.handle_event(event, status),
             Screen::TagEdit(tag_edit) => tag_edit.handle_event(event, status),
             Screen::Configs(configs) => configs.handle_event(event, status),
+            Screen::FileAction(file_action) => file_action.handle_event(event, status),
         }
     }
 }

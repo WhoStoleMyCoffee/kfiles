@@ -108,7 +108,7 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
     ) -> Option<Message> {
         match event {
             Event::Hovered => {
-                state.is_hovered = true;
+                state.is_hovered = self.on_hover.is_some();
                 if let Some(on_hover) = &self.on_hover {
                     return Some(on_hover.clone());
                 }

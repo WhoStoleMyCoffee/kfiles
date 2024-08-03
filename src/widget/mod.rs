@@ -45,7 +45,7 @@ macro_rules! icon {
 #[macro_export]
 macro_rules! simple_button {
     (icon = $icon:expr) => {
-        iced::widget::button(icon!($icon, light))
+        iced::widget::button(crate::icon!($icon, light))
             .style($crate::app::theme::Simple)
     };
 

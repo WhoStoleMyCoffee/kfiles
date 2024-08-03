@@ -383,28 +383,26 @@ impl TagEditScreen {
             tooltip(
                 ContextMenu::new(
                     button(icon!(Bootstrap::BookmarkPlus)).on_press(AppMessage::Empty),
-                    || {
-                        // Tags list
-                        container(scrollable(column(
-                            self.tags_cache.iter()
-                                .filter(|id| **id != self.tag.id)
-                                .map(|id| {
-                                    checkbox(id.to_string(), id.is_subtag_of(&self.tag))
-                                        .on_toggle(|is_on| {
-                                            Message::SubtagToggled(id.clone(), is_on).into()
-                                        })
-                                        .into()
-                                }),
-                        )))
-                        .max_width(240)
-                        .max_height(480)
-                        .padding(4)
-                        .style(
-                            container::Appearance::default()
-                                .with_background(Color::new(0.0, 0.0, 0.1, 1.0)),
-                        )
-                        .into()
-                    }
+                    // Tags list
+                    || container(scrollable(column(
+                        self.tags_cache.iter()
+                            .filter(|id| **id != self.tag.id)
+                            .map(|id| {
+                                checkbox(id.to_string(), id.is_subtag_of(&self.tag))
+                                    .on_toggle(|is_on| {
+                                        Message::SubtagToggled(id.clone(), is_on).into()
+                                    })
+                                    .into()
+                            }),
+                    )))
+                    .max_width(240)
+                    .max_height(480)
+                    .padding(4)
+                    .style(container::Appearance::default()
+                        .with_background(Color::new(0.0, 0.0, 0.1, 1.0)),
+                    )
+                    .into()
+
                 )
                 .left_click_release_activated(),
                 container(text("Subtags")).padding(4).style(

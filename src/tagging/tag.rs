@@ -160,7 +160,7 @@ impl Tag {
     /// tag.get_all_entries().contains(path)
     /// ```
     #[inline]
-    pub fn all_contains<P>(&self, path: P) -> bool
+    pub fn contains_with_subtags<P>(&self, path: P) -> bool
     where P: AsRef<Path>,
     {
         self.get_all_entries().contains(path.as_ref())
@@ -196,6 +196,7 @@ impl Tag {
         Ok(())
     }
 
+    /// To load from a [`Path`], see [`Tag::load_from_path`] instead
     pub fn load(id: &TagID) -> Result<Tag, LoadError> {
         Tag::load_from_path(&id.get_path())
     }
