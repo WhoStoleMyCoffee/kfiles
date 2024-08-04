@@ -40,3 +40,6 @@ opt-level = 0
 [profile.release]
 opt-level = 2
 codegen-units = 1
+
+[build-dependencies]
+winresource = "0.1.17"
