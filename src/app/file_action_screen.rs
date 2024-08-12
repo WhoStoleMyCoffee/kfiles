@@ -1,37 +1,34 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use iced::event::Status;
 use iced::widget::{
-    button, column, container, horizontal_rule, row, scrollable, text, text_input, vertical_space, Container
+    button, column, container, horizontal_rule, row, scrollable, text, vertical_space, Container
 };
-use iced::{Command, Element, Event, Length};
-use iced_aw::{Bootstrap, Card, Wrap};
+use iced::{Color, Command, Element, Event, Length};
+use iced_aw::widgets::Grid;
+use iced_aw::{grid, grid_row, Bootstrap, Card, Wrap};
 
 use crate::tagging::id::TagID;
+use crate::tagging::tag::{LoadError, SaveError};
 use crate::tagging::Tag;
-use crate::widget::fuzzy_input::FuzzyInput;
-use crate::{error, icon, send_message, tagging, trace, ToPrettyString};
+use crate::{error, icon, info, log, send_message, tag_list_menu, tagging, trace, ToPrettyString};
 use crate::{app::Message as AppMessage, simple_button};
 use crate::widget::dir_entry::DirEntry;
 
-use super::theme;
-
-
 const ITEM_SIZE: (f32, f32) = (80.0, 120.0);
 const ITEM_SPACING: (f32, f32) = (8.0, 8.0);
-
-// Ids
-const QUERY_INPUT_ID: fn() -> text_input::Id = || text_input::Id::new("query_input");
 
 
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    RemovePath(usize),
-    ToggleTag(TagID),
+    AddTag(usize),
     RemoveTag(usize),
-    TagTextChanged(String),
+    RemoveAddingTag(TagID),
+    RemoveRemovingTag(TagID),
+
+    RemovePath(usize),
     EntryHovered(usize),
     CancelPressed,
     ApplyPressed,
@@ -49,27 +46,25 @@ impl From<Message> for AppMessage {
 #[derive(Debug)]
 pub struct FileActionScreen {
     selected_paths: Vec<PathBuf>,
-    selected_tags: Vec<TagID>,
-    tags_cache: Vec<TagID>,
-    tag_text_input: String,
+    tags_cache: Vec<Tag>,
     hovered_path: Option<PathBuf>,
     popup: Option<Popup>,
+    changes: Changes,
 }
 
 impl FileActionScreen {
     pub fn new(selected_paths: Vec<PathBuf>) -> (Self, Command<AppMessage>) {
         let mut commands: Vec<Command<AppMessage>> = Vec::new();
         let tags_cache: Vec<Tag> = load_tags(&mut commands);
-        let intersecting_tags = get_intersecting_tags(&selected_paths, &tags_cache);
 
         (
             FileActionScreen {
                 selected_paths,
-                selected_tags: intersecting_tags,
-                tags_cache: tags_cache.into_iter().map(|t| t.id).collect(),
-                tag_text_input: String::new(),
+                tags_cache,
+                // tags_union,
                 hovered_path: None,
                 popup: None,
+                changes: Changes::new(),
             },
             Command::batch(commands),
         )
@@ -77,33 +72,30 @@ impl FileActionScreen {
 
     pub fn update(&mut self, message: Message) -> Command<AppMessage> {
         match message {
-            Message::RemovePath(index) => {
-                self.selected_paths.remove(index);
-            }
-
-            Message::ToggleTag(tag_id) => {
-                if let Some(index) = self.selected_tags.iter().position(|id| id == &tag_id) {
-                    self.selected_tags.remove(index);
-                } else {
-                    self.selected_tags.push(tag_id);
-                }
-
-                self.tag_text_input.clear();
+            Message::AddTag(index) => {
+                let Some(tag) = self.tags_cache.get(index) else {
+                    return Command::none();
+                };
+                self.changes.add_tag(tag.id.clone(), true);
             }
 
             Message::RemoveTag(index) => {
-                if index < self.selected_tags.len() {
-                    self.selected_tags.remove(index);
-                } else {
-                    error!("[FileActionScreen::update() => RemoveQueryTag] Index out of bounds:\n index = {}\n selected_tags.len() = {}",
-                        index,
-                        self.selected_tags.len()
-                    )
-                }
-            },
+                let Some(tag) = self.tags_cache.get(index) else {
+                    return Command::none();
+                };
+                self.changes.remove_tag(tag.id.clone(), true);
+            }
 
-            Message::TagTextChanged(input) => {
-                self.tag_text_input = input;
+            Message::RemoveAddingTag(tag_id) => {
+                self.changes.add_tag(tag_id, false);
+            }
+
+            Message::RemoveRemovingTag(tag_id) => {
+                self.changes.remove_tag(tag_id, false);
+            }
+
+            Message::RemovePath(index) => {
+                self.selected_paths.remove(index);
             }
 
             Message::EntryHovered(index) => {
@@ -123,8 +115,32 @@ impl FileActionScreen {
             }
 
             Message::ApplyChanges => {
-                self.apply_changes();
-                return send_message!(AppMessage::SwitchToMainScreen);
+                trace!("[FileActionScreen::update() => ApplyChanges] Applying changes...");
+                let changes = self.changes.apply(&self.selected_paths);
+                log!("changes = {:#?}", &changes);
+
+                let files_count = self.selected_paths.len();
+                let (added_tags_count, removed_tags_count) = changes.tags.iter()
+                    .flat_map(|(_, res)| res)
+                    .fold((0usize, 0usize), |(a, r), report| (
+                        a + !report.added.is_empty() as usize,
+                        r + !report.removed.is_empty() as usize,
+                    ));
+
+                let message = match (added_tags_count > 0, removed_tags_count > 0) {
+                    (true, true) => format!("{files_count} entries added to {added_tags_count} tags, and removed from {removed_tags_count} tags"),
+                    (true, false) => format!("{files_count} entries added to {added_tags_count} tags"),
+                    (false, true) => format!("{files_count} entries removed from {removed_tags_count} tags"),
+                    (false, false) => "No changes made".to_string(),
+                };
+
+                return Command::batch(vec![
+                    send_message!(AppMessage::SwitchToMainScreen),
+                    send_message!(notif = info!(
+                        notify, log_context = "FileActionScreen::update() => ApplyChanges";
+                        "{}", message
+                    )),
+                ])
             }
         }
 
@@ -132,8 +148,6 @@ impl FileActionScreen {
     }
 
     pub fn view(&self) -> Element<AppMessage> {
-        let palette = iced::theme::Palette::CATPPUCCIN_MOCHA;
-
         if let Some(popup) = &self.popup {
             return popup.view();
         }
@@ -141,16 +155,19 @@ impl FileActionScreen {
         column![
             // Top bar
             row![
-                simple_button!( text("Cancel").style(palette.text) )
-                    .on_press(Message::CancelPressed.into()),
-                button("Apply") .on_press(Message::ApplyPressed.into()),
-                text( format!("{} Files", self.selected_paths.len()) ) .size(24),
+                simple_button!(text("Cancel")).on_press(Message::CancelPressed.into()),
+                button("Apply").on_press_maybe(
+                    (!self.changes.is_empty()).then_some(Message::ApplyPressed.into())
+                ),
+                text(format!("{} Files", self.selected_paths.len())).size(24),
             ],
             vertical_space() .height(Length::Fixed(12.0)),
 
             self.view_actions_tags(),
 
             horizontal_rule(8),
+
+            // Main view
             scrollable( self.view_paths() )
                 .height(Length::Fill),
         ]
@@ -163,53 +180,94 @@ impl FileActionScreen {
         .into()
     }
 
+    // TODO UN-DUPLICATE CODE
     fn view_actions_tags(&self) -> Container<AppMessage> {
         let palette = iced::theme::Palette::CATPPUCCIN_MOCHA;
         let dark_text_col = palette.text.inverse();
 
-        container(column![
-            text("Tags:"),
-            // Tags
-            container(scrollable(Wrap::with_elements(
-                    self.selected_tags.iter().enumerate()
-                        .map(|(i, tag_id)| {
-                            button(
-                                row![
-                                    button(icon!(Bootstrap::X, dark_text_col))
-                                        .on_press(Message::RemoveTag(i).into())
-                                        .style(iced::theme::Button::Text)
-                                        .padding(0),
-                                    text(&tag_id).size(14),
-                                ]
-                                .align_items(iced::Alignment::Center),
-                            )
-                            .on_press(AppMessage::Empty)
-                            .into()
-                        })
-                        .collect()
-                )
-                .spacing(2.0)
-            ))
-            .max_height(120),
+        let hscrolldir = scrollable::Direction::Horizontal(
+            scrollable::Properties::default()
+        );
 
-            // Fuzzy text input
-            FuzzyInput::new(
-                "Tags...",
-                &self.tag_text_input,
-                &self.tags_cache,
-                |tag_id| Message::ToggleTag(tag_id).into(),
-            )
-            .text_input(|text_input| text_input
-                .id(QUERY_INPUT_ID())
-                .on_input(|text| Message::TagTextChanged(text).into())
-            )
-            .style(theme::Simple),
+        // TODO view changes on tag click
+        let mut grid = Grid::new()
+            .vertical_alignment(iced::alignment::Vertical::Center)
+            .column_spacing(8);
+        if !self.changes.add_tags.is_empty() {
+            grid = grid.push(grid_row![
+                "Add tags:",
+                scrollable(row(self.changes.add_tags.iter().map(|tag_id| button(
+                    row![
+                        button(icon!(Bootstrap::X, dark_text_col))
+                            .on_press(Message::RemoveAddingTag(tag_id.clone()).into())
+                            .style(iced::theme::Button::Text)
+                            .padding(0),
+                        text(tag_id.to_string()),
+                    ]
+                    .spacing(2)
+                )
+                .on_press(AppMessage::Empty)
+                .into())))
+                .direction(hscrolldir.clone())
+            ]);
+        }
+        if !self.changes.remove_tags.is_empty() {
+            grid = grid.push(grid_row![
+                "Remove tags:",
+                scrollable(row(self.changes.remove_tags.iter().map(|tag_id| button(
+                    row![
+                        button(icon!(Bootstrap::X, dark_text_col))
+                            .on_press(Message::RemoveRemovingTag(tag_id.clone()).into())
+                            .style(iced::theme::Button::Text)
+                            .padding(0),
+                        text(tag_id.to_string()),
+                    ]
+                    .spacing(2)
+                )
+                .on_press(AppMessage::Empty)
+                .into())))
+                .direction(hscrolldir.clone())
+            ]);
+        }
+
+
+        container(column![
+            row![
+                text("Tags") .size(24),
+
+                // Add button
+                tag_list_menu!(
+                    button("+").on_press(AppMessage::Empty),
+                    self.tags_cache.iter().enumerate()
+                        .filter(|(_, tag)| !self.changes.add_tags.iter().any(|id| **tag == *id))
+                        .map(|(i, tag)| {
+                            simple_button!(text(tag.id.to_string()))
+                                .on_press( Message::AddTag(i).into() )
+                                .into()
+                        })
+                ),
+
+                // Remove button
+                tag_list_menu!(
+                    button("-").on_press(AppMessage::Empty),
+                    self.tags_cache.iter().enumerate()
+                        .filter(|(_, tag)| !self.changes.remove_tags.iter().any(|id| **tag == *id))
+                        .map(|(i, tag)| {
+                            simple_button!(text(tag.id.to_string()))
+                                .on_press( Message::RemoveTag(i).into() )
+                                .into()
+                        })
+                ),
+
+            ],
+
+            grid,
         ])
         .width(Length::Fill)
     }
 
-    fn view_paths(&self) -> Wrap<AppMessage, iced_aw::direction::Horizontal> {
-        Wrap::with_elements(
+    fn view_paths(&self) -> Container<AppMessage> {
+        container(Wrap::with_elements(
             self.selected_paths.iter().enumerate()
                 .map(|(i, p)| row![
                         button(icon!(Bootstrap::X))
@@ -229,14 +287,19 @@ impl FileActionScreen {
         )
         .width_items(Length::Fill)
         .spacing(ITEM_SPACING.0)
-        .line_spacing(ITEM_SPACING.1)
+        .line_spacing(ITEM_SPACING.1))
+    }
+
+    fn view_tag_changes(&self, tag: &Tag, changes: &ChangeReportTagEntry) -> Container<AppMessage> {
+        container(
+            text(format!("tag = {}, changes = {:?}", tag.id, changes))
+        )
     }
 
     pub fn handle_event(&mut self, _event: Event, _status: Status) -> Command<AppMessage> {
         Command::none()
     }
 
-    /// Doesn't update the selected tags
     pub fn push(&mut self, path: PathBuf) -> bool {
         if self.selected_paths.contains(&path) {
             return false;
@@ -245,65 +308,9 @@ impl FileActionScreen {
         true
     }
 
-    /// Doesn't update the selected tags
     pub fn append(&mut self, mut paths: Vec<PathBuf>) {
         paths.retain(|p| !self.selected_paths.contains(&p));
         self.selected_paths.append(&mut paths);
-    }
-
-    /// TODO documentation
-    pub fn apply_changes(&mut self) -> Command<AppMessage> {
-        trace!("[FileActionScreen::apply_changes()] Applying changes...");
-
-        let mut commands = Vec::new();
-        let selected_set = HashSet::<&TagID>::from_iter(self.selected_tags.iter());
-
-        for  mut tag in load_tags(&mut commands).into_iter() {
-            let mut tag_changed: bool = false;
-
-            // Add all selected paths to this tag
-            if selected_set.contains(&tag.id) {
-                for path in self.selected_paths.iter() {
-                    match tag.add_entry(path) {
-                        Err(err) => {
-                            error!("[FileActionScreen::apply_changes()] Failed to add path {}:\n {:?}",
-                                path.display(), err
-                            );
-                        }
-                        Ok(true) => {
-                            trace!("[FileActionScreen::apply_changes()] Added path {} to tag {}",
-                                path.display(), &tag.id
-                            );
-                            tag_changed = true;
-                        }
-                        Ok(false) => {}
-                    }
-                }
-            } else {
-                // Remove all selected paths from this tag
-                for path in self.selected_paths.iter() {
-                    if tag.remove_entry(path) {
-                        trace!("[FileActionScreen::apply_changes()] Removed path {} from tag {}",
-                            path.display(), &tag.id
-                        );
-                        tag_changed = true;
-                    }
-                }
-            }
-
-            // Save tag if there was a change
-            if !tag_changed { continue; }
-
-            if let Err(err) = tag.save() {
-                let tag_id = tag.id.clone();
-                commands.push(send_message!(notif = error!(
-                    notify, log_context = "FileActionScreen::apply_changes()";
-                    "Failed to save tag \"{}\":\n {:?}", tag_id, err
-                )));
-            }
-        }
-
-        Command::batch(commands)
     }
 }
 
@@ -369,19 +376,203 @@ impl Popup {
 
 
 
-/// TODO documentation
-fn get_intersecting_tags(paths: &[PathBuf], tags: &[Tag]) -> Vec<TagID> {
-    paths.iter()
-        .map(|path| tagging::get_tags_for_path(path, tags))
-        .reduce(|acc, t| &acc & &t)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|i| tags[i].id.clone())
-        .collect()
+
+/// A chages list lol
+#[derive(Debug)]
+struct Changes {
+    add_tags: Vec<TagID>,
+    remove_tags: Vec<TagID>,
+}
+
+// TODO documentation
+impl Changes {
+    fn new() -> Changes {
+        Self {
+            add_tags: Vec::new(),
+            remove_tags: Vec::new(),
+        }
+    }
+
+    /// TODO separate fns for add and remove
+    fn add_tag(&mut self, tag_id: TagID, on: bool) {
+        if !on {
+            if let Some(index) = self.add_tags.iter().position(|t| t == &tag_id) {
+                self.add_tags.remove(index);
+            }
+            return;
+        }
+
+        if self.add_tags.contains(&tag_id) {
+            return;
+        }
+
+        if let Some(index) = self.remove_tags.iter().position(|t| t == &tag_id) {
+            self.remove_tags.remove(index);
+        }
+
+        self.add_tags.push(tag_id);
+    }
+
+    /// TODO separate fns for add and remove
+    fn remove_tag(&mut self, tag_id: TagID, on: bool) {
+        if !on {
+            if let Some(index) = self.remove_tags.iter().position(|t| t == &tag_id) {
+                self.remove_tags.remove(index);
+            }
+            return;
+        }
+
+        if self.remove_tags.contains(&tag_id) {
+            return;
+        }
+
+        if let Some(index) = self.add_tags.iter().position(|t| t == &tag_id) {
+            self.add_tags.remove(index);
+        }
+
+        self.remove_tags.push(tag_id);
+    }
+
+    /// Apply changes to the given paths and return the results
+    fn apply(&self, paths: &[PathBuf]) -> ChangesReport {
+        let mut report = ChangesReport::new();
+        trace!("[file_action_screen::Changes::apply()] Applying changes to {} files...", paths.len());
+
+        // ADD
+        for tag_id in self.add_tags.iter() {
+            let mut tag = match Tag::load(&tag_id) {
+                Ok(t) => t,
+                Err(err) => {
+                    error!("[file_action_screen::Changes::apply()] Failed to load tag '{}':\n {:?}", tag_id, err);
+                    report.tag_load_failed(tag_id.clone(), err);
+                    continue;
+                }
+            };
+
+            for path in paths.iter() {
+                match tag.add_entry(path) {
+                    Ok(true) => {
+                        report.added_entry(path.clone(), &tag.id);
+                    },
+                    Ok(false) => {},
+                    Err(err) => error!(
+                        "[file_action_screen::Changes::apply()] Failed to add entry '{}':\n {:?}",
+                        path.display(),
+                        err
+                    ),
+                }
+            }
+
+            if let Err(err) = tag.save() {
+                error!("[file_action_screen::Changes::apply()] Failed to save tag '{}':\n {:?}", &tag.id, err);
+                report.tag_save_failed(tag.id.clone(), err);
+            }
+        }
+
+        // REMOVE
+        for tag_id in self.remove_tags.iter() {
+            let mut tag = match Tag::load(&tag_id) {
+                Ok(t) => t,
+                Err(err) => {
+                    error!("[file_action_screen::Changes::apply()] Failed to load tag '{}':\n {:?}", tag_id, err);
+                    report.tag_load_failed(tag_id.clone(), err);
+                    continue;
+                }
+            };
+
+            for path in paths.iter() {
+                if tag.remove_entry(path) {
+                    report.removed_entry(path.clone(), tag_id);
+                }
+            }
+
+            if let Err(err) = tag.save() {
+                error!("[file_action_screen::Changes::apply()] Failed to save tag '{}':\n {:?}", &tag.id, err);
+                report.tag_save_failed(tag_id.clone(), err);
+            }
+        }
+
+        report
+    }
+
+    fn is_empty(&self) -> bool {
+        self.add_tags.is_empty() && self.remove_tags.is_empty()
+    }
 }
 
 
+#[derive(Debug)]
+enum TagChangeError {
+    LoadError(LoadError),
+    SaveError(SaveError),
+}
+
+
+#[derive(Debug, Default, Clone)]
+struct ChangeReportTagEntry {
+    added: Vec<PathBuf>,
+    removed: Vec<PathBuf>,
+}
+
+
+#[derive(Debug)]
+struct ChangesReport {
+    tags: HashMap<TagID, Result<ChangeReportTagEntry, TagChangeError>>,
+}
+
+impl ChangesReport {
+    fn new() -> Self {
+        Self {
+            tags: HashMap::new(),
+        }
+    }
+
+    fn added_entry(&mut self, path: PathBuf, tag_id: &TagID) {
+        match self.tags.get_mut(tag_id) {
+            Some(Ok(e)) => {
+                e.added.push(path);
+            }
+            Some(Err(_)) => {}
+            // New entry
+            None => {
+                self.tags.insert(tag_id.clone(), Ok(ChangeReportTagEntry {
+                    added: vec![ path ],
+                    ..Default::default()
+                }));
+            }
+        }
+    }
+    
+    fn removed_entry(&mut self, path: PathBuf, tag_id: &TagID) {
+        match self.tags.get_mut(tag_id) {
+            Some(Ok(e)) => {
+                e.removed.push(path);
+            }
+            Some(Err(_)) => {}
+            // New entry
+            None => {
+                self.tags.insert(tag_id.clone(), Ok(ChangeReportTagEntry {
+                    removed: vec![ path ],
+                    ..Default::default()
+                }));
+            }
+        }
+    }
+
+    fn tag_save_failed(&mut self, tag_id: TagID, err: SaveError) {
+        self.tags.insert(tag_id, Err(TagChangeError::SaveError(err)) );
+    }
+
+    fn tag_load_failed(&mut self, tag_id: TagID, err: LoadError) {
+        self.tags.insert(tag_id, Err(TagChangeError::LoadError(err)) );
+    }
+}
+
+
+
+
 /// TODO documentation
+/// TODO should this be in [`tagging`]?
 fn load_tags(commands: &mut Vec<Command<AppMessage>>) -> Vec<Tag> {
     let tags_cache = match tagging::get_all_tags() {
         Ok(v) => v,

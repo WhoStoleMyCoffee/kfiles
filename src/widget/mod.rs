@@ -1,3 +1,6 @@
+use iced::{widget::{button, row, Button}, Element};
+use iced_aw::Bootstrap;
+
 pub mod dir_entry;
 pub mod fuzzy_input;
 pub mod tag_entry;
@@ -62,6 +65,33 @@ macro_rules! simple_button {
         .style($crate::app::theme::Simple)
     };
 }
+
+
+
+/// TODO documentation
+#[macro_export]
+macro_rules! tag_list_menu {
+    ($under:expr, $it:expr) => {
+        $crate::widget::context_menu::ContextMenu::new(
+            $under,
+            // Tags list
+            || container(scrollable(column(
+                $it
+            )))
+            .max_width(240)
+            .max_height(480)
+            .padding(4)
+            .style(container::Appearance::default()
+                .with_background(Color::new(0.0, 0.0, 0.1, 1.0)),
+            )
+            .into()
+        )
+        .left_click_release_activated()
+    };
+}
+
+
+
 
 
 

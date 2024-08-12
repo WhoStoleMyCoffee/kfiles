@@ -19,7 +19,7 @@ use crate::tagging::tag::SelfReferringSubtag;
 use crate::tagging::{ self, entries::Entries, Tag, id::TagID };
 use crate::widget::context_menu::ContextMenu;
 use crate::widget::tag_entry;
-use crate::{ error, icon, info, send_message, simple_button, trace, warn, ToPrettyString };
+use crate::{ error, icon, info, send_message, simple_button, tag_list_menu, trace, warn, ToPrettyString };
 
 use super::theme;
 
@@ -381,30 +381,15 @@ impl TagEditScreen {
         row![
             // Context menu button
             tooltip(
-                ContextMenu::new(
+                tag_list_menu!(
                     button(icon!(Bootstrap::BookmarkPlus)).on_press(AppMessage::Empty),
-                    // Tags list
-                    || container(scrollable(column(
-                        self.tags_cache.iter()
-                            .filter(|id| **id != self.tag.id)
-                            .map(|id| {
-                                checkbox(id.to_string(), id.is_subtag_of(&self.tag))
-                                    .on_toggle(|is_on| {
-                                        Message::SubtagToggled(id.clone(), is_on).into()
-                                    })
-                                    .into()
-                            }),
-                    )))
-                    .max_width(240)
-                    .max_height(480)
-                    .padding(4)
-                    .style(container::Appearance::default()
-                        .with_background(Color::new(0.0, 0.0, 0.1, 1.0)),
-                    )
-                    .into()
-
-                )
-                .left_click_release_activated(),
+                    self.tags_cache.iter()
+                        .filter(|id| **id != self.tag.id)
+                        .map(|id| simple_button!(text(id.to_string()))
+                            .on_press(Message::SubtagToggled(id.clone(), true).into())
+                            .into()
+                        )
+                ),
                 container(text("Subtags")).padding(4).style(
                     container::Appearance::default()
                         .with_background(Color::new(0.0, 0.0, 0.1, 0.9))

@@ -99,6 +99,8 @@ impl Application for KFiles {
     type Theme = Theme;
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
+        trace!("Program started");
+    
         let (main_screen, command) = MainScreen::new();
 
         (
@@ -547,10 +549,13 @@ pub mod theme {
     impl button::StyleSheet for Simple {
         type Style = iced::Theme;
 
-        fn active(&self, _style: &Self::Style) -> button::Appearance {
+        fn active(&self, style: &Self::Style) -> button::Appearance {
+            let palette = style.palette();
+
             button::Appearance {
                 background: Some(Color::new(0.17, 0.17, 0.24, 1.0).into()),
                 border: iced::Border::with_radius(4.0),
+                text_color: palette.text,
                 ..Default::default()
             }
         }

@@ -144,6 +144,7 @@ macro_rules! error {
 /// with the same message. Logs on the `$level` level
 /// - `log!(notify, log_context = $ctx; $level; ...)` same as previous one, but add the context `$ctx` in
 /// the log only. Logs on the `$level` level
+/// - `log!(...)` simply log something
 #[macro_export]
 macro_rules! log {
     (notify, log_context = $ctx:expr; $level:expr; $($arg:tt)*) => {{
@@ -176,6 +177,14 @@ macro_rules! log {
             format_args!( $($arg)* )
         )
     };
+
+    ($($arg:tt)*) => {{
+        use std::io::Write;
+        let _ = writeln!(
+            $crate::log::logger(),
+            $($arg)*
+        );
+    }};
 }
 
 

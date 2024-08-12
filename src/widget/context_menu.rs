@@ -513,7 +513,7 @@ where
 
 
 
-/// The appearance of a [`ContextMenu`](crate::native::ContextMenu).
+/// The appearance of a [`ContextMenu`]
 #[derive(Clone, Copy, Debug)]
 pub struct Appearance {
     /// The background of the [`ContextMenu`](crate::native::ContextMenu).
@@ -568,3 +568,5 @@ impl StyleSheet for Theme {
         }
     }
 }
+
+
