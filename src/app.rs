@@ -600,7 +600,7 @@ pub mod theme {
                     palette.background.r * 1.19,
                     palette.background.g * 1.2,
                     palette.background.b * 1.15,
-                    0.8,
+                    0.9,
                 ).into(),
                 border: Border::default(),
                 selected_text_color: palette.text,

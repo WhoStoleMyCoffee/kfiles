@@ -1,11 +1,10 @@
-use iced::{widget::{button, row, Button}, Element};
-use iced_aw::Bootstrap;
-
 pub mod dir_entry;
 pub mod fuzzy_input;
 pub mod tag_entry;
 pub mod context_menu;
 pub mod notification_card;
+pub mod file_inspector;
+pub mod file_list;
 
 
 /// Create a [`iced::widget::Text`] widget with the given [`Bootstrap`] icon

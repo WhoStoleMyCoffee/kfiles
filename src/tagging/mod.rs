@@ -73,13 +73,6 @@ pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
 }
 
 
-// TODO documentation
-pub fn get_tags_for_path<'a>(path: &Path, tags: &'a [Tag]) -> HashSet<usize> {
-    tags.iter().enumerate()
-        .filter(|(_, tag)| tag.contains(path))
-        .map(|(i, _)| i)
-        .collect()
-}
 
 
 
@@ -95,8 +88,6 @@ mod tests {
     use std::{collections::HashSet, path::{Path, PathBuf}};
 
     use crate::tagging::{entries::Entries, id::TagID, tag::{SelfReferringSubtag, Tag}};
-
-    use super::get_tags_for_path;
 
     #[test]
     fn serde() {

@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::iter;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use iced::event::Status;
 use iced::keyboard::Key;
 use iced::widget::scrollable::Viewport;
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, tooltip, Column};
+use iced::widget::{self, button, column, container, horizontal_space, row, scrollable, text, text_input, tooltip, Column, Container};
 use iced::{self, keyboard, Element, Event, Length, Rectangle};
 use iced::Command;
 use iced_aw::{Bootstrap, Wrap};
@@ -16,6 +16,7 @@ use crate::configs::Configs;
 use crate::search::Query;
 use crate::tagging::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, get_thumbnail_cache_path, ThumbnailBuilder};
+use crate::widget::file_list::{self, FileList};
 use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{theme, Message as AppMessage};
 use crate::{configs, error, icon, send_message, warn, ToPrettyString};
@@ -51,7 +52,8 @@ pub enum Message {
     FocusQuery,
     ResultsScrolled(Viewport),
     ResultsBoundsFetched(Option<Rectangle>),
-    EntryHovered(PathBuf),
+    EntryHovered(usize),
+    EntrySelected(usize),
 }
 
 impl From<Message> for AppMessage {
@@ -69,6 +71,12 @@ pub struct Item(pub isize, pub PathBuf);
 
 impl AsRef<PathBuf> for Item {
     fn as_ref(&self) -> &PathBuf {
+        &self.1
+    }
+}
+
+impl AsRef<Path> for Item {
+    fn as_ref(&self) -> &Path {
         &self.1
     }
 }
@@ -95,6 +103,8 @@ pub struct MainScreen {
     scroll: f32,
     results_container_bounds: Option<Rectangle>,
     hovered_path: Option<PathBuf>,
+    /// TODO select multiple paths
+    selected_path: Option<PathBuf>,
     tags_cache: Vec<TagID>,
 }
 
@@ -127,6 +137,7 @@ impl MainScreen {
                 scroll: 0.0,
                 results_container_bounds: None,
                 hovered_path: None,
+                selected_path: None,
                 tags_cache,
             },
             Command::batch(commands),
@@ -135,9 +146,14 @@ impl MainScreen {
 
     pub fn tick(&mut self) -> Command<AppMessage> {
         self.thumbnail_handler.update();
-        if let Some(range) = self.get_visible_items_range() {
+
+        // Build thumbnails
+        if let Some(range) = self.results_container_bounds.as_ref()
+            .map(|Rectangle { width, height, .. }| file_list::get_visible_items_range(*width, *height, self.scroll))
+        {
             self.thumbnail_handler.build(&self.items, range);
         }
+
         self.try_receive_results();
 
         Command::none()
@@ -266,8 +282,15 @@ impl MainScreen {
                 return send_message!(AppMessage::SwitchToTagEditScreen(tag));
             }
 
-            Message::EntryHovered(path) => {
-                self.hovered_path = Some(path);
+            Message::EntryHovered(index) => {
+                if let Some(Item(_, path)) = self.items.get(index) {
+                    self.hovered_path = Some(path.clone());
+                }
+            }
+
+            Message::EntrySelected(index) => {
+                println!("Entry {index} selected!");
+                self.selected_path = self.items.get(index).map(|Item(_, p)| p.clone());
             }
 
             Message::ResultsScrolled(viewport) => {
@@ -283,10 +306,7 @@ impl MainScreen {
     }
 
     pub fn view(&self) -> Element<AppMessage> {
-        use scrollable::{Direction, Properties};
-
         let query_input = self.view_query_input();
-        let results = self.view_results();
 
         container(
             column![
@@ -307,15 +327,8 @@ impl MainScreen {
 
                 query_input,
                 text("Results:"),
-                container(
-                    scrollable(results)
-                        .id(MAIN_SCROLLABLE_ID())
-                        .direction(Direction::Vertical(Properties::default()))
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .on_scroll(|vp| Message::ResultsScrolled(vp).into())
-                )
-                .id(MAIN_RESULTS_ID()),
+
+                self.view_results(),
             ]
             // Add hovered path text, if any
             .push_maybe(self.hovered_path.as_ref().map(|pb|
@@ -366,7 +379,27 @@ impl MainScreen {
         ]
     }
 
-    fn view_results(&self) -> Wrap<AppMessage, iced_aw::direction::Horizontal> {
+    fn view_results(&self) -> Container<AppMessage> {
+        use widget::scrollable::{ Direction, Properties };
+
+        let list = FileList::new(&self.items)
+            .cull( self.results_container_bounds.as_ref().map(|r| r.size()), self.scroll )
+            .with_selected_maybe( self.selected_path.as_deref() )
+            .on_item_hovered(|i| Message::EntryHovered(i).into())
+            .on_item_selected(|i| Message::EntrySelected(i).into())
+            .on_item_activated(|pb| AppMessage::OpenPath(pb));
+
+        container(
+            scrollable(list)
+                .id(MAIN_SCROLLABLE_ID())
+                .direction(Direction::Vertical(Properties::default()))
+                .on_scroll(|vp| Message::ResultsScrolled(vp).into())
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .id(MAIN_RESULTS_ID())
+
+        /*
         let mut wrap = match self.get_visible_items_range() {
             Some(range) => Wrap::with_elements(
                 self.items.iter().enumerate()
@@ -395,21 +428,7 @@ impl MainScreen {
         }
 
         wrap
-    }
-
-    /// Get the range of items which are visible in the main view
-    /// come to think of it, there was probably a better way to do all this culling thing
-    fn get_visible_items_range(&self) -> Option<Range<usize>> {
-        let Rectangle { width, height, .. } = self.results_container_bounds?;
-
-        let items_per_row: usize = (width / TOTAL_ITEM_SIZE.0) as usize;
-        //          (        Which row do we start at?       ) * items per row
-        let start = (self.scroll / TOTAL_ITEM_SIZE.1) as usize * items_per_row;
-        let end = start
-        //  + (    How many rows does the view span?    ) * items per row
-            + ((height / TOTAL_ITEM_SIZE.1) as usize + 2) * items_per_row;
-
-        Some(start..end)
+        */
     }
 
     pub fn restart_search(&mut self) -> Command<AppMessage> {

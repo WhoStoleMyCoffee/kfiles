@@ -277,7 +277,7 @@ impl FileActionScreen {
                         DirEntry::new(p)
                             .width(ITEM_SIZE.0)
                             .height(ITEM_SIZE.1)
-                            .on_select(AppMessage::OpenPath(p.clone()))
+                            .on_activate(AppMessage::OpenPath(p.clone()))
                             .on_hover(Message::EntryHovered(i).into()),
                     ]
                     .spacing(0)

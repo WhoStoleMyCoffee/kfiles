@@ -9,12 +9,17 @@ use iced::widget::{column, component, container, mouse_area, text, Component};
 use crate::thumbnail::load_thumbnail_for_path;
 
 
-const HOVERED_COLOR: Color = Color {
+const BG_COLOR: Color = Color {
     r: 1.0,
     g: 1.0,
     b: 1.0,
-    a: 0.05,
+    a: 1.0,
 };
+
+const HOVER_BG_ALPHA: f32 = 0.05;
+const SELECTED_BG_ALPHA: f32 = 0.08;
+
+const DOUBLE_CLICK_MILLIS: u64 = 500;
 
 
 
@@ -31,23 +36,19 @@ pub struct State {
     last_pressed: Option<Instant>,
 }
 
-impl State {
-    fn get_appearance(&self) -> Appearance {
-        match self.is_hovered {
-            true => Appearance::default().with_background(HOVERED_COLOR),
-            false => Appearance::default(),
-        }
-    }
-}
+
+
 
 
 pub struct DirEntry<Message: Clone> {
     path: PathBuf,
     do_cull: bool,
+    is_selected: bool,
     width: Length,
     height: Length,
-    on_select: Option<Message>,
     on_hover: Option<Message>,
+    on_select: Option<Message>,
+    on_activate: Option<Message>,
 }
 
 impl<Message: Clone> DirEntry<Message> {
@@ -57,10 +58,12 @@ impl<Message: Clone> DirEntry<Message> {
         DirEntry::<Message> {
             path: path.as_ref().to_path_buf(),
             do_cull: false,
+            is_selected: false,
             width: Length::Shrink,
             height: Length::Shrink,
-            on_select: None,
             on_hover: None,
+            on_select: None,
+            on_activate: None,
         }
     }
 
@@ -80,6 +83,14 @@ impl<Message: Clone> DirEntry<Message> {
     }
 
     /// Does nothing if culled (See [`cull`])
+    pub fn on_activate(mut self, message: Message) -> Self {
+        if !self.do_cull {
+            self.on_activate = Some(message);
+        }
+        self
+    }
+
+    /// Does nothing if culled (See [`cull`])
     pub fn on_select(mut self, message: Message) -> Self {
         if !self.do_cull {
             self.on_select = Some(message);
@@ -92,6 +103,11 @@ impl<Message: Clone> DirEntry<Message> {
         if !self.do_cull {
             self.on_hover = Some(message);
         }
+        self
+    }
+
+    pub fn is_selected(mut self, selected: bool) -> Self {
+        self.is_selected = selected;
         self
     }
 }
@@ -119,15 +135,13 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
             }
 
             Event::Pressed => {
-                const DOUBLE_CLICK_MILLIS: u64 = 500;
-
-                let on_select = self.on_select.as_ref()?;
-                if let Some(instant) = state.last_pressed.replace(Instant::now()) {
-                    if instant.elapsed() < Duration::from_millis(DOUBLE_CLICK_MILLIS) {
-                        return Some(on_select.clone());
-                    }
+                if let Some(on_activate) = state.last_pressed.replace(Instant::now())
+                    .filter(|i| i.elapsed() < Duration::from_millis(DOUBLE_CLICK_MILLIS))
+                    .and_then(|_| self.on_activate.as_ref())
+                {
+                    return Some(on_activate.clone());
                 }
-
+                return self.on_select.clone();
             }
         }
 
@@ -160,13 +174,20 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
             .align_items(Alignment::Center)
             .clip(true);
 
+        let a = (self.is_selected as u8 as f32 * SELECTED_BG_ALPHA)
+            + (state.is_hovered as u8 as f32 * HOVER_BG_ALPHA);
+        let appearance = Appearance::default().with_background(Color {
+            a,
+            ..BG_COLOR
+        });
+
         container(
             mouse_area(inner)
                 .on_enter(Event::Hovered)
                 .on_exit(Event::Unhovered)
                 .on_press(Event::Pressed)
         )
-        .style(state.get_appearance())
+        .style(appearance)
         .into()
     }
 }
