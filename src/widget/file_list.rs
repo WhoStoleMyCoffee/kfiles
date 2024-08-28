@@ -144,19 +144,16 @@ where
     fn view_culled(&self, cull_size: &Size) -> Element<'_, Event, iced::Theme, iced::Renderer> {
         let cols = (cull_size.width / TOTAL_ITEM_SIZE.0) as usize;
         let skipped_rows_count: usize = (self.scroll / TOTAL_ITEM_SIZE.1) as usize;
-        let skipped_count = skipped_rows_count * cols;
-        if skipped_count >= self.items.len() {
-            return Wrap::new().into();
-        }
+        let skipped_count = (skipped_rows_count * cols).min(self.items.len());
+
+        // Empty space before visible entries
+        let before = (skipped_rows_count > 0).then(|| horizontal_space()
+            .height(TOTAL_ITEM_SIZE.1 * skipped_rows_count as f32)
+            .into()
+        );
 
         let visible_rows_count: usize = (cull_size.height / TOTAL_ITEM_SIZE.1) as usize + 2;
-        let after_count = (self.items.len().div_ceil(cols))
-            .checked_sub(skipped_rows_count + visible_rows_count)
-            .unwrap_or_default();
-
-        let empty_row = || horizontal_space().height(ITEM_SIZE.1).into();
-
-        let before = iter::repeat_with(empty_row) .take(skipped_rows_count);
+        // Iterator over visible entries
         let it = self.items[skipped_count..].iter().enumerate()
             .map(|(i, item)| {
                 let i = i + skipped_count;
@@ -172,13 +169,26 @@ where
                     .into()
             })
             .take(visible_rows_count * cols);
-        let after = iter::repeat_with(empty_row) .take(after_count);
 
-        Wrap::with_elements( before.chain(it).chain(after).collect() )
-            .spacing(ITEM_SPACING.0)
-            .line_spacing(ITEM_SPACING.1).width_items(self.width)
-                .height_items(self.height)
-                .into()
+        let after_count = (self.items.len().div_ceil(cols))
+            .checked_sub(skipped_rows_count + visible_rows_count)
+            .unwrap_or_default();
+        // Empty space after visible entries
+        let after = (after_count > 0).then(|| horizontal_space()
+            .height(TOTAL_ITEM_SIZE.1 * after_count as f32)
+            .into()
+        );
+
+        Wrap::with_elements(
+            before.into_iter()
+                .chain(it)
+                .chain(after.into_iter())
+                .collect() 
+        )
+        .spacing(ITEM_SPACING.0)
+        .line_spacing(ITEM_SPACING.1).width_items(self.width)
+            .height_items(self.height)
+            .into()
     }
 
 }
