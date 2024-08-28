@@ -42,7 +42,6 @@ pub struct State {
 
 pub struct DirEntry<Message: Clone> {
     path: PathBuf,
-    do_cull: bool,
     is_selected: bool,
     width: Length,
     height: Length,
@@ -57,7 +56,6 @@ impl<Message: Clone> DirEntry<Message> {
     {
         DirEntry::<Message> {
             path: path.as_ref().to_path_buf(),
-            do_cull: false,
             is_selected: false,
             width: Length::Shrink,
             height: Length::Shrink,
@@ -65,11 +63,6 @@ impl<Message: Clone> DirEntry<Message> {
             on_select: None,
             on_activate: None,
         }
-    }
-
-    pub fn cull(mut self, do_cull: bool) -> Self {
-        self.do_cull = do_cull;
-        self
     }
 
     pub fn width(mut self, width: impl Into<Length>) -> Self {
@@ -82,27 +75,20 @@ impl<Message: Clone> DirEntry<Message> {
         self
     }
 
-    /// Does nothing if culled (See [`cull`])
     pub fn on_activate(mut self, message: Message) -> Self {
-        if !self.do_cull {
-            self.on_activate = Some(message);
-        }
+        self.on_activate = Some(message);
         self
     }
 
     /// Does nothing if culled (See [`cull`])
     pub fn on_select(mut self, message: Message) -> Self {
-        if !self.do_cull {
-            self.on_select = Some(message);
-        }
+        self.on_select = Some(message);
         self
     }
 
     /// Does nothing if culled (See [`cull`])
     pub fn on_hover(mut self, message: Message) -> Self {
-        if !self.do_cull {
-            self.on_hover = Some(message);
-        }
+        self.on_hover = Some(message);
         self
     }
 
@@ -152,12 +138,6 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
         &self,
         state: &Self::State,
     ) -> iced::Element<'_, Self::Event, iced::Theme, iced::Renderer> {
-        if self.do_cull {
-            return column![]
-                .width(self.width)
-                .height(self.height)
-                .into();
-        }
 
         let file_name = self.path.file_name()
             .unwrap_or( std::ffi::OsStr::new("") )

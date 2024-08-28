@@ -1,10 +1,10 @@
+use std::iter;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::{marker::PhantomData, path::Path};
 
-use iced::widget::scrollable::Viewport;
-use iced::{widget, Element, Length, Size};
-use iced::widget::{component, scrollable, Component};
+use iced::{Element, Length, Size};
+use iced::widget::{component, horizontal_space, Component};
 use iced_aw::widgets::Wrap;
 
 use super::dir_entry::DirEntry;
@@ -119,6 +119,68 @@ where
         self
     }
 
+    fn view_unculled(&self) -> Element<'_, Event, iced::Theme, iced::Renderer> {
+        Wrap::with_elements(
+            self.items.iter().enumerate() .map(|(i, item)|
+                DirEntry::new(item)
+                    .is_selected(
+                        self.selected_item.as_ref().is_some_and(|p| *p == item.as_ref()) 
+                    )
+                    .width(ITEM_SIZE.0)
+                    .height(ITEM_SIZE.1)
+                    .on_hover(Event::EntryHovered(i))
+                    .on_activate(Event::EntryActivated(i))
+                    .on_select(Event::EntrySelected(i))
+                    .into()
+            )
+            .collect()
+        )
+        .spacing(ITEM_SPACING.0)
+        .line_spacing(ITEM_SPACING.1).width_items(self.width)
+            .height_items(self.height)
+            .into()
+    }
+
+    fn view_culled(&self, cull_size: &Size) -> Element<'_, Event, iced::Theme, iced::Renderer> {
+        let cols = (cull_size.width / TOTAL_ITEM_SIZE.0) as usize;
+        let skipped_rows_count: usize = (self.scroll / TOTAL_ITEM_SIZE.1) as usize;
+        let skipped_count = skipped_rows_count * cols;
+        if skipped_count >= self.items.len() {
+            return Wrap::new().into();
+        }
+
+        let visible_rows_count: usize = (cull_size.height / TOTAL_ITEM_SIZE.1) as usize + 2;
+        let after_count = (self.items.len().div_ceil(cols))
+            .checked_sub(skipped_rows_count + visible_rows_count)
+            .unwrap_or_default();
+
+        let empty_row = || horizontal_space().height(ITEM_SIZE.1).into();
+
+        let before = iter::repeat_with(empty_row) .take(skipped_rows_count);
+        let it = self.items[skipped_count..].iter().enumerate()
+            .map(|(i, item)| {
+                let i = i + skipped_count;
+                DirEntry::new(item)
+                    .is_selected(
+                        self.selected_item.as_ref().is_some_and(|p| *p == item.as_ref()) 
+                    )
+                    .width(ITEM_SIZE.0)
+                    .height(ITEM_SIZE.1)
+                    .on_hover(Event::EntryHovered(i))
+                    .on_activate(Event::EntryActivated(i))
+                    .on_select(Event::EntrySelected(i))
+                    .into()
+            })
+            .take(visible_rows_count * cols);
+        let after = iter::repeat_with(empty_row) .take(after_count);
+
+        Wrap::with_elements( before.chain(it).chain(after).collect() )
+            .spacing(ITEM_SPACING.0)
+            .line_spacing(ITEM_SPACING.1).width_items(self.width)
+                .height_items(self.height)
+                .into()
+    }
+
 }
 
 
@@ -160,32 +222,10 @@ where
         &self,
         _state: &Self::State,
     ) -> iced::advanced::graphics::core::Element<'_, Self::Event, iced::Theme, iced::Renderer> {
-        // TODO optimize culling further
-        let range = self.cull_size.as_ref()
-            .map(|Size { width, height }| get_visible_items_range(*width, *height, self.scroll));
-
-        let wrap = Wrap::with_elements(
-            self.items.iter().enumerate() .map(|(i, item)|
-                DirEntry::new(item)
-                    .cull( range.as_ref().is_some_and(|r| !r.contains(&i)) )
-                    .is_selected(
-                        self.selected_item.as_ref().is_some_and(|p| *p == item.as_ref()) 
-                    )
-                    .width(ITEM_SIZE.0)
-                    .height(ITEM_SIZE.1)
-                    .on_hover(Event::EntryHovered(i))
-                    .on_activate(Event::EntryActivated(i))
-                    .on_select(Event::EntrySelected(i))
-                    .into()
-            )
-            .collect()
-        )
-        .spacing(ITEM_SPACING.0)
-        .line_spacing(ITEM_SPACING.1);
-
-        wrap.width_items(self.width)
-            .height_items(self.height)
-            .into()
+        match &self.cull_size {
+            Some(s) => self.view_culled(&s),
+            None => self.view_unculled(),
+        }
     }
 
     fn size_hint(&self) -> Size<Length> {
