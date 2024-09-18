@@ -459,11 +459,7 @@ impl Changes {
                         report.added_entry(path.clone(), &tag.id);
                     },
                     Ok(false) => {},
-                    Err(err) => error!(
-                        "[file_action_screen::Changes::apply()] Failed to add entry '{}':\n {:?}",
-                        path.display(),
-                        err
-                    ),
+                    Err(err) => error!("[file_action_screen::Changes::apply()] Failed to add entry '{}':\n {:?}", path.display(), err),
                 }
             }
 

@@ -28,6 +28,7 @@ pub enum Event {
     Hovered,
     Unhovered,
     Pressed,
+    RightPressed,
 }
 
 #[derive(Debug, Default)]
@@ -46,7 +47,8 @@ pub struct DirEntry<Message: Clone> {
     width: Length,
     height: Length,
     on_hover: Option<Message>,
-    on_select: Option<Message>,
+    on_click: Option<Message>,
+    on_right_click: Option<Message>,
     on_activate: Option<Message>,
 }
 
@@ -60,7 +62,8 @@ impl<Message: Clone> DirEntry<Message> {
             width: Length::Shrink,
             height: Length::Shrink,
             on_hover: None,
-            on_select: None,
+            on_click: None,
+            on_right_click: None,
             on_activate: None,
         }
     }
@@ -80,13 +83,16 @@ impl<Message: Clone> DirEntry<Message> {
         self
     }
 
-    /// Does nothing if culled (See [`cull`])
-    pub fn on_select(mut self, message: Message) -> Self {
-        self.on_select = Some(message);
+    pub fn on_click(mut self, message: Message) -> Self {
+        self.on_click = Some(message);
         self
     }
 
-    /// Does nothing if culled (See [`cull`])
+    pub fn on_right_click(mut self, message: Message) -> Self {
+        self.on_right_click = Some(message);
+        self
+    }
+
     pub fn on_hover(mut self, message: Message) -> Self {
         self.on_hover = Some(message);
         self
@@ -127,7 +133,11 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
                 {
                     return Some(on_activate.clone());
                 }
-                return self.on_select.clone();
+                return self.on_click.clone();
+            }
+
+            Event::RightPressed => {
+                return self.on_right_click.clone();
             }
         }
 
@@ -166,6 +176,7 @@ impl<Message: Clone> Component<Message> for DirEntry<Message> {
                 .on_enter(Event::Hovered)
                 .on_exit(Event::Unhovered)
                 .on_press(Event::Pressed)
+                .on_right_press(Event::RightPressed)
         )
         .style(appearance)
         .into()

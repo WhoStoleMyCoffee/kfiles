@@ -56,6 +56,7 @@ pub enum Message {
     ResultsBoundsFetched(Option<Rectangle>),
     EntryHovered(usize),
     EntrySelected(usize),
+    EntryRightClickSelected(usize),
 }
 
 impl From<Message> for AppMessage {
@@ -296,6 +297,10 @@ impl MainScreen {
                 self.selected_path = self.items.get(index).map(|Item(_, p)| p.clone());
             }
 
+            Message::EntryRightClickSelected(_index) => {
+                unimplemented!()
+            }
+
             Message::ResultsScrolled(viewport) => {
                 self.scroll = viewport.absolute_offset().y;
             }
@@ -396,6 +401,7 @@ impl MainScreen {
             .with_selected_maybe( self.selected_path.as_deref() )
             .on_item_hovered(|i| Message::EntryHovered(i).into())
             .on_item_selected(|i| Message::EntrySelected(i).into())
+            .on_item_right_click_selected(|i| Message::EntryRightClickSelected(i).into())
             .on_item_activated(|pb| AppMessage::OpenPath(pb));
 
         container(

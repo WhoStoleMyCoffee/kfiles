@@ -19,6 +19,7 @@ const TOTAL_ITEM_SIZE: (f32, f32) = (ITEM_SIZE.0 + ITEM_SPACING.0, ITEM_SIZE.1 +
 pub enum Event {
     EntryHovered(usize),
     EntrySelected(usize),
+    EntryRightClickSelected(usize),
     EntryActivated(usize),
 }
 
@@ -46,6 +47,7 @@ where
     on_item_hover: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     on_item_select: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     on_item_activate: Option<Box<dyn Fn(PathBuf) -> Message + 'a>>,
+    on_item_right_click_select: Option<Box<dyn Fn(usize) -> Message + 'a>>,
 }
 
 
@@ -64,6 +66,7 @@ where
             scroll: 0.0,
             on_item_hover: None,
             on_item_select: None,
+            on_item_right_click_select: None,
             on_item_activate: None,
         }
     }
@@ -90,48 +93,57 @@ where
     }
 
     pub fn on_item_hovered<F>(mut self, f: F) -> Self
-    where
-        F: Fn(usize) -> Message + 'a
+    where F: Fn(usize) -> Message + 'a
     {
         self.on_item_hover = Some(Box::new(f));
         self
     }
 
     pub fn on_item_selected<F>(mut self, f: F) -> Self
-    where
-        F: Fn(usize) -> Message + 'a
+    where F: Fn(usize) -> Message + 'a
     {
         self.on_item_select = Some(Box::new(f));
         self
     }
 
+    pub fn on_item_right_click_selected<F>(mut self, f: F) -> Self
+    where F: Fn(usize) -> Message + 'a
+    {
+        self.on_item_right_click_select = Some(Box::new(f));
+        self
+    }
+
     pub fn on_item_activated<F>(mut self, f: F) -> Self
-    where
-        F: Fn(PathBuf) -> Message + 'a
+    where F: Fn(PathBuf) -> Message + 'a
     {
         self.on_item_activate = Some(Box::new(f));
         self
     }
 
-    /// TODO `with_selected()`
     pub fn with_selected_maybe(mut self, item: Option<&'a Path>) -> Self {
         self.selected_item = item;
         self
     }
 
+    pub fn with_selected(mut self, item: &'a Path) -> Self {
+        unimplemented!()
+    }
+
+    fn view_dir_entry(&self, item: &Item, index: usize) -> DirEntry<Event> {
+        DirEntry::new(item)
+            .is_selected( self.selected_item.as_ref().is_some_and(|p| *p == item.as_ref()) )
+            .width(ITEM_SIZE.0)
+            .height(ITEM_SIZE.1)
+            .on_hover(Event::EntryHovered(index))
+            .on_activate(Event::EntryActivated(index))
+            .on_click(Event::EntrySelected(index))
+            .on_right_click(Event::EntryRightClickSelected(index))
+    }
+
     fn view_unculled(&self) -> Element<'_, Event, iced::Theme, iced::Renderer> {
         Wrap::with_elements(
             self.items.iter().enumerate() .map(|(i, item)|
-                DirEntry::new(item)
-                    .is_selected(
-                        self.selected_item.as_ref().is_some_and(|p| *p == item.as_ref()) 
-                    )
-                    .width(ITEM_SIZE.0)
-                    .height(ITEM_SIZE.1)
-                    .on_hover(Event::EntryHovered(i))
-                    .on_activate(Event::EntryActivated(i))
-                    .on_select(Event::EntrySelected(i))
-                    .into()
+                self.view_dir_entry(item, i).into()
             )
             .collect()
         )
@@ -155,19 +167,10 @@ where
         let visible_rows_count: usize = (cull_size.height / TOTAL_ITEM_SIZE.1) as usize + 2;
         // Iterator over visible entries
         let it = self.items[skipped_count..].iter().enumerate()
-            .map(|(i, item)| {
-                let i = i + skipped_count;
-                DirEntry::new(item)
-                    .is_selected(
-                        self.selected_item.as_ref().is_some_and(|p| *p == item.as_ref()) 
-                    )
-                    .width(ITEM_SIZE.0)
-                    .height(ITEM_SIZE.1)
-                    .on_hover(Event::EntryHovered(i))
-                    .on_activate(Event::EntryActivated(i))
-                    .on_select(Event::EntrySelected(i))
+            .map(|(i, item)|
+                self.view_dir_entry(item, i + skipped_count)
                     .into()
-            })
+            )
             .take(visible_rows_count * cols);
 
         let after_count = (self.items.len().div_ceil(cols))
@@ -222,6 +225,10 @@ where
 
             Event::EntrySelected(index) => {
                 return self.on_item_select.as_ref().map(|f| f(index));
+            }
+
+            Event::EntryRightClickSelected(index) => {
+                return self.on_item_right_click_select.as_ref().map(|f| f(index))
             }
         }
 
