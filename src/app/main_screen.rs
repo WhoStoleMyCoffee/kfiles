@@ -9,15 +9,17 @@ use iced::widget::scrollable::Viewport;
 use iced::widget::{self, button, column, container, horizontal_space, row, scrollable, text, text_input, tooltip, Column, Container};
 use iced::{self, keyboard, Element, Event, Length, Rectangle};
 use iced::Command;
-use iced_aw::{Bootstrap, Wrap};
+use iced_aw::Bootstrap;
 use rand::Rng;
 
 use crate::configs::Configs;
+use crate::log::notification::Notification;
 use crate::search::Query;
 use crate::tagging::{self, tag::Tag, id::TagID};
 use crate::thumbnail::{self, get_thumbnail_cache_path, ThumbnailBuilder};
+use crate::widget::file_inspector::FileInspector;
+use crate::widget::fuzzy_input::FuzzyInput;
 use crate::widget::file_list::{self, FileList};
-use crate::widget::{dir_entry::DirEntry, fuzzy_input::FuzzyInput};
 use crate::app::{theme, Message as AppMessage};
 use crate::{configs, error, icon, send_message, warn, ToPrettyString};
 
@@ -115,16 +117,18 @@ impl MainScreen {
             text_input::focus( QUERY_INPUT_ID() ),
         ];
 
-        let tags_cache = match tagging::get_all_tag_ids() {
-            Ok(v) => v,
-            Err(err) => {
-                commands.push(send_message!(notif = error!(
-                    notify, log_context = "MainScreen::new()";
-                    "Failed to load tags:\n{}", err
-                )));
-                Vec::new()
-            }
-        };
+        let load_res = tagging::load_tags();
+        commands.extend(
+            load_res.log_errors::<Vec<Notification>>()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|n| send_message!(notif = n))
+        );
+        tagging::set_tags_cache( load_res.get_tags().unwrap_or_default() );
+        let tags_cache: Vec<TagID> = tagging::tags_cache()
+            .iter()
+            .map(|t| t.id.clone())
+            .collect();
 
         let cfg = configs::global();
 
@@ -289,7 +293,6 @@ impl MainScreen {
             }
 
             Message::EntrySelected(index) => {
-                println!("Entry {index} selected!");
                 self.selected_path = self.items.get(index).map(|Item(_, p)| p.clone());
             }
 
@@ -326,14 +329,20 @@ impl MainScreen {
                 .spacing(8),
 
                 query_input,
-                text("Results:"),
 
-                self.view_results(),
+                row![
+                    self.view_results(),
+                ]
+                // .push_maybe(self.selected_path.as_ref()
+                //     .map(|path| FileInspector::new(path, &self.tags_cache)
+                // ))
+
             ]
             // Add hovered path text, if any
             .push_maybe(self.hovered_path.as_ref().map(|pb|
                 text(pb.to_pretty_string()) .size(12)
-            )),
+            ))
+            .spacing(8),
         )
         .into()
     }
@@ -398,37 +407,6 @@ impl MainScreen {
         .width(Length::Fill)
         .height(Length::Fill)
         .id(MAIN_RESULTS_ID())
-
-        /*
-        let mut wrap = match self.get_visible_items_range() {
-            Some(range) => Wrap::with_elements(
-                self.items.iter().enumerate()
-                .map(|(i, Item(_score, pb))| 
-                    DirEntry::new(pb)
-                        .cull(!range.contains(&i))
-                        .width(ITEM_SIZE.0)
-                        .height(ITEM_SIZE.1)
-                        .on_select(AppMessage::OpenPath(pb.clone()))
-                        .on_hover(Message::EntryHovered(pb.clone()).into())
-                        .into()
-                )
-                .collect(),
-            )
-            .spacing(ITEM_SPACING.0)
-            .line_spacing(ITEM_SPACING.1),
-
-            None => Wrap::new(),
-        };
-
-        if self.query.receiver.is_some() {
-            wrap = wrap.push(iced_aw::Spinner::new()
-                .width(Length::Fixed(ITEM_SIZE.0))
-                .height(Length::Fixed(ITEM_SIZE.1))
-            );
-        }
-
-        wrap
-        */
     }
 
     pub fn restart_search(&mut self) -> Command<AppMessage> {

@@ -7,12 +7,13 @@ use iced::widget::{
 };
 use iced::{Color, Command, Element, Event, Length};
 use iced_aw::widgets::Grid;
-use iced_aw::{grid, grid_row, Bootstrap, Card, Wrap};
+use iced_aw::{ grid_row, Bootstrap, Card, Wrap};
 
+use crate::log::notification::Notification;
 use crate::tagging::id::TagID;
 use crate::tagging::tag::{LoadError, SaveError};
-use crate::tagging::Tag;
-use crate::{error, icon, info, log, send_message, tag_list_menu, tagging, trace, ToPrettyString};
+use crate::tagging::{self, tags_cache, Tag};
+use crate::{error, icon, info, log, send_message, tag_list_menu, trace, ToPrettyString};
 use crate::{app::Message as AppMessage, simple_button};
 use crate::widget::dir_entry::DirEntry;
 
@@ -46,7 +47,6 @@ impl From<Message> for AppMessage {
 #[derive(Debug)]
 pub struct FileActionScreen {
     selected_paths: Vec<PathBuf>,
-    tags_cache: Vec<Tag>,
     hovered_path: Option<PathBuf>,
     popup: Option<Popup>,
     changes: Changes,
@@ -54,13 +54,18 @@ pub struct FileActionScreen {
 
 impl FileActionScreen {
     pub fn new(selected_paths: Vec<PathBuf>) -> (Self, Command<AppMessage>) {
-        let mut commands: Vec<Command<AppMessage>> = Vec::new();
-        let tags_cache: Vec<Tag> = load_tags(&mut commands);
+        let load_res = tagging::load_tags();
+        let commands: Vec<Command<AppMessage>> = load_res.log_errors::<Vec<Notification>>()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|n| send_message!(notif = n))
+            .collect();
+
+        tagging::set_tags_cache( load_res.get_tags().unwrap_or_default() );
 
         (
             FileActionScreen {
                 selected_paths,
-                tags_cache,
                 // tags_union,
                 hovered_path: None,
                 popup: None,
@@ -73,17 +78,17 @@ impl FileActionScreen {
     pub fn update(&mut self, message: Message) -> Command<AppMessage> {
         match message {
             Message::AddTag(index) => {
-                let Some(tag) = self.tags_cache.get(index) else {
-                    return Command::none();
-                };
-                self.changes.add_tag(tag.id.clone(), true);
+                if let Some(tag) = tags_cache().get(index) {
+                    self.changes.add_tag(tag.id.clone(), true);
+                }
+                return Command::none();
             }
 
             Message::RemoveTag(index) => {
-                let Some(tag) = self.tags_cache.get(index) else {
-                    return Command::none();
-                };
-                self.changes.remove_tag(tag.id.clone(), true);
+                if let Some(tag) = tags_cache().get(index) {
+                    self.changes.remove_tag(tag.id.clone(), true);
+                }
+                return Command::none();
             }
 
             Message::RemoveAddingTag(tag_id) => {
@@ -230,7 +235,6 @@ impl FileActionScreen {
             ]);
         }
 
-
         container(column![
             row![
                 text("Tags") .size(24),
@@ -238,7 +242,7 @@ impl FileActionScreen {
                 // Add button
                 tag_list_menu!(
                     button("+").on_press(AppMessage::Empty),
-                    self.tags_cache.iter().enumerate()
+                    tags_cache().iter().enumerate()
                         .filter(|(_, tag)| !self.changes.add_tags.iter().any(|id| **tag == *id))
                         .map(|(i, tag)| {
                             simple_button!(text(tag.id.to_string()))
@@ -250,7 +254,7 @@ impl FileActionScreen {
                 // Remove button
                 tag_list_menu!(
                     button("-").on_press(AppMessage::Empty),
-                    self.tags_cache.iter().enumerate()
+                    tags_cache().iter().enumerate()
                         .filter(|(_, tag)| !self.changes.remove_tags.iter().any(|id| **tag == *id))
                         .map(|(i, tag)| {
                             simple_button!(text(tag.id.to_string()))
@@ -570,48 +574,6 @@ impl ChangesReport {
 
 
 
-
-/// TODO documentation
-/// TODO should this be in [`tagging`]?
-fn load_tags(commands: &mut Vec<Command<AppMessage>>) -> Vec<Tag> {
-    let tags_cache = match tagging::get_all_tags() {
-        Ok(v) => v,
-        Err(err) => {
-            commands.push(send_message!(notif = error!(
-                notify, log_context = "file_action_screen::load_tags()";
-                "Failed to load tags:\n {}", err
-            )));
-
-            Vec::new()
-        }
-    };
-
-    let mut load_failed: bool = false;
-    let tags_cache: Vec<Tag> = tags_cache.into_iter()
-        .flat_map(|p| {
-            let res = Tag::load_from_path(&p);
-
-            if let Err(ref err) = res {
-                let err = err.to_string();
-                error!(notify, log_context = "file_action_screen::load_tags()";
-                    "Failed to load tag at \"{}\":\n {}", p.display(), err
-                );
-                load_failed = true;
-            }
-
-            res
-        })
-        .collect();
-
-    if load_failed {
-        commands.push(send_message!(notif = error!(
-            notify, log_context = "TagEditScreen::new()";
-            "Failed to load tags. See logs for more details",
-        )))
-    }
-
-    tags_cache
-}
 
 
 

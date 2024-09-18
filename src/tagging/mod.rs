@@ -1,20 +1,50 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
+use std::fmt::Write;
 use std::fs::{create_dir_all, read_dir};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{RwLock, RwLockReadGuard};
 
 pub mod entries;
 pub mod id;
 pub mod tag;
 
+use iced::Command;
 use id::TagID;
+use crate::log::notification::Notification;
+use crate::log::Level as LogLevel;
+use crate::{error, send_message, trace};
+use crate::app::Message as AppMessage;
+
+pub use tag::{ LoadError, RenameError, SaveError };
+pub use tag::Tag;
 
 
-pub type RenameError = tag::RenameError;
-pub type LoadError = tag::LoadError;
-pub type SaveError = tag::SaveError;
+static TAGS_CACHE: RwLock<Vec<Tag>> = RwLock::new(Vec::new());
 
-pub type Tag = tag::Tag;
+
+/// TODO documentation
+pub fn tags_cache() -> RwLockReadGuard<'static, Vec<tag::Tag>> {
+    TAGS_CACHE.read() .unwrap_or_else(|err| {
+        error!("Error while getting global tags cache:\n RwLock was poisonned");
+        err.into_inner()
+    })
+}
+
+
+/// TODO documentation
+pub fn set_tags_cache(new_tags: Vec<Tag>) {
+    match TAGS_CACHE.write() {
+        Ok(mut tags) => {
+            *tags = new_tags
+        },
+        Err(mut err) => {
+            error!("Error while setting global tags cache:\n RwLock was poisonned");
+            **err.get_mut() = new_tags;
+            TAGS_CACHE.clear_poison();
+        },
+    }
+}
 
 
 /// Returns whether the base dir already existed
@@ -74,7 +104,168 @@ pub fn get_all_tag_ids() -> io::Result<Vec<TagID>> {
 
 
 
+/// TODO documentation
+/// TODO clean up
+pub fn load_tags() -> TagLoadResult {
+    use crate::{ send_message, error };
 
+    trace!("[tagging::load_tags()] Loading tags...");
+
+    let paths = match get_all_tags() {
+        Ok(v) => v,
+        Err(err) => {
+            error!("[tagging::load_tags()] Failed to load tags dir:\n {:?}", err);
+            return TagLoadResult::IO(err);
+        }
+    };
+
+    let mut errors: HashMap<PathBuf, LoadError> = HashMap::new();
+    let mut tags: Vec<Tag> = Vec::new();
+
+    for path in paths.into_iter() {
+        match Tag::load_from_path(&path) {
+            Ok(tag) => tags.push(tag),
+            Err(err) => {
+                error!("[tagging::load_tags()] Failed to load tag at \"{}\":\n {:?}", path.display(), err);
+                errors.insert(path, err);
+            }
+        }
+    }
+
+    TagLoadResult::Ok(tags, errors)
+}
+
+
+/// TODO documentation
+pub enum TagLoadResult {
+    /// initial load error
+    IO(io::Error),
+    /// per tag
+    Ok(Vec<Tag>, HashMap<PathBuf, LoadError>),
+}
+
+impl TagLoadResult {
+    pub fn get_tags(self) -> Option<Vec<Tag>> {
+        match self {
+            TagLoadResult::IO(_) => None,
+            TagLoadResult::Ok(v, _) => Some(v),
+        }
+    }
+
+    pub fn get_tags_errors(self) -> Option<HashMap<PathBuf, LoadError>> {
+        match self {
+            TagLoadResult::IO(_) => None,
+            TagLoadResult::Ok(_, v) if v.is_empty() => None,
+            TagLoadResult::Ok(_, v) => Some(v),
+        }
+    }
+
+    pub fn log_errors<V>(&self) -> Option<V>
+    where V: TagLoadResultLog + Default
+    {
+        let mut v = V::default();
+
+        match self {
+            TagLoadResult::IO(err) => {
+                let content = format!("Failed to load tags:\n {}", err);
+                v.push(content);
+            }
+
+            TagLoadResult::Ok(_, errs) if errs.is_empty() => {
+                // No errors yay
+                return None;
+            }
+
+            TagLoadResult::Ok(_, _) => {
+                let content = "Failed to load all tags. See logs for more details".to_string();
+                v.push(content);
+            }
+        }
+
+        Some(v)
+    }
+
+    pub fn log_errors_verbose<V>(&self) -> Option<V>
+    where V: TagLoadResultLog + Default
+    {
+        todo!()
+    }
+
+    /* pub fn notify_on_error(self, commands: &mut Vec<Command<AppMessage>>) -> Self {
+        match &self {
+            TagLoadResult::IO(err) => {
+                let content = format!("Failed to load tags:\n {}", err);
+                commands.push(send_message!(notif = Notification::new(
+                    LogLevel::Error,
+                    content,
+                )))
+            },
+
+            TagLoadResult::Ok(_, errs) if errs.is_empty() => {},
+
+            TagLoadResult::Ok(_, _) => {
+                commands.push(send_message!(notif = Notification::new(
+                    LogLevel::Error,
+                    "Failed to load all tags. See logs for more details".to_string()
+                )))
+            }
+        }
+
+        self
+    }
+
+    pub fn notify_verbose(self, commands: &mut Vec<Command<AppMessage>>) -> Self {
+        match &self {
+            TagLoadResult::IO(err) => {
+                let content = format!("Failed to load tags:\n {}", err);
+                commands.push(send_message!(notif = Notification::new(
+                    LogLevel::Error,
+                    content,
+                )))
+            },
+
+            TagLoadResult::Ok(_, errs) => {
+                commands.extend(errs.iter()
+                    .map(|(p, err)| {
+                        let content = format!("Failed to load tag at \"{}\":\n {}", p.display(), err);
+                        send_message!(notif = Notification::new(
+                            LogLevel::Error,
+                            content,
+                        ))
+                    })
+                )
+            }
+        } // end match &self
+
+        self
+    } */
+}
+
+
+trait TagLoadResultLog {
+    fn push(&mut self, line: String);
+}
+
+impl TagLoadResultLog for Vec<Notification> {
+    fn push(&mut self, content: String) {
+        self.push(Notification::new(
+            LogLevel::Error,
+            content,
+        ));
+    }
+}
+
+impl TagLoadResultLog for Vec<String> {
+    fn push(&mut self, content: String) {
+        self.push(content);
+    }
+}
+
+impl TagLoadResultLog for String {
+    fn push(&mut self, line: String) {
+        writeln!(self, "{}", line) .expect("Writing a String to a String shouldn't fail");
+    }
+}
 
 
 

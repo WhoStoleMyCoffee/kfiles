@@ -6,7 +6,7 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::widget::text_editor::{Action, Content};
 use iced::widget::{
-    self, button, checkbox, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, tooltip, vertical_space, Column, Row
+    self, button, column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor, text_input, tooltip, vertical_space, Column, Row
 };
 use iced::widget::tooltip::Position as TooltipPosition;
 use iced::{Alignment, Color, Command, Element, Event, Length};
@@ -16,6 +16,7 @@ use rfd::FileDialog;
 
 use crate::app::Message as AppMessage;
 use crate::tagging::tag::SelfReferringSubtag;
+use crate::tagging::tags_cache;
 use crate::tagging::{ self, entries::Entries, Tag, id::TagID };
 use crate::widget::context_menu::ContextMenu;
 use crate::widget::tag_entry;
@@ -76,37 +77,23 @@ pub struct TagEditScreen {
     entries_editing_content: Option<Content>,
     renaming_content: Option<String>,
     is_loading: bool,
-    tags_cache: Vec<TagID>,
 }
 
 impl TagEditScreen {
     pub fn new(tag: Tag) -> (Self, Command<AppMessage>) {
-        let (tags_cache, tag_load_command) = match tagging::get_all_tag_ids() {
-            Ok(v) => (v, Command::none()),
-            Err(err) => (
-                Vec::new(),
-                send_message!(notif = error!(
-                    notify, log_context = "TagEditScreen::new()";
-                    "Failed to load tags:\n{}", err
-                ))
-            )
-        };
-
         (
             TagEditScreen {
                 tag,
                 entries_editing_content: None,
                 renaming_content: None,
                 is_loading: false,
-                tags_cache,
             },
-            Command::batch(vec![
-                tag_load_command,
-                scrollable::snap_to(
-                    MAIN_SCROLLABLE_ID(),
-                    scrollable::RelativeOffset::START,
-                ),
-            ])
+
+            scrollable::snap_to(
+                MAIN_SCROLLABLE_ID(),
+                scrollable::RelativeOffset::START,
+            ),
+
         )
     }
 
@@ -383,10 +370,10 @@ impl TagEditScreen {
             tooltip(
                 tag_list_menu!(
                     button(icon!(Bootstrap::BookmarkPlus)).on_press(AppMessage::Empty),
-                    self.tags_cache.iter()
-                        .filter(|id| **id != self.tag.id)
-                        .map(|id| simple_button!(text(id.to_string()))
-                            .on_press(Message::SubtagToggled(id.clone(), true).into())
+                    tags_cache().iter()
+                        .filter(|tag| **tag != self.tag.id)
+                        .map(|tag| simple_button!(text(tag.id.to_string()) )
+                            .on_press( Message::SubtagToggled(tag.id.clone(), true).into() )
                             .into()
                         )
                 ),
